@@ -22,3 +22,6 @@ tools/probe/results/
 # core/ 的 vendor 符号链接，由 core/setup.sh 重建
 core/Vendor/SQLCipher
 core/Vendor/SqliteVec
+
+# Developer ID 描述文件不进仓库（含团队信息）；构建脚本从 ~/Library/Application Support/brosis-dev/ 读取
+*.provisionprofile

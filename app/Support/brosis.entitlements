@@ -8,5 +8,19 @@
 	<!-- hardened runtime 下向其他应用发 Apple 事件需要这一项，配合 NSAppleEventsUsageDescription -->
 	<key>com.apple.security.automation.apple-events</key>
 	<true/>
+	<!-- 下面三项是"受限权利"：只有内嵌了匹配的 Developer ID 描述文件才能签，否则系统拒绝启动。
+	     __TEAM_ID__ 由 build_app.sh 按钥匙串里探测到的签名身份渲染；没有描述文件时这三项会被整段去掉，
+	     app 退回登录钥匙串存密钥（KeychainKeyProvider 的回退路径）。
+	     用途：data-protection 钥匙串（计划 3.5）。 -->
+	<!-- BEGIN restricted -->
+	<key>com.apple.application-identifier</key>
+	<string>__TEAM_ID__.com.brosis.app</string>
+	<key>com.apple.developer.team-identifier</key>
+	<string>__TEAM_ID__</string>
+	<key>keychain-access-groups</key>
+	<array>
+		<string>__TEAM_ID__.com.brosis.app</string>
+	</array>
+	<!-- END restricted -->
 </dict>
 </plist>

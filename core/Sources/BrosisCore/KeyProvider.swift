@@ -139,6 +139,19 @@ public struct KeychainKeyProvider: KeyProvider {
         case .missingEntitlement:
             break                                   // 这条路走不通，整体回退
         case .notFound:
+            // 1b. 迁移：之前的构建没有 data-protection 权利时，密钥落在了登录钥匙串。
+            //     现在权利有了，就把那把密钥搬进 data-protection（不能换新密钥，否则已有库打不开）。
+            if case .found(let legacy) = try read(dataProtection: false) {
+                switch try create(dataProtection: true, existing: legacy) {
+                case .created(let data):
+                    try? deleteLegacyOnly()
+                    backend?.pointee = .dataProtection
+                    return data
+                case .missingEntitlement:
+                    backend?.pointee = .legacy
+                    return legacy
+                }
+            }
             // 2. data-protection：生成并写入；被 -34018 拒绝也回退
             guard createIfMissing else {
                 throw StoreError.keyUnavailable("钥匙串里没有 \(service)/\(account)，且未允许生成")
@@ -210,8 +223,16 @@ public struct KeychainKeyProvider: KeyProvider {
         }
     }
 
-    private func create(dataProtection: Bool) throws -> CreateResult {
-        var key = try KeyBytes.random()
+    private func deleteLegacyOnly() throws {
+        let status = SecItemDelete(baseQuery(dataProtection: false) as CFDictionary)
+        guard status == errSecSuccess || status == errSecItemNotFound else {
+            throw StoreError.keyUnavailable("删除登录钥匙串旧条目失败：OSStatus \(status)")
+        }
+    }
+
+    /// `existing` 非空时写入这把已有密钥（迁移），否则生成新的。
+    private func create(dataProtection: Bool, existing: Data? = nil) throws -> CreateResult {
+        var key = try existing ?? KeyBytes.random()
         defer { brosisZeroize(&key) }
         var query = baseQuery(dataProtection: dataProtection)
         query[kSecValueData as String] = key

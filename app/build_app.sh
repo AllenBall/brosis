@@ -79,9 +79,22 @@ if [ "${SKIP_SIGN:-0}" = "1" ]; then
 fi
 
 step "3. Developer ID 签名 + hardened runtime"
+# 描述文件（不进仓库）：存在就内嵌并签受限权利（data-protection 钥匙串可用），
+# 不存在就把受限权利整段去掉再签（app 退回登录钥匙串）。
+PROFILE="${BROSIS_PROFILE:-$HOME/Library/Application Support/brosis-dev/brosis.provisionprofile}"
+RENDERED_ENT="$SCRATCH/brosis.entitlements"
+if [ -f "$PROFILE" ]; then
+  cp "$PROFILE" "$APP_BUNDLE/Contents/embedded.provisionprofile"
+  sed "s/__TEAM_ID__/$TEAM_ID/g" "$APP_SRC/Support/brosis.entitlements" > "$RENDERED_ENT"
+  echo "内嵌描述文件：$PROFILE（受限权利按 Team ID $TEAM_ID 渲染）"
+else
+  sed '/<!-- BEGIN restricted -->/,/<!-- END restricted -->/d' "$APP_SRC/Support/brosis.entitlements" > "$RENDERED_ENT"
+  echo "注意：没有描述文件（$PROFILE），未签 application-identifier / keychain-access-groups；密钥将走登录钥匙串。"
+fi
+plutil -lint "$RENDERED_ENT" > /dev/null
 SIGN_ARGS=(--force --sign "$IDENTITY"
            --options runtime
-           --entitlements "$APP_SRC/Support/brosis.entitlements"
+           --entitlements "$RENDERED_ENT"
            --identifier "com.brosis.app"
            --generate-entitlement-der)
 if [ "$TIMESTAMP" = "none" ]; then
