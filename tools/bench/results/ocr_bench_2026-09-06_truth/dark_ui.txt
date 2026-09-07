@@ -1,0 +1,49 @@
+[09:41:07] brosisd[4821] INFO  启动完成，pid=4821，配置版本 v0.14
+[09:41:10] brosisd[4821] DEBUG SCStream 已附着到 display 1 (3456x2234 @ 2x)
+[09:41:13] brosisd[4821] WARN  AX 文本为空，回退 OCR：com.apple.Terminal
+[09:41:16] brosisd[4821] INFO  OCR accurate 用时 1187 ms，观测 42 行，字符 1893
+[09:41:19] brosisd[4821] ERROR kTCCServiceScreenCapture 未授权，OSStatus=-25300，30 s 后重试
+[09:41:22] brosisd[4821] INFO  写入 observations.sqlite，rowid=88214，source=ocr
+[09:41:25] brosisd[4821] DEBUG FTS5 索引更新耗时 12.4 ms，WAL 大小 96 MB
+[09:41:28] brosisd[4821] WARN  磁盘剩余 18.3 GB，低于 20 GB 阈值，进入降级档 2
+[09:41:31] brosisd[4821] INFO  嵌入队列长度 137，批大小 32，预计 4.2 s 清空
+[09:41:34] brosisd[4821] ERROR HTTP 503 from https://api.brosis.local/v1/ingest (retry 2/3)
+[09:41:37] brosisd[4821] INFO  用户触发暂停，采集器进入 paused 状态
+[09:41:40] brosisd[4821] INFO  排除清单命中 com.agilebits.onepassword7，跳过本帧
+[09:41:43] user@m4max ~ % ps -o pid,rss,%cpu -p 4821
+[09:41:46]   PID    RSS  %CPU
+[09:41:49]  4821 412336   3.7
+[09:41:52] user@m4max ~ % du -sh ~/Library/Application\ Support/brosis
+[09:41:55] 1.9G    /Users/allen/Library/Application Support/brosis
+[09:41:58] user@m4max ~ % git log --oneline -3
+[09:42:01] a3f9c1e fix(ocr): 修正 boundingBox 坐标翻转
+[09:42:04] 7be20d4 feat(store): schema v0.14 增加 source 列
+[09:42:07] c15d90f chore(bench): 同源缩放与 CER 指标
+[09:42:10] user@m4max ~ % swift build -c release 2>&1 | tail -2
+[09:42:13] [42/42] Compiling brosisd OCRPipeline.swift
+[09:42:16] Build complete! (18.42s)
+[09:42:19] user@m4max ~ % echo $SHELL; sw_vers -productVersion
+[09:42:22] /bin/zsh
+[09:42:25] 26.6.2
+[09:42:28] brosisd[4821] INFO  启动完成，pid=4821，配置版本 v0.14
+[09:42:31] brosisd[4821] DEBUG SCStream 已附着到 display 1 (3456x2234 @ 2x)
+[09:42:34] brosisd[4821] WARN  AX 文本为空，回退 OCR：com.apple.Terminal
+[09:42:37] brosisd[4821] INFO  OCR accurate 用时 1187 ms，观测 42 行，字符 1893
+[09:42:40] brosisd[4821] ERROR kTCCServiceScreenCapture 未授权，OSStatus=-25300，30 s 后重试
+[09:42:43] brosisd[4821] INFO  写入 observations.sqlite，rowid=88214，source=ocr
+[09:42:46] brosisd[4821] DEBUG FTS5 索引更新耗时 12.4 ms，WAL 大小 96 MB
+[09:42:49] brosisd[4821] WARN  磁盘剩余 18.3 GB，低于 20 GB 阈值，进入降级档 2
+[09:42:52] brosisd[4821] INFO  嵌入队列长度 137，批大小 32，预计 4.2 s 清空
+[09:42:55] brosisd[4821] ERROR HTTP 503 from https://api.brosis.local/v1/ingest (retry 2/3)
+[09:42:58] brosisd[4821] INFO  用户触发暂停，采集器进入 paused 状态
+[09:43:01] brosisd[4821] INFO  排除清单命中 com.agilebits.onepassword7，跳过本帧
+[09:43:04] user@m4max ~ % ps -o pid,rss,%cpu -p 4821
+[09:43:07]   PID    RSS  %CPU
+[09:43:10]  4821 412336   3.7
+[09:43:13] user@m4max ~ % du -sh ~/Library/Application\ Support/brosis
+[09:43:16] 1.9G    /Users/allen/Library/Application Support/brosis
+[09:43:19] user@m4max ~ % git log --oneline -3
+[09:43:22] a3f9c1e fix(ocr): 修正 boundingBox 坐标翻转
+[09:43:25] 7be20d4 feat(store): schema v0.14 增加 source 列
+[09:43:28] c15d90f chore(bench): 同源缩放与 CER 指标
+[09:43:31] user@m4max ~ % swift build -c release 2>&1 | tail -2

@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- 必须不沙盒：沙盒应用拿不到辅助功能权限（报告 3.3） -->
+	<key>com.apple.security.app-sandbox</key>
+	<false/>
+	<!-- hardened runtime 下向其他应用发 Apple 事件需要这一项，配合 NSAppleEventsUsageDescription -->
+	<key>com.apple.security.automation.apple-events</key>
+	<true/>
+</dict>
+</plist>

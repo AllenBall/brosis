@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleName</key>
+	<string>brosis-e9</string>
+	<key>CFBundleDisplayName</key>
+	<string>brosis E9 运行时验证</string>
+	<key>CFBundleIdentifier</key>
+	<string>com.brosis.e9</string>
+	<key>CFBundleExecutable</key>
+	<string>brosis-e9</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleShortVersionString</key>
+	<string>0.1.0</string>
+	<key>CFBundleVersion</key>
+	<string>1</string>
+	<key>CFBundleSupportedPlatforms</key>
+	<array>
+		<string>MacOSX</string>
+	</array>
+	<key>LSMinimumSystemVersion</key>
+	<string>26.0</string>
+	<key>NSHighResolutionCapable</key>
+	<true/>
+	<!-- E9 是命令行验证工具：LSUIElement 保留，正式 app 里同样是菜单栏常驻 -->
+	<key>LSUIElement</key>
+	<true/>
+	<key>NSHumanReadableCopyright</key>
+	<string>brosis · M0 E9 内嵌推理运行时与分发验证，仅本机使用</string>
+</dict>
+</plist>

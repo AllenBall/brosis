@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- 模板：二进制路径、数据目录、stdout、stderr 四个占位符由 install.sh 渲染成绝对路径；
+     占位符字面量只出现在下面的 <string> 里，注释里不要写，否则会被 sed 一并替换 -->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.brosis.probe</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>__BIN__</string>
+        <string>--dir</string>
+        <string>__DATADIR__</string>
+    </array>
+
+    <!-- 登录 / 加载即启动，退出后自动拉起 -->
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>ThrottleInterval</key>
+    <integer>10</integer>
+
+    <!-- 只在图形登录会话里跑：拿得到 NSWorkspace 的前台应用 -->
+    <key>LimitLoadToSessionType</key>
+    <string>Aqua</string>
+
+    <!-- 后台优先级，不与前台应用抢资源 -->
+    <key>ProcessType</key>
+    <string>Background</string>
+
+    <key>StandardOutPath</key>
+    <string>__STDOUT__</string>
+    <key>StandardErrorPath</key>
+    <string>__STDERR__</string>
+</dict>
+</plist>

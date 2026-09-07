@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleName</key>
+	<string>brosis</string>
+	<key>CFBundleDisplayName</key>
+	<string>brosis</string>
+	<key>CFBundleIdentifier</key>
+	<string>com.brosis.app</string>
+	<key>CFBundleExecutable</key>
+	<string>brosis</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<!-- 应用图标：Resources/AppIcon.icns，由 Support/icon/make_icon.swift 生成 -->
+	<key>CFBundleIconFile</key>
+	<string>AppIcon</string>
+	<key>CFBundleIconName</key>
+	<string>AppIcon</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleShortVersionString</key>
+	<string>0.1.0</string>
+	<key>CFBundleVersion</key>
+	<string>1</string>
+	<key>CFBundleSupportedPlatforms</key>
+	<array>
+		<string>MacOSX</string>
+	</array>
+	<key>LSMinimumSystemVersion</key>
+	<string>26.0</string>
+	<key>NSPrincipalClass</key>
+	<string>NSApplication</string>
+	<key>NSHighResolutionCapable</key>
+	<true/>
+	<!-- 菜单栏常驻，不出现在 Dock 与 Cmd-Tab -->
+	<key>LSUIElement</key>
+	<true/>
+	<key>NSHumanReadableCopyright</key>
+	<string>brosis · 个人活动记忆，仅本机使用</string>
+	<!-- TCC usage string：缺失会导致静默失败（报告 3.3） -->
+	<key>NSScreenCaptureUsageDescription</key>
+	<string>brosis 需要屏幕录制权限，用于按 1 秒间隔读取当前屏幕的变化区域并读取窗口标题，从而记录你看过什么。画面不会被保存，只保留文字与统计。</string>
+	<key>NSAccessibilityUsageDescription</key>
+	<string>brosis 需要辅助功能权限，用于读取当前焦点窗口的标题、文件路径、网址和可见正文，作为文字记录的主要来源，避免频繁截图。</string>
+	<key>NSAppleEventsUsageDescription</key>
+	<string>brosis 需要向浏览器发送 Apple 事件，用于在辅助功能读不到网址时获取当前标签页的地址与标题。不会控制这些应用做其他操作。</string>
+</dict>
+</plist>

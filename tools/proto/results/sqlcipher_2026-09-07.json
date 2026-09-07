@@ -1,0 +1,2850 @@
+{
+  "date": "2026-09-07",
+  "machine": "M4 Max 128 GB / macOS 26.6 / Xcode 26.6 / Swift 6.3.3",
+  "route_b_memory_security": {
+    "build": {
+      "cipher_compatibility": "(空)",
+      "cipher_default_kdf_iter": "256000",
+      "cipher_default_page_size": "4096",
+      "cipher_default_use_hmac": "1",
+      "cipher_hmac_algorithm": "HMAC_SHA512",
+      "cipher_kdf_algorithm": "PBKDF2_HMAC_SHA512",
+      "cipher_memory_security": "1",
+      "cipher_memory_security_set_rc": 0,
+      "cipher_page_size": "4096",
+      "cipher_provider": "commoncrypto",
+      "cipher_provider_version": "61901.160.44",
+      "cipher_settings": [
+        "PRAGMA kdf_iter = 256000;",
+        "PRAGMA cipher_page_size = 4096;",
+        "PRAGMA cipher_use_hmac = 1;",
+        "PRAGMA cipher_plaintext_header_size = 0;",
+        "PRAGMA cipher_hmac_algorithm = HMAC_SHA512;",
+        "PRAGMA cipher_kdf_algorithm = PBKDF2_HMAC_SHA512;"
+      ],
+      "cipher_version": "4.18.0 community",
+      "compile_options_all_count": 65,
+      "compile_options_selected": [
+        "DQS=0",
+        "ENABLE_API_ARMOR",
+        "ENABLE_COLUMN_METADATA",
+        "ENABLE_DBSTAT_VTAB",
+        "ENABLE_FTS5",
+        "ENABLE_MATH_FUNCTIONS",
+        "ENABLE_MEMORY_MANAGEMENT",
+        "ENABLE_PREUPDATE_HOOK",
+        "ENABLE_RTREE",
+        "ENABLE_SESSION",
+        "ENABLE_SNAPSHOT",
+        "ENABLE_STAT4",
+        "ENABLE_UNLOCK_NOTIFY",
+        "HAS_CODEC",
+        "MAX_VARIABLE_NUMBER=250000",
+        "OMIT_LOAD_EXTENSION",
+        "SECURE_DELETE",
+        "TEMP_STORE=2",
+        "THREADSAFE=1",
+        "USE_URI"
+      ],
+      "kdf_iter": "256000",
+      "required_flags": {
+        "SQLITE_ENABLE_DBSTAT_VTAB": true,
+        "SQLITE_ENABLE_FTS5": true,
+        "SQLITE_HAS_CODEC": true,
+        "SQLITE_TEMP_STORE": "TEMP_STORE=2",
+        "sqlite_ge_3_43": true
+      },
+      "sqlite_libversion": "3.53.4",
+      "sqlite_sourceid": "2026-07-24 19:02:57 bf7c7f30031888f4e796e429ab3978879485813aaca6f641c7b33e4e0945alt1",
+      "sqlite_version_number": 3053004,
+      "vec_version": "v0.1.9"
+    },
+    "corpus": {
+      "avg_bigram_bytes": 2122,
+      "avg_doc_bytes": 1153,
+      "docs": 20000,
+      "gen_ms": 1328.562,
+      "plaintext_MiB": 21.99,
+      "plaintext_bytes": 23061945
+    },
+    "date": "2026-09-06T17:03:09Z",
+    "encrypted": {
+      "auto_vacuum": 2,
+      "cipher_hmac_algorithm": "HMAC_SHA512",
+      "cipher_kdf_algorithm": "PBKDF2_HMAC_SHA512",
+      "cipher_memory_security": "1",
+      "cipher_page_size": "16384",
+      "cipher_provider": "commoncrypto",
+      "cipher_provider_version": "61901.160.44",
+      "cipher_version": "4.18.0 community",
+      "dbstat": [
+        {
+          "bytes": 26181632,
+          "name": "text_versions",
+          "pages": 1598
+        },
+        {
+          "bytes": 19546112,
+          "name": "text_fts_data",
+          "pages": 1193
+        },
+        {
+          "bytes": 10567680,
+          "name": "vec_text_vector_chunks00",
+          "pages": 645
+        },
+        {
+          "bytes": 1163264,
+          "name": "observations",
+          "pages": 71
+        },
+        {
+          "bytes": 1146880,
+          "name": "sqlite_autoindex_text_versions_2",
+          "pages": 70
+        },
+        {
+          "bytes": 557056,
+          "name": "occurrences",
+          "pages": 34
+        },
+        {
+          "bytes": 491520,
+          "name": "sqlite_autoindex_text_versions_1",
+          "pages": 30
+        },
+        {
+          "bytes": 491520,
+          "name": "sqlite_autoindex_occurrences_2",
+          "pages": 30
+        },
+        {
+          "bytes": 491520,
+          "name": "sqlite_autoindex_observations_1",
+          "pages": 30
+        },
+        {
+          "bytes": 475136,
+          "name": "sqlite_autoindex_occurrences_1",
+          "pages": 29
+        },
+        {
+          "bytes": 475136,
+          "name": "idx_occ_tv",
+          "pages": 29
+        },
+        {
+          "bytes": 393216,
+          "name": "idx_obs_url_ts",
+          "pages": 24
+        },
+        {
+          "bytes": 360448,
+          "name": "idx_obs_app_ts",
+          "pages": 22
+        },
+        {
+          "bytes": 344064,
+          "name": "vec_text_chunks",
+          "pages": 21
+        },
+        {
+          "bytes": 344064,
+          "name": "idx_obs_ts",
+          "pages": 21
+        },
+        {
+          "bytes": 278528,
+          "name": "vec_text_rowids",
+          "pages": 17
+        },
+        {
+          "bytes": 278528,
+          "name": "text_fts_docsize",
+          "pages": 17
+        },
+        {
+          "bytes": 81920,
+          "name": "text_fts_idx",
+          "pages": 5
+        },
+        {
+          "bytes": 65536,
+          "name": "sessions",
+          "pages": 4
+        },
+        {
+          "bytes": 49152,
+          "name": "urls",
+          "pages": 3
+        },
+        {
+          "bytes": 49152,
+          "name": "sqlite_autoindex_sessions_1",
+          "pages": 3
+        },
+        {
+          "bytes": 49152,
+          "name": "idx_sessions_range",
+          "pages": 3
+        },
+        {
+          "bytes": 16384,
+          "name": "windows",
+          "pages": 1
+        },
+        {
+          "bytes": 16384,
+          "name": "vec_text_info",
+          "pages": 1
+        },
+        {
+          "bytes": 16384,
+          "name": "text_fts_config",
+          "pages": 1
+        },
+        {
+          "bytes": 16384,
+          "name": "sqlite_sequence",
+          "pages": 1
+        },
+        {
+          "bytes": 16384,
+          "name": "sqlite_schema",
+          "pages": 1
+        },
+        {
+          "bytes": 16384,
+          "name": "sqlite_autoindex_windows_1",
+          "pages": 1
+        },
+        {
+          "bytes": 16384,
+          "name": "sqlite_autoindex_vec_text_vector_chunks00_1",
+          "pages": 1
+        },
+        {
+          "bytes": 16384,
+          "name": "sqlite_autoindex_vec_text_info_1",
+          "pages": 1
+        },
+        {
+          "bytes": 16384,
+          "name": "sqlite_autoindex_urls_1",
+          "pages": 1
+        },
+        {
+          "bytes": 16384,
+          "name": "sqlite_autoindex_apps_1",
+          "pages": 1
+        },
+        {
+          "bytes": 16384,
+          "name": "idx_windows_title",
+          "pages": 1
+        },
+        {
+          "bytes": 16384,
+          "name": "idx_urls_host",
+          "pages": 1
+        },
+        {
+          "bytes": 16384,
+          "name": "apps",
+          "pages": 1
+        }
+      ],
+      "dbstat_ms": 64.844,
+      "encrypted": true,
+      "file_sizes": {
+        "db": 64126976,
+        "db_MiB": 61.16,
+        "shm": 32768,
+        "wal": 0
+      },
+      "freelist_count": 0,
+      "fts_delete_check": {
+        "contentless_delete_works": true,
+        "fts_delete_msg": "not an error",
+        "fts_delete_rc": 0,
+        "fts_integrity_check_rc": 0,
+        "matches_after": 0,
+        "matches_before": 1,
+        "token": "docid9999"
+      },
+      "insert_ms": 2835.688,
+      "insert_rows_per_s": 7053,
+      "journal_mode": "wal",
+      "kdf_iter": "256000",
+      "key_applied_and_verified_ms": 0.115,
+      "key_buffer_zeroed": true,
+      "leak_after_close": {
+        "db": {
+          "bytes": 64126976,
+          "exists": true,
+          "hits": {
+            "canary_en": 0,
+            "canary_zh": 0,
+            "canary_zh_short": 0,
+            "common_zh": 0
+          },
+          "total_hits": 0
+        },
+        "shm": {
+          "bytes": 32768,
+          "exists": true,
+          "hits": {
+            "canary_en": 0,
+            "canary_zh": 0,
+            "canary_zh_short": 0,
+            "common_zh": 0
+          },
+          "total_hits": 0
+        },
+        "total_hits": 0,
+        "wal": {
+          "bytes": 0,
+          "exists": true,
+          "hits": {
+            "canary_en": 0,
+            "canary_zh": 0,
+            "canary_zh_short": 0,
+            "common_zh": 0
+          },
+          "total_hits": 0
+        }
+      },
+      "leak_wal_dirty": {
+        "db": {
+          "bytes": 61358080,
+          "exists": true,
+          "hits": {
+            "canary_en": 0,
+            "canary_zh": 0,
+            "canary_zh_short": 0,
+            "common_zh": 0
+          },
+          "total_hits": 0
+        },
+        "shm": {
+          "bytes": 32768,
+          "exists": true,
+          "hits": {
+            "canary_en": 0,
+            "canary_zh": 0,
+            "canary_zh_short": 0,
+            "common_zh": 0
+          },
+          "total_hits": 0
+        },
+        "total_hits": 0,
+        "wal": {
+          "bytes": 24989416,
+          "exists": true,
+          "hits": {
+            "canary_en": 0,
+            "canary_zh": 0,
+            "canary_zh_short": 0,
+            "common_zh": 0
+          },
+          "total_hits": 0
+        }
+      },
+      "page_count": 3914,
+      "page_size": 16384,
+      "path": "~/Library/Caches/brosis-build/sqlcipher/run/route-b-memsec/enc.db",
+      "queries": {
+        "exact_two_step": {
+          "max_ms": 0.033,
+          "mean_ms": 0.019,
+          "min_ms": 0.016,
+          "n": 100,
+          "p50_ms": 0.019,
+          "p95_ms": 0.021
+        },
+        "fts_match": {
+          "avg_rows": 10,
+          "max_ms": 1.025,
+          "mean_ms": 0.712,
+          "min_ms": 0.319,
+          "n": 100,
+          "p50_ms": 0.748,
+          "p95_ms": 0.926
+        },
+        "fts_match_cache128MiB": {
+          "max_ms": 1.064,
+          "mean_ms": 0.56,
+          "min_ms": 0.282,
+          "n": 100,
+          "p50_ms": 0.554,
+          "p95_ms": 0.788
+        },
+        "sessions_range": {
+          "max_ms": 0.016,
+          "mean_ms": 0.006,
+          "min_ms": 0.004,
+          "n": 100,
+          "p50_ms": 0.006,
+          "p95_ms": 0.007
+        },
+        "vec_knn": {
+          "avg_rows": 10,
+          "max_ms": 14.217,
+          "mean_ms": 13.074,
+          "min_ms": 11.927,
+          "n": 100,
+          "p50_ms": 13.161,
+          "p95_ms": 13.639
+        },
+        "vec_knn_cache128MiB": {
+          "max_ms": 4.908,
+          "mean_ms": 4.487,
+          "min_ms": 4.266,
+          "n": 100,
+          "p50_ms": 4.489,
+          "p95_ms": 4.712
+        },
+        "vec_knn_self_hit": 50
+      },
+      "secure_delete": 1,
+      "temp_store": 2,
+      "temp_store_check": {
+        "file": {
+          "main_db_writes": 0,
+          "plaintext_marker_hits_all_files": 73494,
+          "plaintext_marker_hits_in_temp": 73494,
+          "sort_ms": 77.036,
+          "statvfs_free_bytes_before": 1257925820416,
+          "statvfs_free_bytes_min_during": 1257902051328,
+          "statvfs_max_dip_MiB": 22.67,
+          "statvfs_max_dip_bytes": 23769088,
+          "temp_file_MiB": 22.64,
+          "temp_file_bytes": 23739278,
+          "temp_file_opens": 1,
+          "temp_store_readback": 1,
+          "wal_writes": 0
+        },
+        "memory": {
+          "main_db_writes": 0,
+          "plaintext_marker_hits_all_files": 0,
+          "plaintext_marker_hits_in_temp": 0,
+          "sort_ms": 57.44,
+          "statvfs_free_bytes_before": 1257910128640,
+          "statvfs_free_bytes_min_during": 1257909059584,
+          "statvfs_max_dip_MiB": 1.02,
+          "statvfs_max_dip_bytes": 1069056,
+          "temp_file_MiB": 0,
+          "temp_file_bytes": 0,
+          "temp_file_opens": 0,
+          "temp_store_readback": 2,
+          "wal_writes": 0
+        }
+      },
+      "wal_size_bytes": 24989416
+    },
+    "lock_cycle": {
+      "close_ms": {
+        "max_ms": 1.442,
+        "mean_ms": 1.352,
+        "min_ms": 1.248,
+        "n": 5,
+        "p50_ms": 1.355,
+        "p95_ms": 1.426
+      },
+      "cycles": 5,
+      "key_zeroized_every_cycle": true,
+      "observations_last_seen": 20504,
+      "open_ms": {
+        "max_ms": 1.005,
+        "mean_ms": 0.874,
+        "min_ms": 0.774,
+        "n": 5,
+        "p50_ms": 0.815,
+        "p95_ms": 1.002
+      },
+      "query_ms": {
+        "max_ms": 1.132,
+        "mean_ms": 1.077,
+        "min_ms": 1.038,
+        "n": 5,
+        "p50_ms": 1.069,
+        "p95_ms": 1.125
+      },
+      "reopen_after_zeroize_ok": true,
+      "write_ms": {
+        "max_ms": 0.653,
+        "mean_ms": 0.544,
+        "min_ms": 0.482,
+        "n": 5,
+        "p50_ms": 0.538,
+        "p95_ms": 0.635
+      }
+    },
+    "memory_security_requested": true,
+    "overhead": {
+      "db_bytes_encrypted": 64126976,
+      "db_bytes_plaintext": 63930368,
+      "db_size_ratio": 1.0031,
+      "insert_ms_encrypted": 2835.688,
+      "insert_ms_plaintext": 1959.541,
+      "insert_slowdown_x": 1.447,
+      "queries": {
+        "exact_two_step": {
+          "enc_p50_ms": 0.019,
+          "enc_p95_ms": 0.021,
+          "p50_slowdown_x": 1.056,
+          "p95_slowdown_x": 1.105,
+          "plain_p50_ms": 0.018,
+          "plain_p95_ms": 0.019
+        },
+        "fts_match": {
+          "enc_p50_ms": 0.748,
+          "enc_p95_ms": 0.926,
+          "p50_slowdown_x": 1.578,
+          "p95_slowdown_x": 1.659,
+          "plain_p50_ms": 0.474,
+          "plain_p95_ms": 0.558
+        },
+        "fts_match_cache128MiB": {
+          "enc_p50_ms": 0.554,
+          "enc_p95_ms": 0.788,
+          "p50_slowdown_x": 1.149,
+          "p95_slowdown_x": 1.405,
+          "plain_p50_ms": 0.482,
+          "plain_p95_ms": 0.561
+        },
+        "sessions_range": {
+          "enc_p50_ms": 0.006,
+          "enc_p95_ms": 0.007,
+          "p50_slowdown_x": 1.2,
+          "p95_slowdown_x": 1.167,
+          "plain_p50_ms": 0.005,
+          "plain_p95_ms": 0.006
+        },
+        "vec_knn": {
+          "enc_p50_ms": 13.161,
+          "enc_p95_ms": 13.639,
+          "p50_slowdown_x": 2.716,
+          "p95_slowdown_x": 2.692,
+          "plain_p50_ms": 4.846,
+          "plain_p95_ms": 5.067
+        },
+        "vec_knn_cache128MiB": {
+          "enc_p50_ms": 4.489,
+          "enc_p95_ms": 4.712,
+          "p50_slowdown_x": 0.92,
+          "p95_slowdown_x": 0.926,
+          "plain_p50_ms": 4.881,
+          "plain_p95_ms": 5.091
+        }
+      }
+    },
+    "passphrase_open": {
+      "kdf_iter": 256000,
+      "note": "口令密钥每次开库都要跑 PBKDF2-HMAC-SHA512 kdf_iter 轮；原始密钥跳过这一步",
+      "passphrase_open_ms": {
+        "max_ms": 84.605,
+        "mean_ms": 83.806,
+        "min_ms": 82.853,
+        "n": 5,
+        "p50_ms": 83.771,
+        "p95_ms": 84.557
+      }
+    },
+    "plaintext": {
+      "auto_vacuum": 2,
+      "dbstat": [
+        {
+          "bytes": 26050560,
+          "name": "text_versions",
+          "pages": 1590
+        },
+        {
+          "bytes": 19546112,
+          "name": "text_fts_data",
+          "pages": 1193
+        },
+        {
+          "bytes": 10551296,
+          "name": "vec_text_vector_chunks00",
+          "pages": 644
+        },
+        {
+          "bytes": 1163264,
+          "name": "observations",
+          "pages": 71
+        },
+        {
+          "bytes": 1114112,
+          "name": "sqlite_autoindex_text_versions_2",
+          "pages": 68
+        },
+        {
+          "bytes": 540672,
+          "name": "occurrences",
+          "pages": 33
+        },
+        {
+          "bytes": 491520,
+          "name": "sqlite_autoindex_text_versions_1",
+          "pages": 30
+        },
+        {
+          "bytes": 491520,
+          "name": "sqlite_autoindex_occurrences_2",
+          "pages": 30
+        },
+        {
+          "bytes": 491520,
+          "name": "sqlite_autoindex_observations_1",
+          "pages": 30
+        },
+        {
+          "bytes": 475136,
+          "name": "sqlite_autoindex_occurrences_1",
+          "pages": 29
+        },
+        {
+          "bytes": 475136,
+          "name": "idx_occ_tv",
+          "pages": 29
+        },
+        {
+          "bytes": 376832,
+          "name": "idx_obs_url_ts",
+          "pages": 23
+        },
+        {
+          "bytes": 376832,
+          "name": "idx_obs_app_ts",
+          "pages": 23
+        },
+        {
+          "bytes": 344064,
+          "name": "vec_text_chunks",
+          "pages": 21
+        },
+        {
+          "bytes": 344064,
+          "name": "idx_obs_ts",
+          "pages": 21
+        },
+        {
+          "bytes": 278528,
+          "name": "vec_text_rowids",
+          "pages": 17
+        },
+        {
+          "bytes": 278528,
+          "name": "text_fts_docsize",
+          "pages": 17
+        },
+        {
+          "bytes": 81920,
+          "name": "text_fts_idx",
+          "pages": 5
+        },
+        {
+          "bytes": 65536,
+          "name": "sessions",
+          "pages": 4
+        },
+        {
+          "bytes": 49152,
+          "name": "urls",
+          "pages": 3
+        },
+        {
+          "bytes": 49152,
+          "name": "sqlite_autoindex_sessions_1",
+          "pages": 3
+        },
+        {
+          "bytes": 49152,
+          "name": "idx_sessions_range",
+          "pages": 3
+        },
+        {
+          "bytes": 16384,
+          "name": "windows",
+          "pages": 1
+        },
+        {
+          "bytes": 16384,
+          "name": "vec_text_info",
+          "pages": 1
+        },
+        {
+          "bytes": 16384,
+          "name": "text_fts_config",
+          "pages": 1
+        },
+        {
+          "bytes": 16384,
+          "name": "sqlite_sequence",
+          "pages": 1
+        },
+        {
+          "bytes": 16384,
+          "name": "sqlite_schema",
+          "pages": 1
+        },
+        {
+          "bytes": 16384,
+          "name": "sqlite_autoindex_windows_1",
+          "pages": 1
+        },
+        {
+          "bytes": 16384,
+          "name": "sqlite_autoindex_vec_text_vector_chunks00_1",
+          "pages": 1
+        },
+        {
+          "bytes": 16384,
+          "name": "sqlite_autoindex_vec_text_info_1",
+          "pages": 1
+        },
+        {
+          "bytes": 16384,
+          "name": "sqlite_autoindex_urls_1",
+          "pages": 1
+        },
+        {
+          "bytes": 16384,
+          "name": "sqlite_autoindex_apps_1",
+          "pages": 1
+        },
+        {
+          "bytes": 16384,
+          "name": "idx_windows_title",
+          "pages": 1
+        },
+        {
+          "bytes": 16384,
+          "name": "idx_urls_host",
+          "pages": 1
+        },
+        {
+          "bytes": 16384,
+          "name": "apps",
+          "pages": 1
+        }
+      ],
+      "dbstat_ms": 20.377,
+      "encrypted": false,
+      "file_sizes": {
+        "db": 63930368,
+        "db_MiB": 60.97,
+        "shm": 32768,
+        "wal": 0
+      },
+      "freelist_count": 0,
+      "fts_delete_check": {
+        "contentless_delete_works": true,
+        "fts_delete_msg": "not an error",
+        "fts_delete_rc": 0,
+        "fts_integrity_check_rc": 0,
+        "matches_after": 0,
+        "matches_before": 1,
+        "token": "docid9999"
+      },
+      "insert_ms": 1959.541,
+      "insert_rows_per_s": 10206.5,
+      "journal_mode": "wal",
+      "leak_after_close": {
+        "db": {
+          "bytes": 63930368,
+          "exists": true,
+          "hits": {
+            "canary_en": 20499,
+            "canary_zh": 20499,
+            "canary_zh_short": 20505,
+            "common_zh": 12044
+          },
+          "total_hits": 73547
+        },
+        "shm": {
+          "bytes": 32768,
+          "exists": true,
+          "hits": {
+            "canary_en": 0,
+            "canary_zh": 0,
+            "canary_zh_short": 0,
+            "common_zh": 0
+          },
+          "total_hits": 0
+        },
+        "total_hits": 73547,
+        "wal": {
+          "bytes": 0,
+          "exists": true,
+          "hits": {
+            "canary_en": 0,
+            "canary_zh": 0,
+            "canary_zh_short": 0,
+            "common_zh": 0
+          },
+          "total_hits": 0
+        }
+      },
+      "leak_wal_dirty": {
+        "db": {
+          "bytes": 61210624,
+          "exists": true,
+          "hits": {
+            "canary_en": 19000,
+            "canary_zh": 19000,
+            "canary_zh_short": 19006,
+            "common_zh": 11174
+          },
+          "total_hits": 68180
+        },
+        "shm": {
+          "bytes": 32768,
+          "exists": true,
+          "hits": {
+            "canary_en": 0,
+            "canary_zh": 0,
+            "canary_zh_short": 0,
+            "common_zh": 0
+          },
+          "total_hits": 0
+        },
+        "total_hits": 78435,
+        "wal": {
+          "bytes": 25022232,
+          "exists": true,
+          "hits": {
+            "canary_en": 2857,
+            "canary_zh": 2857,
+            "canary_zh_short": 2869,
+            "common_zh": 1672
+          },
+          "total_hits": 10255
+        }
+      },
+      "page_count": 3902,
+      "page_size": 16384,
+      "path": "~/Library/Caches/brosis-build/sqlcipher/run/route-b-memsec/plain.db",
+      "queries": {
+        "exact_two_step": {
+          "max_ms": 0.024,
+          "mean_ms": 0.018,
+          "min_ms": 0.016,
+          "n": 100,
+          "p50_ms": 0.018,
+          "p95_ms": 0.019
+        },
+        "fts_match": {
+          "avg_rows": 10,
+          "max_ms": 0.641,
+          "mean_ms": 0.467,
+          "min_ms": 0.291,
+          "n": 100,
+          "p50_ms": 0.474,
+          "p95_ms": 0.558
+        },
+        "fts_match_cache128MiB": {
+          "max_ms": 0.635,
+          "mean_ms": 0.467,
+          "min_ms": 0.283,
+          "n": 100,
+          "p50_ms": 0.482,
+          "p95_ms": 0.561
+        },
+        "sessions_range": {
+          "max_ms": 0.01,
+          "mean_ms": 0.005,
+          "min_ms": 0.004,
+          "n": 100,
+          "p50_ms": 0.005,
+          "p95_ms": 0.006
+        },
+        "vec_knn": {
+          "avg_rows": 10,
+          "max_ms": 5.645,
+          "mean_ms": 4.84,
+          "min_ms": 4.526,
+          "n": 100,
+          "p50_ms": 4.846,
+          "p95_ms": 5.067
+        },
+        "vec_knn_cache128MiB": {
+          "max_ms": 5.155,
+          "mean_ms": 4.864,
+          "min_ms": 4.534,
+          "n": 100,
+          "p50_ms": 4.881,
+          "p95_ms": 5.091
+        },
+        "vec_knn_self_hit": 50
+      },
+      "secure_delete": 1,
+      "temp_store": 2,
+      "temp_store_check": {
+        "file": {
+          "main_db_writes": 0,
+          "plaintext_marker_hits_all_files": 73494,
+          "plaintext_marker_hits_in_temp": 73494,
+          "sort_ms": 58.18,
+          "statvfs_free_bytes_before": 1257926668288,
+          "statvfs_free_bytes_min_during": 1257902919680,
+          "statvfs_max_dip_MiB": 22.65,
+          "statvfs_max_dip_bytes": 23748608,
+          "temp_file_MiB": 22.64,
+          "temp_file_bytes": 23739278,
+          "temp_file_opens": 1,
+          "temp_store_readback": 1,
+          "wal_writes": 0
+        },
+        "memory": {
+          "main_db_writes": 0,
+          "plaintext_marker_hits_all_files": 0,
+          "plaintext_marker_hits_in_temp": 0,
+          "sort_ms": 38.541,
+          "statvfs_free_bytes_before": 1257926668288,
+          "statvfs_free_bytes_min_during": 1257926668288,
+          "statvfs_max_dip_MiB": 0,
+          "statvfs_max_dip_bytes": 0,
+          "temp_file_MiB": 0,
+          "temp_file_bytes": 0,
+          "temp_file_opens": 0,
+          "temp_store_readback": 2,
+          "wal_writes": 0
+        }
+      },
+      "wal_size_bytes": 25022232
+    },
+    "route": "b",
+    "rows": 20000,
+    "seed": "20260907",
+    "sqlite_tmpdir": "~/Library/Caches/brosis-build/sqlcipher/run/route-b-memsec/sqlite-tmp",
+    "task": "T8 / E6 SQLCipher 构建与密钥、数据边界验证",
+    "tmpdir_after_all": {
+      "exists": true,
+      "file_count": 0,
+      "files": [],
+      "total_hits": 0
+    },
+    "vec_auto_extension_rc": 0,
+    "vfs_shim_rc": 0,
+    "work_dir": "~/Library/Caches/brosis-build/sqlcipher/run/route-b-memsec",
+    "wrong_key": {
+      "correct_key": {
+        "note": "错误密钥尝试之后仍能用正确密钥打开，说明失败的解锁不会破坏库",
+        "observations": 20505,
+        "ok": true
+      },
+      "no_key": {
+        "failed_as_expected": true,
+        "message": "file is not a database",
+        "rc": 26,
+        "rc_name": "SQLITE_NOTADB"
+      },
+      "wrong_key": {
+        "failed_as_expected": true,
+        "message": "file is not a database",
+        "rc": 26,
+        "rc_name": "SQLITE_NOTADB"
+      }
+    }
+  },
+  "routes": {
+    "a_swift_sqlcipher": {
+      "build": {
+        "cipher_compatibility": "(空)",
+        "cipher_default_kdf_iter": "256000",
+        "cipher_default_page_size": "4096",
+        "cipher_default_use_hmac": "1",
+        "cipher_hmac_algorithm": "HMAC_SHA512",
+        "cipher_kdf_algorithm": "PBKDF2_HMAC_SHA512",
+        "cipher_memory_security": "0",
+        "cipher_page_size": "4096",
+        "cipher_provider": "libtomcrypt",
+        "cipher_provider_version": "1.18.2-develop",
+        "cipher_settings": [
+          "PRAGMA kdf_iter = 256000;",
+          "PRAGMA cipher_page_size = 4096;",
+          "PRAGMA cipher_use_hmac = 1;",
+          "PRAGMA cipher_plaintext_header_size = 0;",
+          "PRAGMA cipher_hmac_algorithm = HMAC_SHA512;",
+          "PRAGMA cipher_kdf_algorithm = PBKDF2_HMAC_SHA512;"
+        ],
+        "cipher_version": "4.15.0 community",
+        "compile_options_all_count": 69,
+        "compile_options_selected": [
+          "DQS=0",
+          "ENABLE_API_ARMOR",
+          "ENABLE_CARRAY",
+          "ENABLE_COLUMN_METADATA",
+          "ENABLE_DBSTAT_VTAB",
+          "ENABLE_FTS5",
+          "ENABLE_MATH_FUNCTIONS",
+          "ENABLE_MEMORY_MANAGEMENT",
+          "ENABLE_PREUPDATE_HOOK",
+          "ENABLE_RTREE",
+          "ENABLE_SESSION",
+          "ENABLE_SNAPSHOT",
+          "ENABLE_STAT4",
+          "ENABLE_UNLOCK_NOTIFY",
+          "HAS_CODEC",
+          "MAX_VARIABLE_NUMBER=250000",
+          "SECURE_DELETE",
+          "TEMP_STORE=2",
+          "THREADSAFE=1",
+          "USE_URI"
+        ],
+        "kdf_iter": "256000",
+        "required_flags": {
+          "SQLITE_ENABLE_DBSTAT_VTAB": true,
+          "SQLITE_ENABLE_FTS5": true,
+          "SQLITE_HAS_CODEC": true,
+          "SQLITE_TEMP_STORE": "TEMP_STORE=2",
+          "sqlite_ge_3_43": true
+        },
+        "sqlite_libversion": "3.53.0",
+        "sqlite_sourceid": "2026-04-09 11:41:38 4525003a53a7fc63ca75c59b22c79608659ca12f0131f52c18637f829977alt1",
+        "sqlite_version_number": 3053000,
+        "vec_version": "v0.1.9"
+      },
+      "corpus": {
+        "avg_bigram_bytes": 2122,
+        "avg_doc_bytes": 1153,
+        "docs": 20000,
+        "gen_ms": 1325.309,
+        "plaintext_MiB": 21.99,
+        "plaintext_bytes": 23061945
+      },
+      "date": "2026-09-06T17:02:20Z",
+      "encrypted": {
+        "auto_vacuum": 2,
+        "cipher_hmac_algorithm": "HMAC_SHA512",
+        "cipher_kdf_algorithm": "PBKDF2_HMAC_SHA512",
+        "cipher_memory_security": "0",
+        "cipher_page_size": "16384",
+        "cipher_provider": "libtomcrypt",
+        "cipher_provider_version": "1.18.2-develop",
+        "cipher_version": "4.15.0 community",
+        "dbstat": [
+          {
+            "bytes": 26181632,
+            "name": "text_versions",
+            "pages": 1598
+          },
+          {
+            "bytes": 19546112,
+            "name": "text_fts_data",
+            "pages": 1193
+          },
+          {
+            "bytes": 10567680,
+            "name": "vec_text_vector_chunks00",
+            "pages": 645
+          },
+          {
+            "bytes": 1163264,
+            "name": "observations",
+            "pages": 71
+          },
+          {
+            "bytes": 1146880,
+            "name": "sqlite_autoindex_text_versions_2",
+            "pages": 70
+          },
+          {
+            "bytes": 557056,
+            "name": "occurrences",
+            "pages": 34
+          },
+          {
+            "bytes": 491520,
+            "name": "sqlite_autoindex_text_versions_1",
+            "pages": 30
+          },
+          {
+            "bytes": 491520,
+            "name": "sqlite_autoindex_occurrences_2",
+            "pages": 30
+          },
+          {
+            "bytes": 491520,
+            "name": "sqlite_autoindex_observations_1",
+            "pages": 30
+          },
+          {
+            "bytes": 475136,
+            "name": "sqlite_autoindex_occurrences_1",
+            "pages": 29
+          },
+          {
+            "bytes": 475136,
+            "name": "idx_occ_tv",
+            "pages": 29
+          },
+          {
+            "bytes": 393216,
+            "name": "idx_obs_url_ts",
+            "pages": 24
+          },
+          {
+            "bytes": 360448,
+            "name": "idx_obs_app_ts",
+            "pages": 22
+          },
+          {
+            "bytes": 344064,
+            "name": "vec_text_chunks",
+            "pages": 21
+          },
+          {
+            "bytes": 344064,
+            "name": "idx_obs_ts",
+            "pages": 21
+          },
+          {
+            "bytes": 278528,
+            "name": "vec_text_rowids",
+            "pages": 17
+          },
+          {
+            "bytes": 278528,
+            "name": "text_fts_docsize",
+            "pages": 17
+          },
+          {
+            "bytes": 81920,
+            "name": "text_fts_idx",
+            "pages": 5
+          },
+          {
+            "bytes": 65536,
+            "name": "sessions",
+            "pages": 4
+          },
+          {
+            "bytes": 49152,
+            "name": "urls",
+            "pages": 3
+          },
+          {
+            "bytes": 49152,
+            "name": "sqlite_autoindex_sessions_1",
+            "pages": 3
+          },
+          {
+            "bytes": 49152,
+            "name": "idx_sessions_range",
+            "pages": 3
+          },
+          {
+            "bytes": 16384,
+            "name": "windows",
+            "pages": 1
+          },
+          {
+            "bytes": 16384,
+            "name": "vec_text_info",
+            "pages": 1
+          },
+          {
+            "bytes": 16384,
+            "name": "text_fts_config",
+            "pages": 1
+          },
+          {
+            "bytes": 16384,
+            "name": "sqlite_sequence",
+            "pages": 1
+          },
+          {
+            "bytes": 16384,
+            "name": "sqlite_schema",
+            "pages": 1
+          },
+          {
+            "bytes": 16384,
+            "name": "sqlite_autoindex_windows_1",
+            "pages": 1
+          },
+          {
+            "bytes": 16384,
+            "name": "sqlite_autoindex_vec_text_vector_chunks00_1",
+            "pages": 1
+          },
+          {
+            "bytes": 16384,
+            "name": "sqlite_autoindex_vec_text_info_1",
+            "pages": 1
+          },
+          {
+            "bytes": 16384,
+            "name": "sqlite_autoindex_urls_1",
+            "pages": 1
+          },
+          {
+            "bytes": 16384,
+            "name": "sqlite_autoindex_apps_1",
+            "pages": 1
+          },
+          {
+            "bytes": 16384,
+            "name": "idx_windows_title",
+            "pages": 1
+          },
+          {
+            "bytes": 16384,
+            "name": "idx_urls_host",
+            "pages": 1
+          },
+          {
+            "bytes": 16384,
+            "name": "apps",
+            "pages": 1
+          }
+        ],
+        "dbstat_ms": 315.059,
+        "encrypted": true,
+        "file_sizes": {
+          "db": 64126976,
+          "db_MiB": 61.16,
+          "shm": 32768,
+          "wal": 0
+        },
+        "freelist_count": 0,
+        "fts_delete_check": {
+          "contentless_delete_works": true,
+          "fts_delete_msg": "not an error",
+          "fts_delete_rc": 0,
+          "fts_integrity_check_rc": 0,
+          "matches_after": 0,
+          "matches_before": 1,
+          "token": "docid9999"
+        },
+        "insert_ms": 5795.901,
+        "insert_rows_per_s": 3450.7,
+        "journal_mode": "wal",
+        "kdf_iter": "256000",
+        "key_applied_and_verified_ms": 0.146,
+        "key_buffer_zeroed": true,
+        "leak_after_close": {
+          "db": {
+            "bytes": 64126976,
+            "exists": true,
+            "hits": {
+              "canary_en": 0,
+              "canary_zh": 0,
+              "canary_zh_short": 0,
+              "common_zh": 0
+            },
+            "total_hits": 0
+          },
+          "shm": {
+            "bytes": 32768,
+            "exists": true,
+            "hits": {
+              "canary_en": 0,
+              "canary_zh": 0,
+              "canary_zh_short": 0,
+              "common_zh": 0
+            },
+            "total_hits": 0
+          },
+          "total_hits": 0,
+          "wal": {
+            "bytes": 0,
+            "exists": true,
+            "hits": {
+              "canary_en": 0,
+              "canary_zh": 0,
+              "canary_zh_short": 0,
+              "common_zh": 0
+            },
+            "total_hits": 0
+          }
+        },
+        "leak_wal_dirty": {
+          "db": {
+            "bytes": 61358080,
+            "exists": true,
+            "hits": {
+              "canary_en": 0,
+              "canary_zh": 0,
+              "canary_zh_short": 0,
+              "common_zh": 0
+            },
+            "total_hits": 0
+          },
+          "shm": {
+            "bytes": 32768,
+            "exists": true,
+            "hits": {
+              "canary_en": 0,
+              "canary_zh": 0,
+              "canary_zh_short": 0,
+              "common_zh": 0
+            },
+            "total_hits": 0
+          },
+          "total_hits": 0,
+          "wal": {
+            "bytes": 24989416,
+            "exists": true,
+            "hits": {
+              "canary_en": 0,
+              "canary_zh": 0,
+              "canary_zh_short": 0,
+              "common_zh": 0
+            },
+            "total_hits": 0
+          }
+        },
+        "page_count": 3914,
+        "page_size": 16384,
+        "path": "~/Library/Caches/brosis-build/sqlcipher/run/route-a/enc.db",
+        "queries": {
+          "exact_two_step": {
+            "max_ms": 0.107,
+            "mean_ms": 0.017,
+            "min_ms": 0.014,
+            "n": 100,
+            "p50_ms": 0.016,
+            "p95_ms": 0.018
+          },
+          "fts_match": {
+            "avg_rows": 10,
+            "max_ms": 2.141,
+            "mean_ms": 1.47,
+            "min_ms": 0.033,
+            "n": 100,
+            "p50_ms": 1.603,
+            "p95_ms": 1.954
+          },
+          "fts_match_cache128MiB": {
+            "max_ms": 2.558,
+            "mean_ms": 0.676,
+            "min_ms": 0.032,
+            "n": 100,
+            "p50_ms": 0.627,
+            "p95_ms": 1.692
+          },
+          "sessions_range": {
+            "max_ms": 0.002,
+            "mean_ms": 0.002,
+            "min_ms": 0,
+            "n": 100,
+            "p50_ms": 0.002,
+            "p95_ms": 0.002
+          },
+          "vec_knn": {
+            "avg_rows": 10,
+            "max_ms": 56.927,
+            "mean_ms": 55.58,
+            "min_ms": 54.492,
+            "n": 100,
+            "p50_ms": 55.536,
+            "p95_ms": 56.39
+          },
+          "vec_knn_cache128MiB": {
+            "max_ms": 4.115,
+            "mean_ms": 3.91,
+            "min_ms": 3.812,
+            "n": 100,
+            "p50_ms": 3.867,
+            "p95_ms": 4.065
+          },
+          "vec_knn_self_hit": 50
+        },
+        "secure_delete": 1,
+        "temp_store": 2,
+        "temp_store_check": {
+          "file": {
+            "main_db_writes": 0,
+            "plaintext_marker_hits_all_files": 73494,
+            "plaintext_marker_hits_in_temp": 73494,
+            "sort_ms": 178.554,
+            "statvfs_free_bytes_before": 1257953632256,
+            "statvfs_free_bytes_min_during": 1257929891840,
+            "statvfs_max_dip_MiB": 22.64,
+            "statvfs_max_dip_bytes": 23740416,
+            "temp_file_MiB": 22.64,
+            "temp_file_bytes": 23739278,
+            "temp_file_opens": 1,
+            "temp_store_readback": 1,
+            "wal_writes": 0
+          },
+          "memory": {
+            "main_db_writes": 0,
+            "plaintext_marker_hits_all_files": 0,
+            "plaintext_marker_hits_in_temp": 0,
+            "sort_ms": 137.216,
+            "statvfs_free_bytes_before": 1257953632256,
+            "statvfs_free_bytes_min_during": 1257953632256,
+            "statvfs_max_dip_MiB": 0,
+            "statvfs_max_dip_bytes": 0,
+            "temp_file_MiB": 0,
+            "temp_file_bytes": 0,
+            "temp_file_opens": 0,
+            "temp_store_readback": 2,
+            "wal_writes": 0
+          }
+        },
+        "wal_size_bytes": 24989416
+      },
+      "lock_cycle": {
+        "close_ms": {
+          "max_ms": 0.749,
+          "mean_ms": 0.496,
+          "min_ms": 0.409,
+          "n": 20,
+          "p50_ms": 0.488,
+          "p95_ms": 0.571
+        },
+        "cycles": 20,
+        "key_zeroized_every_cycle": true,
+        "observations_last_seen": 20519,
+        "open_ms": {
+          "max_ms": 2.222,
+          "mean_ms": 2.055,
+          "min_ms": 1.964,
+          "n": 20,
+          "p50_ms": 2.046,
+          "p95_ms": 2.17
+        },
+        "query_ms": {
+          "max_ms": 2.795,
+          "mean_ms": 2.653,
+          "min_ms": 2.556,
+          "n": 20,
+          "p50_ms": 2.655,
+          "p95_ms": 2.792
+        },
+        "reopen_after_zeroize_ok": true,
+        "write_ms": {
+          "max_ms": 2.512,
+          "mean_ms": 1.682,
+          "min_ms": 1.471,
+          "n": 20,
+          "p50_ms": 1.559,
+          "p95_ms": 2.01
+        }
+      },
+      "memory_security_requested": false,
+      "overhead": {
+        "db_bytes_encrypted": 64126976,
+        "db_bytes_plaintext": 63930368,
+        "db_size_ratio": 1.0031,
+        "insert_ms_encrypted": 5795.901,
+        "insert_ms_plaintext": 1303.206,
+        "insert_slowdown_x": 4.447,
+        "queries": {
+          "exact_two_step": {
+            "enc_p50_ms": 0.016,
+            "enc_p95_ms": 0.018,
+            "p50_slowdown_x": 1,
+            "p95_slowdown_x": 1,
+            "plain_p50_ms": 0.016,
+            "plain_p95_ms": 0.018
+          },
+          "fts_match": {
+            "enc_p50_ms": 1.603,
+            "enc_p95_ms": 1.954,
+            "p50_slowdown_x": 23.232,
+            "p95_slowdown_x": 22.205,
+            "plain_p50_ms": 0.069,
+            "plain_p95_ms": 0.088
+          },
+          "fts_match_cache128MiB": {
+            "enc_p50_ms": 0.627,
+            "enc_p95_ms": 1.692,
+            "p50_slowdown_x": 9.358,
+            "p95_slowdown_x": 15.243,
+            "plain_p50_ms": 0.067,
+            "plain_p95_ms": 0.111
+          },
+          "sessions_range": {
+            "enc_p50_ms": 0.002,
+            "enc_p95_ms": 0.002,
+            "p50_slowdown_x": 1,
+            "p95_slowdown_x": 1,
+            "plain_p50_ms": 0.002,
+            "plain_p95_ms": 0.002
+          },
+          "vec_knn": {
+            "enc_p50_ms": 55.536,
+            "enc_p95_ms": 56.39,
+            "p50_slowdown_x": 13.493,
+            "p95_slowdown_x": 12.957,
+            "plain_p50_ms": 4.116,
+            "plain_p95_ms": 4.352
+          },
+          "vec_knn_cache128MiB": {
+            "enc_p50_ms": 3.867,
+            "enc_p95_ms": 4.065,
+            "p50_slowdown_x": 0.945,
+            "p95_slowdown_x": 0.933,
+            "plain_p50_ms": 4.093,
+            "plain_p95_ms": 4.358
+          }
+        }
+      },
+      "passphrase_open": {
+        "kdf_iter": 256000,
+        "note": "口令密钥每次开库都要跑 PBKDF2-HMAC-SHA512 kdf_iter 轮；原始密钥跳过这一步",
+        "passphrase_open_ms": {
+          "max_ms": 203.335,
+          "mean_ms": 200.923,
+          "min_ms": 198.715,
+          "n": 5,
+          "p50_ms": 201.09,
+          "p95_ms": 203.037
+        }
+      },
+      "plaintext": {
+        "auto_vacuum": 2,
+        "dbstat": [
+          {
+            "bytes": 26050560,
+            "name": "text_versions",
+            "pages": 1590
+          },
+          {
+            "bytes": 19546112,
+            "name": "text_fts_data",
+            "pages": 1193
+          },
+          {
+            "bytes": 10551296,
+            "name": "vec_text_vector_chunks00",
+            "pages": 644
+          },
+          {
+            "bytes": 1163264,
+            "name": "observations",
+            "pages": 71
+          },
+          {
+            "bytes": 1114112,
+            "name": "sqlite_autoindex_text_versions_2",
+            "pages": 68
+          },
+          {
+            "bytes": 540672,
+            "name": "occurrences",
+            "pages": 33
+          },
+          {
+            "bytes": 491520,
+            "name": "sqlite_autoindex_text_versions_1",
+            "pages": 30
+          },
+          {
+            "bytes": 491520,
+            "name": "sqlite_autoindex_occurrences_2",
+            "pages": 30
+          },
+          {
+            "bytes": 491520,
+            "name": "sqlite_autoindex_observations_1",
+            "pages": 30
+          },
+          {
+            "bytes": 475136,
+            "name": "sqlite_autoindex_occurrences_1",
+            "pages": 29
+          },
+          {
+            "bytes": 475136,
+            "name": "idx_occ_tv",
+            "pages": 29
+          },
+          {
+            "bytes": 376832,
+            "name": "idx_obs_url_ts",
+            "pages": 23
+          },
+          {
+            "bytes": 376832,
+            "name": "idx_obs_app_ts",
+            "pages": 23
+          },
+          {
+            "bytes": 344064,
+            "name": "vec_text_chunks",
+            "pages": 21
+          },
+          {
+            "bytes": 344064,
+            "name": "idx_obs_ts",
+            "pages": 21
+          },
+          {
+            "bytes": 278528,
+            "name": "vec_text_rowids",
+            "pages": 17
+          },
+          {
+            "bytes": 278528,
+            "name": "text_fts_docsize",
+            "pages": 17
+          },
+          {
+            "bytes": 81920,
+            "name": "text_fts_idx",
+            "pages": 5
+          },
+          {
+            "bytes": 65536,
+            "name": "sessions",
+            "pages": 4
+          },
+          {
+            "bytes": 49152,
+            "name": "urls",
+            "pages": 3
+          },
+          {
+            "bytes": 49152,
+            "name": "sqlite_autoindex_sessions_1",
+            "pages": 3
+          },
+          {
+            "bytes": 49152,
+            "name": "idx_sessions_range",
+            "pages": 3
+          },
+          {
+            "bytes": 16384,
+            "name": "windows",
+            "pages": 1
+          },
+          {
+            "bytes": 16384,
+            "name": "vec_text_info",
+            "pages": 1
+          },
+          {
+            "bytes": 16384,
+            "name": "text_fts_config",
+            "pages": 1
+          },
+          {
+            "bytes": 16384,
+            "name": "sqlite_sequence",
+            "pages": 1
+          },
+          {
+            "bytes": 16384,
+            "name": "sqlite_schema",
+            "pages": 1
+          },
+          {
+            "bytes": 16384,
+            "name": "sqlite_autoindex_windows_1",
+            "pages": 1
+          },
+          {
+            "bytes": 16384,
+            "name": "sqlite_autoindex_vec_text_vector_chunks00_1",
+            "pages": 1
+          },
+          {
+            "bytes": 16384,
+            "name": "sqlite_autoindex_vec_text_info_1",
+            "pages": 1
+          },
+          {
+            "bytes": 16384,
+            "name": "sqlite_autoindex_urls_1",
+            "pages": 1
+          },
+          {
+            "bytes": 16384,
+            "name": "sqlite_autoindex_apps_1",
+            "pages": 1
+          },
+          {
+            "bytes": 16384,
+            "name": "idx_windows_title",
+            "pages": 1
+          },
+          {
+            "bytes": 16384,
+            "name": "idx_urls_host",
+            "pages": 1
+          },
+          {
+            "bytes": 16384,
+            "name": "apps",
+            "pages": 1
+          }
+        ],
+        "dbstat_ms": 6.788,
+        "encrypted": false,
+        "file_sizes": {
+          "db": 63930368,
+          "db_MiB": 60.97,
+          "shm": 32768,
+          "wal": 0
+        },
+        "freelist_count": 0,
+        "fts_delete_check": {
+          "contentless_delete_works": true,
+          "fts_delete_msg": "not an error",
+          "fts_delete_rc": 0,
+          "fts_integrity_check_rc": 0,
+          "matches_after": 0,
+          "matches_before": 1,
+          "token": "docid9999"
+        },
+        "insert_ms": 1303.206,
+        "insert_rows_per_s": 15346.8,
+        "journal_mode": "wal",
+        "leak_after_close": {
+          "db": {
+            "bytes": 63930368,
+            "exists": true,
+            "hits": {
+              "canary_en": 20499,
+              "canary_zh": 20499,
+              "canary_zh_short": 20505,
+              "common_zh": 12044
+            },
+            "total_hits": 73547
+          },
+          "shm": {
+            "bytes": 32768,
+            "exists": true,
+            "hits": {
+              "canary_en": 0,
+              "canary_zh": 0,
+              "canary_zh_short": 0,
+              "common_zh": 0
+            },
+            "total_hits": 0
+          },
+          "total_hits": 73547,
+          "wal": {
+            "bytes": 0,
+            "exists": true,
+            "hits": {
+              "canary_en": 0,
+              "canary_zh": 0,
+              "canary_zh_short": 0,
+              "common_zh": 0
+            },
+            "total_hits": 0
+          }
+        },
+        "leak_wal_dirty": {
+          "db": {
+            "bytes": 61210624,
+            "exists": true,
+            "hits": {
+              "canary_en": 19000,
+              "canary_zh": 19000,
+              "canary_zh_short": 19006,
+              "common_zh": 11174
+            },
+            "total_hits": 68180
+          },
+          "shm": {
+            "bytes": 32768,
+            "exists": true,
+            "hits": {
+              "canary_en": 0,
+              "canary_zh": 0,
+              "canary_zh_short": 0,
+              "common_zh": 0
+            },
+            "total_hits": 0
+          },
+          "total_hits": 78435,
+          "wal": {
+            "bytes": 25022232,
+            "exists": true,
+            "hits": {
+              "canary_en": 2857,
+              "canary_zh": 2857,
+              "canary_zh_short": 2869,
+              "common_zh": 1672
+            },
+            "total_hits": 10255
+          }
+        },
+        "page_count": 3902,
+        "page_size": 16384,
+        "path": "~/Library/Caches/brosis-build/sqlcipher/run/route-a/plain.db",
+        "queries": {
+          "exact_two_step": {
+            "max_ms": 0.019,
+            "mean_ms": 0.017,
+            "min_ms": 0.014,
+            "n": 100,
+            "p50_ms": 0.016,
+            "p95_ms": 0.018
+          },
+          "fts_match": {
+            "avg_rows": 10,
+            "max_ms": 0.103,
+            "mean_ms": 0.068,
+            "min_ms": 0.032,
+            "n": 100,
+            "p50_ms": 0.069,
+            "p95_ms": 0.088
+          },
+          "fts_match_cache128MiB": {
+            "max_ms": 0.155,
+            "mean_ms": 0.071,
+            "min_ms": 0.031,
+            "n": 100,
+            "p50_ms": 0.067,
+            "p95_ms": 0.111
+          },
+          "sessions_range": {
+            "max_ms": 0.002,
+            "mean_ms": 0.002,
+            "min_ms": 0,
+            "n": 100,
+            "p50_ms": 0.002,
+            "p95_ms": 0.002
+          },
+          "vec_knn": {
+            "avg_rows": 10,
+            "max_ms": 4.394,
+            "mean_ms": 4.15,
+            "min_ms": 4.037,
+            "n": 100,
+            "p50_ms": 4.116,
+            "p95_ms": 4.352
+          },
+          "vec_knn_cache128MiB": {
+            "max_ms": 4.428,
+            "mean_ms": 4.142,
+            "min_ms": 4.026,
+            "n": 100,
+            "p50_ms": 4.093,
+            "p95_ms": 4.358
+          },
+          "vec_knn_self_hit": 50
+        },
+        "secure_delete": 1,
+        "temp_store": 2,
+        "temp_store_check": {
+          "file": {
+            "main_db_writes": 0,
+            "plaintext_marker_hits_all_files": 73494,
+            "plaintext_marker_hits_in_temp": 73494,
+            "sort_ms": 51.756,
+            "statvfs_free_bytes_before": 1257954619392,
+            "statvfs_free_bytes_min_during": 1257930862592,
+            "statvfs_max_dip_MiB": 22.66,
+            "statvfs_max_dip_bytes": 23756800,
+            "temp_file_MiB": 22.64,
+            "temp_file_bytes": 23739278,
+            "temp_file_opens": 1,
+            "temp_store_readback": 1,
+            "wal_writes": 0
+          },
+          "memory": {
+            "main_db_writes": 0,
+            "plaintext_marker_hits_all_files": 0,
+            "plaintext_marker_hits_in_temp": 0,
+            "sort_ms": 10.612,
+            "statvfs_free_bytes_before": 1257954619392,
+            "statvfs_free_bytes_min_during": 1257954619392,
+            "statvfs_max_dip_MiB": 0,
+            "statvfs_max_dip_bytes": 0,
+            "temp_file_MiB": 0,
+            "temp_file_bytes": 0,
+            "temp_file_opens": 0,
+            "temp_store_readback": 2,
+            "wal_writes": 0
+          }
+        },
+        "wal_size_bytes": 25022232
+      },
+      "route": "a",
+      "rows": 20000,
+      "seed": "20260907",
+      "sqlite_tmpdir": "~/Library/Caches/brosis-build/sqlcipher/run/route-a/sqlite-tmp",
+      "task": "T8 / E6 SQLCipher 构建与密钥、数据边界验证",
+      "tmpdir_after_all": {
+        "exists": true,
+        "file_count": 0,
+        "files": [],
+        "total_hits": 0
+      },
+      "vec_auto_extension_rc": 0,
+      "vfs_shim_rc": 0,
+      "work_dir": "~/Library/Caches/brosis-build/sqlcipher/run/route-a",
+      "wrong_key": {
+        "correct_key": {
+          "note": "错误密钥尝试之后仍能用正确密钥打开，说明失败的解锁不会破坏库",
+          "observations": 20520,
+          "ok": true
+        },
+        "no_key": {
+          "failed_as_expected": true,
+          "message": "file is not a database",
+          "rc": 26,
+          "rc_name": "SQLITE_NOTADB"
+        },
+        "wrong_key": {
+          "failed_as_expected": true,
+          "message": "file is not a database",
+          "rc": 26,
+          "rc_name": "SQLITE_NOTADB"
+        }
+      }
+    },
+    "b_vendored_amalgamation": {
+      "build": {
+        "cipher_compatibility": "(空)",
+        "cipher_default_kdf_iter": "256000",
+        "cipher_default_page_size": "4096",
+        "cipher_default_use_hmac": "1",
+        "cipher_hmac_algorithm": "HMAC_SHA512",
+        "cipher_kdf_algorithm": "PBKDF2_HMAC_SHA512",
+        "cipher_memory_security": "0",
+        "cipher_page_size": "4096",
+        "cipher_provider": "commoncrypto",
+        "cipher_provider_version": "61901.160.44",
+        "cipher_settings": [
+          "PRAGMA kdf_iter = 256000;",
+          "PRAGMA cipher_page_size = 4096;",
+          "PRAGMA cipher_use_hmac = 1;",
+          "PRAGMA cipher_plaintext_header_size = 0;",
+          "PRAGMA cipher_hmac_algorithm = HMAC_SHA512;",
+          "PRAGMA cipher_kdf_algorithm = PBKDF2_HMAC_SHA512;"
+        ],
+        "cipher_version": "4.18.0 community",
+        "compile_options_all_count": 65,
+        "compile_options_selected": [
+          "DQS=0",
+          "ENABLE_API_ARMOR",
+          "ENABLE_COLUMN_METADATA",
+          "ENABLE_DBSTAT_VTAB",
+          "ENABLE_FTS5",
+          "ENABLE_MATH_FUNCTIONS",
+          "ENABLE_MEMORY_MANAGEMENT",
+          "ENABLE_PREUPDATE_HOOK",
+          "ENABLE_RTREE",
+          "ENABLE_SESSION",
+          "ENABLE_SNAPSHOT",
+          "ENABLE_STAT4",
+          "ENABLE_UNLOCK_NOTIFY",
+          "HAS_CODEC",
+          "MAX_VARIABLE_NUMBER=250000",
+          "OMIT_LOAD_EXTENSION",
+          "SECURE_DELETE",
+          "TEMP_STORE=2",
+          "THREADSAFE=1",
+          "USE_URI"
+        ],
+        "kdf_iter": "256000",
+        "required_flags": {
+          "SQLITE_ENABLE_DBSTAT_VTAB": true,
+          "SQLITE_ENABLE_FTS5": true,
+          "SQLITE_HAS_CODEC": true,
+          "SQLITE_TEMP_STORE": "TEMP_STORE=2",
+          "sqlite_ge_3_43": true
+        },
+        "sqlite_libversion": "3.53.4",
+        "sqlite_sourceid": "2026-07-24 19:02:57 bf7c7f30031888f4e796e429ab3978879485813aaca6f641c7b33e4e0945alt1",
+        "sqlite_version_number": 3053004,
+        "vec_version": "v0.1.9"
+      },
+      "corpus": {
+        "avg_bigram_bytes": 2122,
+        "avg_doc_bytes": 1153,
+        "docs": 20000,
+        "gen_ms": 1352.675,
+        "plaintext_MiB": 21.99,
+        "plaintext_bytes": 23061945
+      },
+      "date": "2026-09-06T17:02:58Z",
+      "encrypted": {
+        "auto_vacuum": 2,
+        "cipher_hmac_algorithm": "HMAC_SHA512",
+        "cipher_kdf_algorithm": "PBKDF2_HMAC_SHA512",
+        "cipher_memory_security": "0",
+        "cipher_page_size": "16384",
+        "cipher_provider": "commoncrypto",
+        "cipher_provider_version": "61901.160.44",
+        "cipher_version": "4.18.0 community",
+        "dbstat": [
+          {
+            "bytes": 26181632,
+            "name": "text_versions",
+            "pages": 1598
+          },
+          {
+            "bytes": 19546112,
+            "name": "text_fts_data",
+            "pages": 1193
+          },
+          {
+            "bytes": 10567680,
+            "name": "vec_text_vector_chunks00",
+            "pages": 645
+          },
+          {
+            "bytes": 1163264,
+            "name": "observations",
+            "pages": 71
+          },
+          {
+            "bytes": 1146880,
+            "name": "sqlite_autoindex_text_versions_2",
+            "pages": 70
+          },
+          {
+            "bytes": 557056,
+            "name": "occurrences",
+            "pages": 34
+          },
+          {
+            "bytes": 491520,
+            "name": "sqlite_autoindex_text_versions_1",
+            "pages": 30
+          },
+          {
+            "bytes": 491520,
+            "name": "sqlite_autoindex_occurrences_2",
+            "pages": 30
+          },
+          {
+            "bytes": 491520,
+            "name": "sqlite_autoindex_observations_1",
+            "pages": 30
+          },
+          {
+            "bytes": 475136,
+            "name": "sqlite_autoindex_occurrences_1",
+            "pages": 29
+          },
+          {
+            "bytes": 475136,
+            "name": "idx_occ_tv",
+            "pages": 29
+          },
+          {
+            "bytes": 393216,
+            "name": "idx_obs_url_ts",
+            "pages": 24
+          },
+          {
+            "bytes": 360448,
+            "name": "idx_obs_app_ts",
+            "pages": 22
+          },
+          {
+            "bytes": 344064,
+            "name": "vec_text_chunks",
+            "pages": 21
+          },
+          {
+            "bytes": 344064,
+            "name": "idx_obs_ts",
+            "pages": 21
+          },
+          {
+            "bytes": 278528,
+            "name": "vec_text_rowids",
+            "pages": 17
+          },
+          {
+            "bytes": 278528,
+            "name": "text_fts_docsize",
+            "pages": 17
+          },
+          {
+            "bytes": 81920,
+            "name": "text_fts_idx",
+            "pages": 5
+          },
+          {
+            "bytes": 65536,
+            "name": "sessions",
+            "pages": 4
+          },
+          {
+            "bytes": 49152,
+            "name": "urls",
+            "pages": 3
+          },
+          {
+            "bytes": 49152,
+            "name": "sqlite_autoindex_sessions_1",
+            "pages": 3
+          },
+          {
+            "bytes": 49152,
+            "name": "idx_sessions_range",
+            "pages": 3
+          },
+          {
+            "bytes": 16384,
+            "name": "windows",
+            "pages": 1
+          },
+          {
+            "bytes": 16384,
+            "name": "vec_text_info",
+            "pages": 1
+          },
+          {
+            "bytes": 16384,
+            "name": "text_fts_config",
+            "pages": 1
+          },
+          {
+            "bytes": 16384,
+            "name": "sqlite_sequence",
+            "pages": 1
+          },
+          {
+            "bytes": 16384,
+            "name": "sqlite_schema",
+            "pages": 1
+          },
+          {
+            "bytes": 16384,
+            "name": "sqlite_autoindex_windows_1",
+            "pages": 1
+          },
+          {
+            "bytes": 16384,
+            "name": "sqlite_autoindex_vec_text_vector_chunks00_1",
+            "pages": 1
+          },
+          {
+            "bytes": 16384,
+            "name": "sqlite_autoindex_vec_text_info_1",
+            "pages": 1
+          },
+          {
+            "bytes": 16384,
+            "name": "sqlite_autoindex_urls_1",
+            "pages": 1
+          },
+          {
+            "bytes": 16384,
+            "name": "sqlite_autoindex_apps_1",
+            "pages": 1
+          },
+          {
+            "bytes": 16384,
+            "name": "idx_windows_title",
+            "pages": 1
+          },
+          {
+            "bytes": 16384,
+            "name": "idx_urls_host",
+            "pages": 1
+          },
+          {
+            "bytes": 16384,
+            "name": "apps",
+            "pages": 1
+          }
+        ],
+        "dbstat_ms": 48.104,
+        "encrypted": true,
+        "file_sizes": {
+          "db": 64126976,
+          "db_MiB": 61.16,
+          "shm": 32768,
+          "wal": 0
+        },
+        "freelist_count": 0,
+        "fts_delete_check": {
+          "contentless_delete_works": true,
+          "fts_delete_msg": "not an error",
+          "fts_delete_rc": 0,
+          "fts_integrity_check_rc": 0,
+          "matches_after": 0,
+          "matches_before": 1,
+          "token": "docid9999"
+        },
+        "insert_ms": 2050.799,
+        "insert_rows_per_s": 9752.3,
+        "journal_mode": "wal",
+        "kdf_iter": "256000",
+        "key_applied_and_verified_ms": 0.09,
+        "key_buffer_zeroed": true,
+        "leak_after_close": {
+          "db": {
+            "bytes": 64126976,
+            "exists": true,
+            "hits": {
+              "canary_en": 0,
+              "canary_zh": 0,
+              "canary_zh_short": 0,
+              "common_zh": 0
+            },
+            "total_hits": 0
+          },
+          "shm": {
+            "bytes": 32768,
+            "exists": true,
+            "hits": {
+              "canary_en": 0,
+              "canary_zh": 0,
+              "canary_zh_short": 0,
+              "common_zh": 0
+            },
+            "total_hits": 0
+          },
+          "total_hits": 0,
+          "wal": {
+            "bytes": 0,
+            "exists": true,
+            "hits": {
+              "canary_en": 0,
+              "canary_zh": 0,
+              "canary_zh_short": 0,
+              "common_zh": 0
+            },
+            "total_hits": 0
+          }
+        },
+        "leak_wal_dirty": {
+          "db": {
+            "bytes": 61358080,
+            "exists": true,
+            "hits": {
+              "canary_en": 0,
+              "canary_zh": 0,
+              "canary_zh_short": 0,
+              "common_zh": 0
+            },
+            "total_hits": 0
+          },
+          "shm": {
+            "bytes": 32768,
+            "exists": true,
+            "hits": {
+              "canary_en": 0,
+              "canary_zh": 0,
+              "canary_zh_short": 0,
+              "common_zh": 0
+            },
+            "total_hits": 0
+          },
+          "total_hits": 0,
+          "wal": {
+            "bytes": 24989416,
+            "exists": true,
+            "hits": {
+              "canary_en": 0,
+              "canary_zh": 0,
+              "canary_zh_short": 0,
+              "common_zh": 0
+            },
+            "total_hits": 0
+          }
+        },
+        "page_count": 3914,
+        "page_size": 16384,
+        "path": "~/Library/Caches/brosis-build/sqlcipher/run/route-b/enc.db",
+        "queries": {
+          "exact_two_step": {
+            "max_ms": 0.031,
+            "mean_ms": 0.016,
+            "min_ms": 0.014,
+            "n": 100,
+            "p50_ms": 0.016,
+            "p95_ms": 0.018
+          },
+          "fts_match": {
+            "avg_rows": 10,
+            "max_ms": 0.553,
+            "mean_ms": 0.281,
+            "min_ms": 0.032,
+            "n": 100,
+            "p50_ms": 0.299,
+            "p95_ms": 0.38
+          },
+          "fts_match_cache128MiB": {
+            "max_ms": 0.556,
+            "mean_ms": 0.15,
+            "min_ms": 0.031,
+            "n": 100,
+            "p50_ms": 0.139,
+            "p95_ms": 0.318
+          },
+          "sessions_range": {
+            "max_ms": 0.002,
+            "mean_ms": 0.002,
+            "min_ms": 0,
+            "n": 100,
+            "p50_ms": 0.002,
+            "p95_ms": 0.002
+          },
+          "vec_knn": {
+            "avg_rows": 10,
+            "max_ms": 12.497,
+            "mean_ms": 11.545,
+            "min_ms": 11.112,
+            "n": 100,
+            "p50_ms": 11.416,
+            "p95_ms": 12.203
+          },
+          "vec_knn_cache128MiB": {
+            "max_ms": 4.125,
+            "mean_ms": 3.929,
+            "min_ms": 3.809,
+            "n": 100,
+            "p50_ms": 3.895,
+            "p95_ms": 4.08
+          },
+          "vec_knn_self_hit": 50
+        },
+        "secure_delete": 1,
+        "temp_store": 2,
+        "temp_store_check": {
+          "file": {
+            "main_db_writes": 0,
+            "plaintext_marker_hits_all_files": 73494,
+            "plaintext_marker_hits_in_temp": 73494,
+            "sort_ms": 74.821,
+            "statvfs_free_bytes_before": 1257954291712,
+            "statvfs_free_bytes_min_during": 1257930551296,
+            "statvfs_max_dip_MiB": 22.64,
+            "statvfs_max_dip_bytes": 23740416,
+            "temp_file_MiB": 22.64,
+            "temp_file_bytes": 23739278,
+            "temp_file_opens": 1,
+            "temp_store_readback": 1,
+            "wal_writes": 0
+          },
+          "memory": {
+            "main_db_writes": 0,
+            "plaintext_marker_hits_all_files": 0,
+            "plaintext_marker_hits_in_temp": 0,
+            "sort_ms": 29.645,
+            "statvfs_free_bytes_before": 1257954291712,
+            "statvfs_free_bytes_min_during": 1257954291712,
+            "statvfs_max_dip_MiB": 0,
+            "statvfs_max_dip_bytes": 0,
+            "temp_file_MiB": 0,
+            "temp_file_bytes": 0,
+            "temp_file_opens": 0,
+            "temp_store_readback": 2,
+            "wal_writes": 0
+          }
+        },
+        "wal_size_bytes": 24989416
+      },
+      "lock_cycle": {
+        "close_ms": {
+          "max_ms": 0.64,
+          "mean_ms": 0.436,
+          "min_ms": 0.349,
+          "n": 20,
+          "p50_ms": 0.417,
+          "p95_ms": 0.559
+        },
+        "cycles": 20,
+        "key_zeroized_every_cycle": true,
+        "observations_last_seen": 20519,
+        "open_ms": {
+          "max_ms": 0.783,
+          "mean_ms": 0.545,
+          "min_ms": 0.462,
+          "n": 20,
+          "p50_ms": 0.526,
+          "p95_ms": 0.646
+        },
+        "query_ms": {
+          "max_ms": 0.582,
+          "mean_ms": 0.474,
+          "min_ms": 0.431,
+          "n": 20,
+          "p50_ms": 0.457,
+          "p95_ms": 0.544
+        },
+        "reopen_after_zeroize_ok": true,
+        "write_ms": {
+          "max_ms": 0.721,
+          "mean_ms": 0.485,
+          "min_ms": 0.391,
+          "n": 20,
+          "p50_ms": 0.439,
+          "p95_ms": 0.616
+        }
+      },
+      "memory_security_requested": false,
+      "overhead": {
+        "db_bytes_encrypted": 64126976,
+        "db_bytes_plaintext": 63930368,
+        "db_size_ratio": 1.0031,
+        "insert_ms_encrypted": 2050.799,
+        "insert_ms_plaintext": 1330.129,
+        "insert_slowdown_x": 1.542,
+        "queries": {
+          "exact_two_step": {
+            "enc_p50_ms": 0.016,
+            "enc_p95_ms": 0.018,
+            "p50_slowdown_x": 1,
+            "p95_slowdown_x": 1.059,
+            "plain_p50_ms": 0.016,
+            "plain_p95_ms": 0.017
+          },
+          "fts_match": {
+            "enc_p50_ms": 0.299,
+            "enc_p95_ms": 0.38,
+            "p50_slowdown_x": 4.333,
+            "p95_slowdown_x": 4.634,
+            "plain_p50_ms": 0.069,
+            "plain_p95_ms": 0.082
+          },
+          "fts_match_cache128MiB": {
+            "enc_p50_ms": 0.139,
+            "enc_p95_ms": 0.318,
+            "p50_slowdown_x": 2.106,
+            "p95_slowdown_x": 3.347,
+            "plain_p50_ms": 0.066,
+            "plain_p95_ms": 0.095
+          },
+          "sessions_range": {
+            "enc_p50_ms": 0.002,
+            "enc_p95_ms": 0.002,
+            "p50_slowdown_x": 1,
+            "p95_slowdown_x": 1,
+            "plain_p50_ms": 0.002,
+            "plain_p95_ms": 0.002
+          },
+          "vec_knn": {
+            "enc_p50_ms": 11.416,
+            "enc_p95_ms": 12.203,
+            "p50_slowdown_x": 2.763,
+            "p95_slowdown_x": 2.834,
+            "plain_p50_ms": 4.131,
+            "plain_p95_ms": 4.306
+          },
+          "vec_knn_cache128MiB": {
+            "enc_p50_ms": 3.895,
+            "enc_p95_ms": 4.08,
+            "p50_slowdown_x": 0.944,
+            "p95_slowdown_x": 0.941,
+            "plain_p50_ms": 4.128,
+            "plain_p95_ms": 4.336
+          }
+        }
+      },
+      "passphrase_open": {
+        "kdf_iter": 256000,
+        "note": "口令密钥每次开库都要跑 PBKDF2-HMAC-SHA512 kdf_iter 轮；原始密钥跳过这一步",
+        "passphrase_open_ms": {
+          "max_ms": 79.183,
+          "mean_ms": 78.458,
+          "min_ms": 77.709,
+          "n": 5,
+          "p50_ms": 78.357,
+          "p95_ms": 79.09
+        }
+      },
+      "plaintext": {
+        "auto_vacuum": 2,
+        "dbstat": [
+          {
+            "bytes": 26050560,
+            "name": "text_versions",
+            "pages": 1590
+          },
+          {
+            "bytes": 19546112,
+            "name": "text_fts_data",
+            "pages": 1193
+          },
+          {
+            "bytes": 10551296,
+            "name": "vec_text_vector_chunks00",
+            "pages": 644
+          },
+          {
+            "bytes": 1163264,
+            "name": "observations",
+            "pages": 71
+          },
+          {
+            "bytes": 1114112,
+            "name": "sqlite_autoindex_text_versions_2",
+            "pages": 68
+          },
+          {
+            "bytes": 540672,
+            "name": "occurrences",
+            "pages": 33
+          },
+          {
+            "bytes": 491520,
+            "name": "sqlite_autoindex_text_versions_1",
+            "pages": 30
+          },
+          {
+            "bytes": 491520,
+            "name": "sqlite_autoindex_occurrences_2",
+            "pages": 30
+          },
+          {
+            "bytes": 491520,
+            "name": "sqlite_autoindex_observations_1",
+            "pages": 30
+          },
+          {
+            "bytes": 475136,
+            "name": "sqlite_autoindex_occurrences_1",
+            "pages": 29
+          },
+          {
+            "bytes": 475136,
+            "name": "idx_occ_tv",
+            "pages": 29
+          },
+          {
+            "bytes": 376832,
+            "name": "idx_obs_url_ts",
+            "pages": 23
+          },
+          {
+            "bytes": 376832,
+            "name": "idx_obs_app_ts",
+            "pages": 23
+          },
+          {
+            "bytes": 344064,
+            "name": "vec_text_chunks",
+            "pages": 21
+          },
+          {
+            "bytes": 344064,
+            "name": "idx_obs_ts",
+            "pages": 21
+          },
+          {
+            "bytes": 278528,
+            "name": "vec_text_rowids",
+            "pages": 17
+          },
+          {
+            "bytes": 278528,
+            "name": "text_fts_docsize",
+            "pages": 17
+          },
+          {
+            "bytes": 81920,
+            "name": "text_fts_idx",
+            "pages": 5
+          },
+          {
+            "bytes": 65536,
+            "name": "sessions",
+            "pages": 4
+          },
+          {
+            "bytes": 49152,
+            "name": "urls",
+            "pages": 3
+          },
+          {
+            "bytes": 49152,
+            "name": "sqlite_autoindex_sessions_1",
+            "pages": 3
+          },
+          {
+            "bytes": 49152,
+            "name": "idx_sessions_range",
+            "pages": 3
+          },
+          {
+            "bytes": 16384,
+            "name": "windows",
+            "pages": 1
+          },
+          {
+            "bytes": 16384,
+            "name": "vec_text_info",
+            "pages": 1
+          },
+          {
+            "bytes": 16384,
+            "name": "text_fts_config",
+            "pages": 1
+          },
+          {
+            "bytes": 16384,
+            "name": "sqlite_sequence",
+            "pages": 1
+          },
+          {
+            "bytes": 16384,
+            "name": "sqlite_schema",
+            "pages": 1
+          },
+          {
+            "bytes": 16384,
+            "name": "sqlite_autoindex_windows_1",
+            "pages": 1
+          },
+          {
+            "bytes": 16384,
+            "name": "sqlite_autoindex_vec_text_vector_chunks00_1",
+            "pages": 1
+          },
+          {
+            "bytes": 16384,
+            "name": "sqlite_autoindex_vec_text_info_1",
+            "pages": 1
+          },
+          {
+            "bytes": 16384,
+            "name": "sqlite_autoindex_urls_1",
+            "pages": 1
+          },
+          {
+            "bytes": 16384,
+            "name": "sqlite_autoindex_apps_1",
+            "pages": 1
+          },
+          {
+            "bytes": 16384,
+            "name": "idx_windows_title",
+            "pages": 1
+          },
+          {
+            "bytes": 16384,
+            "name": "idx_urls_host",
+            "pages": 1
+          },
+          {
+            "bytes": 16384,
+            "name": "apps",
+            "pages": 1
+          }
+        ],
+        "dbstat_ms": 6.612,
+        "encrypted": false,
+        "file_sizes": {
+          "db": 63930368,
+          "db_MiB": 60.97,
+          "shm": 32768,
+          "wal": 0
+        },
+        "freelist_count": 0,
+        "fts_delete_check": {
+          "contentless_delete_works": true,
+          "fts_delete_msg": "not an error",
+          "fts_delete_rc": 0,
+          "fts_integrity_check_rc": 0,
+          "matches_after": 0,
+          "matches_before": 1,
+          "token": "docid9999"
+        },
+        "insert_ms": 1330.129,
+        "insert_rows_per_s": 15036.1,
+        "journal_mode": "wal",
+        "leak_after_close": {
+          "db": {
+            "bytes": 63930368,
+            "exists": true,
+            "hits": {
+              "canary_en": 20499,
+              "canary_zh": 20499,
+              "canary_zh_short": 20505,
+              "common_zh": 12044
+            },
+            "total_hits": 73547
+          },
+          "shm": {
+            "bytes": 32768,
+            "exists": true,
+            "hits": {
+              "canary_en": 0,
+              "canary_zh": 0,
+              "canary_zh_short": 0,
+              "common_zh": 0
+            },
+            "total_hits": 0
+          },
+          "total_hits": 73547,
+          "wal": {
+            "bytes": 0,
+            "exists": true,
+            "hits": {
+              "canary_en": 0,
+              "canary_zh": 0,
+              "canary_zh_short": 0,
+              "common_zh": 0
+            },
+            "total_hits": 0
+          }
+        },
+        "leak_wal_dirty": {
+          "db": {
+            "bytes": 61210624,
+            "exists": true,
+            "hits": {
+              "canary_en": 19000,
+              "canary_zh": 19000,
+              "canary_zh_short": 19006,
+              "common_zh": 11174
+            },
+            "total_hits": 68180
+          },
+          "shm": {
+            "bytes": 32768,
+            "exists": true,
+            "hits": {
+              "canary_en": 0,
+              "canary_zh": 0,
+              "canary_zh_short": 0,
+              "common_zh": 0
+            },
+            "total_hits": 0
+          },
+          "total_hits": 78435,
+          "wal": {
+            "bytes": 25022232,
+            "exists": true,
+            "hits": {
+              "canary_en": 2857,
+              "canary_zh": 2857,
+              "canary_zh_short": 2869,
+              "common_zh": 1672
+            },
+            "total_hits": 10255
+          }
+        },
+        "page_count": 3902,
+        "page_size": 16384,
+        "path": "~/Library/Caches/brosis-build/sqlcipher/run/route-b/plain.db",
+        "queries": {
+          "exact_two_step": {
+            "max_ms": 0.018,
+            "mean_ms": 0.016,
+            "min_ms": 0.014,
+            "n": 100,
+            "p50_ms": 0.016,
+            "p95_ms": 0.017
+          },
+          "fts_match": {
+            "avg_rows": 10,
+            "max_ms": 0.189,
+            "mean_ms": 0.068,
+            "min_ms": 0.033,
+            "n": 100,
+            "p50_ms": 0.069,
+            "p95_ms": 0.082
+          },
+          "fts_match_cache128MiB": {
+            "max_ms": 0.159,
+            "mean_ms": 0.068,
+            "min_ms": 0.032,
+            "n": 100,
+            "p50_ms": 0.066,
+            "p95_ms": 0.095
+          },
+          "sessions_range": {
+            "max_ms": 0.002,
+            "mean_ms": 0.002,
+            "min_ms": 0,
+            "n": 100,
+            "p50_ms": 0.002,
+            "p95_ms": 0.002
+          },
+          "vec_knn": {
+            "avg_rows": 10,
+            "max_ms": 4.365,
+            "mean_ms": 4.143,
+            "min_ms": 4.019,
+            "n": 100,
+            "p50_ms": 4.131,
+            "p95_ms": 4.306
+          },
+          "vec_knn_cache128MiB": {
+            "max_ms": 5.41,
+            "mean_ms": 4.166,
+            "min_ms": 4.034,
+            "n": 100,
+            "p50_ms": 4.128,
+            "p95_ms": 4.336
+          },
+          "vec_knn_self_hit": 50
+        },
+        "secure_delete": 1,
+        "temp_store": 2,
+        "temp_store_check": {
+          "file": {
+            "main_db_writes": 0,
+            "plaintext_marker_hits_all_files": 73494,
+            "plaintext_marker_hits_in_temp": 73494,
+            "sort_ms": 52.929,
+            "statvfs_free_bytes_before": 1257954267136,
+            "statvfs_free_bytes_min_during": 1257930526720,
+            "statvfs_max_dip_MiB": 22.64,
+            "statvfs_max_dip_bytes": 23740416,
+            "temp_file_MiB": 22.64,
+            "temp_file_bytes": 23739278,
+            "temp_file_opens": 1,
+            "temp_store_readback": 1,
+            "wal_writes": 0
+          },
+          "memory": {
+            "main_db_writes": 0,
+            "plaintext_marker_hits_all_files": 0,
+            "plaintext_marker_hits_in_temp": 0,
+            "sort_ms": 11.007,
+            "statvfs_free_bytes_before": 1257954267136,
+            "statvfs_free_bytes_min_during": 1257954267136,
+            "statvfs_max_dip_MiB": 0,
+            "statvfs_max_dip_bytes": 0,
+            "temp_file_MiB": 0,
+            "temp_file_bytes": 0,
+            "temp_file_opens": 0,
+            "temp_store_readback": 2,
+            "wal_writes": 0
+          }
+        },
+        "wal_size_bytes": 25022232
+      },
+      "route": "b",
+      "rows": 20000,
+      "seed": "20260907",
+      "sqlite_tmpdir": "~/Library/Caches/brosis-build/sqlcipher/run/route-b/sqlite-tmp",
+      "task": "T8 / E6 SQLCipher 构建与密钥、数据边界验证",
+      "tmpdir_after_all": {
+        "exists": true,
+        "file_count": 0,
+        "files": [],
+        "total_hits": 0
+      },
+      "vec_auto_extension_rc": 0,
+      "vfs_shim_rc": 0,
+      "work_dir": "~/Library/Caches/brosis-build/sqlcipher/run/route-b",
+      "wrong_key": {
+        "correct_key": {
+          "note": "错误密钥尝试之后仍能用正确密钥打开，说明失败的解锁不会破坏库",
+          "observations": 20520,
+          "ok": true
+        },
+        "no_key": {
+          "failed_as_expected": true,
+          "message": "file is not a database",
+          "rc": 26,
+          "rc_name": "SQLITE_NOTADB"
+        },
+        "wrong_key": {
+          "failed_as_expected": true,
+          "message": "file is not a database",
+          "rc": 26,
+          "rc_name": "SQLITE_NOTADB"
+        }
+      }
+    }
+  },
+  "task": "T8 / E6 SQLCipher 构建与密钥、数据边界验证",
+  "unit_convention": "MB 与 GB 一律按 2^20 / 2^30（写作 MiB / GiB）；毫秒为 wall clock，CLOCK_UPTIME_RAW"
+}

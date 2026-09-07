@@ -1,0 +1,20 @@
+# macOS / 编辑器
+.DS_Store
+.swiftpm/
+*.xcuserstate
+
+# 构建产物一律不进项目目录（约定：~/Library/Caches/brosis-build/<任务>/）
+.build/
+DerivedData/
+__pycache__/
+*.pyc
+.venv/
+*.icloud
+
+# 指向本机缓存目录的符号链接，由 tools/proto/sqlcipher/setup.sh 重建
+tools/proto/sqlcipher/RouteB/SQLCipher
+tools/proto/sqlcipher/Sources/CSqliteVec
+
+# 不进公开仓库：计划 / 交接文档与探针采集报告只留在本地（含公司与机器信息）
+docs/
+tools/probe/results/

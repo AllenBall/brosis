@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>com.brosis.agent</string>
+	<!-- BundleProgram 是相对 .app 包根的路径；SMAppService.agent(plistName:) 要求 plist 放在
+	     Contents/Library/LaunchAgents/ 下，且 app 必须已签名。 -->
+	<key>BundleProgram</key>
+	<string>Contents/MacOS/brosis</string>
+	<key>AssociatedBundleIdentifiers</key>
+	<array>
+		<string>com.brosis.app</string>
+	</array>
+	<key>RunAtLoad</key>
+	<true/>
+	<!-- 只在有图形会话时加载：TCC 授权只在 Aqua 会话里有意义 -->
+	<key>LimitLoadToSessionType</key>
+	<string>Aqua</string>
+	<key>ProcessType</key>
+	<string>Background</string>
+	<key>LowPriorityBackgroundIO</key>
+	<true/>
+	<!-- 崩溃自动拉起；用户从菜单栏正常退出（exit 0）时不拉起 -->
+	<key>KeepAlive</key>
+	<dict>
+		<key>SuccessfulExit</key>
+		<false/>
+	</dict>
+</dict>
+</plist>

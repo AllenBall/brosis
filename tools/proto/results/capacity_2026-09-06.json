@@ -1,0 +1,3216 @@
+{
+ "env": {
+  "日期": "2026-09-06 23:44 CST",
+  "Python": "3.14.7",
+  "SQLite 库版本（Python 链接）": "3.53.4",
+  "平台": "macOS-26.6.2-arm64-arm-64bit-Mach-O / arm64",
+  "sqlite3 CLI": "3.51.0",
+  "构建目录": "~/Library/Caches/brosis-build/proto"
+ },
+ "args": {
+  "cold_worker": null,
+  "temp_worker": null,
+  "scales": "1,3,12",
+  "days_per_month": 30,
+  "seed": 20260906,
+  "build_dir": "~/Library/Caches/brosis-build/proto",
+  "fts": "bigram",
+  "cold_rounds": 10,
+  "hot_reps": 20,
+  "sensitivity": true,
+  "max_build_min": 22.0,
+  "date": "2026-09-06",
+  "report": null,
+  "report_only": false
+ },
+ "results": [
+  {
+   "tag": "1m",
+   "months": 1,
+   "days": 30,
+   "fts_scheme": "bigram",
+   "page_size": 4096,
+   "db_path": "~/Library/Caches/brosis-build/proto/capacity_1m.db",
+   "gen": {
+    "days": 30,
+    "per_day": 8640,
+    "device": "dev-mbp16",
+    "seed": 20260906,
+    "avg_chars_target": 1500,
+    "new_ratio": 0.3,
+    "fts_scheme": "bigram",
+    "observations": 259200,
+    "occurrences": 224316,
+    "text_versions": 77794,
+    "sessions": 6840,
+    "reused": 146522,
+    "thumb_refs": 64641,
+    "app_switches": 6840,
+    "text_chars": 119019816,
+    "text_bytes": 225458504,
+    "cjk_chars": 48246237,
+    "fts_body_bytes": 393815851,
+    "build_s": 51.8672304579959,
+    "finalize_s": 0.14818120800191537,
+    "textgen_s": 37.91415570954268,
+    "page_size": 4096,
+    "path": "~/Library/Caches/brosis-build/proto/capacity_1m.db"
+   },
+   "dbstat_raw": {
+    "app_policies": {
+     "bytes": 4096,
+     "cells": 8
+    },
+    "apps": {
+     "bytes": 4096,
+     "cells": 8
+    },
+    "deletions": {
+     "bytes": 4096,
+     "cells": 0
+    },
+    "files": {
+     "bytes": 4096,
+     "cells": 5
+    },
+    "grants": {
+     "bytes": 4096,
+     "cells": 0
+    },
+    "idx_files_path": {
+     "bytes": 4096,
+     "cells": 5
+    },
+    "idx_jobs_state": {
+     "bytes": 4096,
+     "cells": 0
+    },
+    "idx_obs_app_ts": {
+     "bytes": 4849664,
+     "cells": 259200
+    },
+    "idx_obs_deleted": {
+     "bytes": 4096,
+     "cells": 0
+    },
+    "idx_obs_live": {
+     "bytes": 7397376,
+     "cells": 259200
+    },
+    "idx_obs_ts": {
+     "bytes": 4431872,
+     "cells": 259200
+    },
+    "idx_occ_obs": {
+     "bytes": 5611520,
+     "cells": 224316
+    },
+    "idx_occ_tv": {
+     "bytes": 5300224,
+     "cells": 224316
+    },
+    "idx_sessions_range": {
+     "bytes": 245760,
+     "cells": 6840
+    },
+    "idx_urls_canonical": {
+     "bytes": 4096,
+     "cells": 5
+    },
+    "idx_urls_host": {
+     "bytes": 4096,
+     "cells": 5
+    },
+    "idx_windows_title": {
+     "bytes": 4096,
+     "cells": 20
+    },
+    "jobs": {
+     "bytes": 4096,
+     "cells": 0
+    },
+    "ledgers": {
+     "bytes": 1986560,
+     "cells": 58
+    },
+    "meta": {
+     "bytes": 4096,
+     "cells": 5
+    },
+    "observations": {
+     "bytes": 35344384,
+     "cells": 267805
+    },
+    "occurrences": {
+     "bytes": 15704064,
+     "cells": 228138
+    },
+    "sessions": {
+     "bytes": 2117632,
+     "cells": 7353
+    },
+    "sqlite_autoindex_app_policies_1": {
+     "bytes": 4096,
+     "cells": 8
+    },
+    "sqlite_autoindex_apps_1": {
+     "bytes": 4096,
+     "cells": 8
+    },
+    "sqlite_autoindex_deletions_1": {
+     "bytes": 4096,
+     "cells": 0
+    },
+    "sqlite_autoindex_files_1": {
+     "bytes": 4096,
+     "cells": 5
+    },
+    "sqlite_autoindex_grants_1": {
+     "bytes": 4096,
+     "cells": 0
+    },
+    "sqlite_autoindex_ledgers_1": {
+     "bytes": 4096,
+     "cells": 30
+    },
+    "sqlite_autoindex_ledgers_2": {
+     "bytes": 4096,
+     "cells": 30
+    },
+    "sqlite_autoindex_meta_1": {
+     "bytes": 4096,
+     "cells": 5
+    },
+    "sqlite_autoindex_observations_1": {
+     "bytes": 6483968,
+     "cells": 259200
+    },
+    "sqlite_autoindex_occurrences_1": {
+     "bytes": 5603328,
+     "cells": 224316
+    },
+    "sqlite_autoindex_occurrences_2": {
+     "bytes": 5869568,
+     "cells": 224316
+    },
+    "sqlite_autoindex_sessions_1": {
+     "bytes": 159744,
+     "cells": 6840
+    },
+    "sqlite_autoindex_text_versions_1": {
+     "bytes": 1892352,
+     "cells": 77794
+    },
+    "sqlite_autoindex_text_versions_2": {
+     "bytes": 7491584,
+     "cells": 77794
+    },
+    "sqlite_autoindex_urls_1": {
+     "bytes": 4096,
+     "cells": 5
+    },
+    "sqlite_autoindex_windows_1": {
+     "bytes": 4096,
+     "cells": 20
+    },
+    "sqlite_schema": {
+     "bytes": 16384,
+     "cells": 52
+    },
+    "sqlite_stat1": {
+     "bytes": 4096,
+     "cells": 29
+    },
+    "sqlite_stat4": {
+     "bytes": 49152,
+     "cells": 446
+    },
+    "text_fts_config": {
+     "bytes": 4096,
+     "cells": 1
+    },
+    "text_fts_data": {
+     "bytes": 175943680,
+     "cells": 89094
+    },
+    "text_fts_docsize": {
+     "bytes": 1032192,
+     "cells": 78044
+    },
+    "text_fts_idx": {
+     "bytes": 233472,
+     "cells": 13511
+    },
+    "text_versions": {
+     "bytes": 318590976,
+     "cells": 153320
+    },
+    "urls": {
+     "bytes": 4096,
+     "cells": 5
+    },
+    "windows": {
+     "bytes": 4096,
+     "cells": 20
+    }
+   },
+   "dbstat_groups": {
+    "策略与运行时（meta/jobs/grants/app_policies/deletions）": {
+     "data": 20480,
+     "index": 20480
+    },
+    "规范化对象（apps/windows/urls/files）": {
+     "data": 16384,
+     "index": 32768
+    },
+    "observations（观察）": {
+     "data": 35344384,
+     "index": 23166976
+    },
+    "occurrences（出现记录）": {
+     "data": 15704064,
+     "index": 22384640
+    },
+    "sessions（会话）": {
+     "data": 2117632,
+     "index": 405504
+    },
+    "ledgers（日台账）": {
+     "data": 1986560,
+     "index": 8192
+    },
+    "text_versions（原文）": {
+     "data": 318590976,
+     "index": 9383936
+    },
+    "sqlite_schema（表定义）": {
+     "data": 16384,
+     "index": 0
+    },
+    "sqlite_stat1/stat4（ANALYZE 统计）": {
+     "data": 53248,
+     "index": 0
+    },
+    "text_fts（全文索引）": {
+     "data": 0,
+     "index": 177213440
+    }
+   },
+   "payload_bytes": 225458504,
+   "fts_rows": 77794,
+   "freelist_pages": 478,
+   "freelist_bytes": 1957888,
+   "integrity": "ok",
+   "files": {
+    "主库": 609169408,
+    "WAL": 0,
+    "SHM": 0
+   },
+   "total_file_bytes": 609169408,
+   "wal_peak_bytes": 51162192,
+   "shm_peak_bytes": 131072,
+   "tmp_peak_build_bytes": 0,
+   "build_s": 51.8672304579959,
+   "finalize_s": 0.14818120800191537,
+   "temp_ops": [
+    {
+     "op": "ANALYZE 重算统计",
+     "sql": "ANALYZE",
+     "ms": 202.0600420073606,
+     "dir_peak_bytes": 0,
+     "fs_drop_peak_bytes": 0,
+     "db_delta_bytes": 0,
+     "peak_bytes": 0,
+     "ok": true,
+     "err": ""
+    },
+    {
+     "op": "全表排序 text_versions.sha256（外部归并）",
+     "sql": "SELECT sha256 FROM text_versions ORDER BY sha256",
+     "ms": 126.67612500081304,
+     "dir_peak_bytes": 0,
+     "fs_drop_peak_bytes": 5332992,
+     "db_delta_bytes": 0,
+     "peak_bytes": 5332992,
+     "ok": true,
+     "err": ""
+    },
+    {
+     "op": "全表排序 text_versions.text（最坏情况：排序键带正文）",
+     "sql": "SELECT vrow FROM text_versions ORDER BY text",
+     "ms": 414.17050000745803,
+     "dir_peak_bytes": 0,
+     "fs_drop_peak_bytes": 233353216,
+     "db_delta_bytes": 0,
+     "peak_bytes": 233353216,
+     "ok": true,
+     "err": ""
+    },
+    {
+     "op": "按应用 + 时间分组聚合（GROUP BY 溢出）",
+     "sql": "SELECT app_id, date(ts/1000,'unixepoch'), COUNT(*) FROM observations GROUP BY 1, 2 ORDER BY 3 DESC",
+     "ms": 115.24504100088961,
+     "dir_peak_bytes": 0,
+     "fs_drop_peak_bytes": 5742592,
+     "db_delta_bytes": 0,
+     "peak_bytes": 5742592,
+     "ok": true,
+     "err": ""
+    },
+    {
+     "op": "incremental_vacuum 回收",
+     "sql": "PRAGMA incremental_vacuum",
+     "ms": 63.41524999879766,
+     "dir_peak_bytes": 0,
+     "fs_drop_peak_bytes": 0,
+     "db_delta_bytes": -1961984,
+     "peak_bytes": 0,
+     "ok": true,
+     "err": ""
+    },
+    {
+     "op": "wal_checkpoint(TRUNCATE)",
+     "sql": "PRAGMA wal_checkpoint(TRUNCATE)",
+     "ms": 56.648167010280304,
+     "dir_peak_bytes": 0,
+     "fs_drop_peak_bytes": 32768,
+     "db_delta_bytes": 0,
+     "peak_bytes": 32768,
+     "ok": true,
+     "err": ""
+    }
+   ],
+   "tmp_peak_ops_bytes": 233353216,
+   "latency": {
+    "exact_host": {
+     "cat": "精确字段",
+     "label": "host 等值 → 观察",
+     "cold_p50": 0.6737499934388325,
+     "cold_p95": 0.7498339982703328,
+     "hot_p50": 0.09641700307838619,
+     "hot_p95": 0.10466700769029558,
+     "rows": 20,
+     "cold_n": 10,
+     "hot_n": 20,
+     "error": null
+    },
+    "exact_url_prefix": {
+     "cat": "精确字段",
+     "label": "canonical_url 前缀 → 观察",
+     "cold_p50": 0.6717910000588745,
+     "cold_p95": 0.8343750087078661,
+     "hot_p50": 0.12270899605937302,
+     "hot_p95": 0.1271250075660646,
+     "rows": 20,
+     "cold_n": 10,
+     "hot_n": 20,
+     "error": null
+    },
+    "exact_path": {
+     "cat": "精确字段",
+     "label": "files.path 子串 → 观察",
+     "cold_p50": 0.5256669974187389,
+     "cold_p95": 0.6260829977691174,
+     "hot_p50": 0.04312499368097633,
+     "hot_p95": 0.04616699879989028,
+     "rows": 20,
+     "cold_n": 10,
+     "hot_n": 20,
+     "error": null
+    },
+    "exact_title": {
+     "cat": "精确字段",
+     "label": "窗口标题前缀 → 观察",
+     "cold_p50": 0.5415409978013486,
+     "cold_p95": 0.610999995842576,
+     "hot_p50": 0.037124991649761796,
+     "hot_p95": 0.03825000021606684,
+     "rows": 20,
+     "cold_n": 10,
+     "hot_n": 20,
+     "error": null
+    },
+    "exact_evidence": {
+     "cat": "精确字段",
+     "label": "get_evidence 主键点查 20 条",
+     "cold_p50": 0.6717920041410252,
+     "cold_p95": 0.898750004125759,
+     "hot_p50": 0.05874999624211341,
+     "hot_p95": 0.06320899410638958,
+     "rows": 20,
+     "cold_n": 10,
+     "hot_n": 20,
+     "error": null
+    },
+    "fts_采集覆盖率": {
+     "cat": "FTS 检索",
+     "label": "中文三字以上（常见词）：`采集覆盖率`",
+     "cold_p50": 19.74000000336673,
+     "cold_p95": 20.161458000075072,
+     "hot_p50": 21.957082994049415,
+     "hot_p95": 22.441709006670862,
+     "rows": 20,
+     "cold_n": 10,
+     "hot_n": 20,
+     "error": null
+    },
+    "fts_蟠桃": {
+     "cat": "FTS 检索",
+     "label": "中文两字词（稀有，植入）：`蟠桃`",
+     "cold_p50": 1.8461669969838113,
+     "cold_p95": 2.0284159982111305,
+     "hot_p50": 1.0194589995080605,
+     "hot_p95": 1.168832997791469,
+     "rows": 20,
+     "cold_n": 10,
+     "hot_n": 20,
+     "error": null
+    },
+    "fts_蟠桃调度器": {
+     "cat": "FTS 检索",
+     "label": "中文四字（稀有，植入）：`蟠桃调度器`",
+     "cold_p50": 2.0966669981135055,
+     "cold_p95": 2.5807500060182065,
+     "hot_p50": 1.3975420006318018,
+     "hot_p95": 1.5484580071642995,
+     "rows": 20,
+     "cold_n": 10,
+     "hot_n": 20,
+     "error": null
+    },
+    "fts_checkpoint": {
+     "cat": "FTS 检索",
+     "label": "英文单词（常见）：`checkpoint`",
+     "cold_p50": 14.507416999549605,
+     "cold_p95": 14.804332997300662,
+     "hot_p50": 17.11283299664501,
+     "hot_p95": 17.891166993649676,
+     "rows": 20,
+     "cold_n": 10,
+     "hot_n": 20,
+     "error": null
+    },
+    "fts_zygomorphic": {
+     "cat": "FTS 检索",
+     "label": "英文单词（稀有，植入）：`zygomorphic`",
+     "cold_p50": 1.6051249986048788,
+     "cold_p95": 1.7682920006336644,
+     "hot_p50": 0.7919170020613819,
+     "hot_p95": 0.8617499988758937,
+     "rows": 20,
+     "cold_n": 10,
+     "hot_n": 20,
+     "error": null
+    },
+    "fts_frobnicate_widget": {
+     "cat": "FTS 检索",
+     "label": "代码标识符（稀有，植入）：`frobnicate_widget`",
+     "cold_p50": 1.8095840059686452,
+     "cold_p95": 1.973499995074235,
+     "hot_p50": 0.987208986771293,
+     "hot_p95": 1.153165998402983,
+     "rows": 20,
+     "cold_n": 10,
+     "hot_n": 20,
+     "error": null
+    },
+    "fts_E1042": {
+     "cat": "FTS 检索",
+     "label": "数字/错误码（常见）：`E1042`",
+     "cold_p50": 9.946167003363371,
+     "cold_p95": 10.233084001811221,
+     "hot_p50": 11.261540988925844,
+     "hot_p95": 11.395249995985068,
+     "rows": 20,
+     "cold_n": 10,
+     "hot_n": 20,
+     "error": null
+    },
+    "fts_FTS5_索引": {
+     "cat": "FTS 检索",
+     "label": "中英混排短语（常见）：`FTS5 索引`",
+     "cold_p50": 18.809249988407828,
+     "cold_p95": 19.193708008970134,
+     "hot_p50": 20.78291699581314,
+     "hot_p95": 20.977249994757585,
+     "rows": 20,
+     "cold_n": 10,
+     "hot_n": 20,
+     "error": null
+    },
+    "fts_sqlite_org": {
+     "cat": "FTS 检索",
+     "label": "URL/域名：`sqlite.org`",
+     "cold_p50": 10.746125000878237,
+     "cold_p95": 11.415667002438568,
+     "hot_p50": 11.741875001462176,
+     "hot_p95": 11.901999998372048,
+     "rows": 40,
+     "cold_n": 10,
+     "hot_n": 20,
+     "error": null
+    },
+    "fts_tools_bench_fts_compare_py": {
+     "cat": "FTS 检索",
+     "label": "文件路径：`tools/bench/fts_compare.py`",
+     "cold_p50": 11.721415998181328,
+     "cold_p95": 11.991624996881,
+     "hot_p50": 12.268791993847117,
+     "hot_p95": 12.969999996130355,
+     "rows": 20,
+     "cold_n": 10,
+     "hot_n": 20,
+     "error": null
+    },
+    "fts_帧": {
+     "cat": "FTS 检索",
+     "label": "单个汉字（走扫描回退）：`帧`",
+     "cold_p50": 0.8157499978551641,
+     "cold_p95": 1.0621249966789037,
+     "hot_p50": 0.1673340011620894,
+     "hot_p95": 0.1924579992191866,
+     "rows": 20,
+     "cold_n": 10,
+     "hot_n": 20,
+     "error": null
+    },
+    "ctx_by_app": {
+     "cat": "get_context 聚合",
+     "label": "按应用聚合最近 24 h",
+     "cold_p50": 2.199000009568408,
+     "cold_p95": 2.439000003505498,
+     "hot_p50": 1.5323749976232648,
+     "hot_p95": 1.5894579992163926,
+     "rows": 8,
+     "cold_n": 10,
+     "hot_n": 20,
+     "error": null
+    },
+    "ctx_sessions": {
+     "cat": "get_context 聚合",
+     "label": "会话时长汇总最近 24 h",
+     "cold_p50": 1.074583997251466,
+     "cold_p95": 1.148333991295658,
+     "hot_p50": 0.4725829930976033,
+     "hot_p95": 0.5143329908605665,
+     "rows": 8,
+     "cold_n": 10,
+     "hot_n": 20,
+     "error": null
+    },
+    "ctx_snippets": {
+     "cat": "get_context 聚合",
+     "label": "取窗口内最近 30 段正文",
+     "cold_p50": 0.651540991384536,
+     "cold_p95": 0.720124997314997,
+     "hot_p50": 0.07158299558795989,
+     "hot_p95": 0.0746669975342229,
+     "rows": 30,
+     "cold_n": 10,
+     "hot_n": 20,
+     "error": null
+    },
+    "ctx_full": {
+     "cat": "get_context 聚合",
+     "label": "get_context(hours=24) 三段合计",
+     "cold_p50": 2.9100829997332767,
+     "cold_p95": 3.1513330031884834,
+     "hot_p50": 2.292875011335127,
+     "hot_p95": 2.4421249981969595,
+     "rows": 46,
+     "cold_n": 10,
+     "hot_n": 20,
+     "error": null
+    },
+    "app_count": {
+     "cat": "app + 时间范围扫描",
+     "label": "计数（最近 7 天）",
+     "cold_p50": 1.4303749921964481,
+     "cold_p95": 1.9728330080397427,
+     "hot_p50": 0.8044589922064915,
+     "hot_p95": 0.8475409995298833,
+     "rows": 1,
+     "cold_n": 10,
+     "hot_n": 20,
+     "error": null
+    },
+    "app_text": {
+     "cat": "app + 时间范围扫描",
+     "label": "取 200 条并连正文",
+     "cold_p50": 0.9774170030141249,
+     "cold_p95": 1.0572910105111077,
+     "hot_p50": 0.26266698841936886,
+     "hot_p95": 0.2896249934565276,
+     "rows": 200,
+     "cold_n": 10,
+     "hot_n": 20,
+     "error": null
+    },
+    "app_scan": {
+     "cat": "app + 时间范围扫描",
+     "label": "范围内 LIKE 扫描正文",
+     "cold_p50": 0.730249987100251,
+     "cold_p95": 0.8503749995725229,
+     "hot_p50": 0.19574999168980867,
+     "hot_p95": 0.2181250019930303,
+     "rows": 20,
+     "cold_n": 10,
+     "hot_n": 20,
+     "error": null
+    },
+    "ftsrid_采集覆盖率": {
+     "cat": "FTS 检索（rowid 倒序取候选）",
+     "label": "同上但按 rowid 倒序：`采集覆盖率`",
+     "cold_p50": 2.099624995025806,
+     "cold_p95": 2.2324589954223484,
+     "hot_p50": 1.3146670098649338,
+     "hot_p95": 1.3773329992545769,
+     "rows": 20,
+     "cold_n": 10,
+     "hot_n": 20,
+     "error": null
+    },
+    "ftsrid_checkpoint": {
+     "cat": "FTS 检索（rowid 倒序取候选）",
+     "label": "同上但按 rowid 倒序：`checkpoint`",
+     "cold_p50": 1.3536659971578047,
+     "cold_p95": 1.5746249991934747,
+     "hot_p50": 0.6267499993555248,
+     "hot_p95": 0.6677909987047315,
+     "rows": 20,
+     "cold_n": 10,
+     "hot_n": 20,
+     "error": null
+    },
+    "ftsrid_tools_bench_fts_compare_py": {
+     "cat": "FTS 检索（rowid 倒序取候选）",
+     "label": "同上但按 rowid 倒序：`tools/bench/fts_compare.py`",
+     "cold_p50": 2.0251670066500083,
+     "cold_p95": 2.160374991944991,
+     "hot_p50": 1.2756249925587326,
+     "hot_p95": 1.385791998472996,
+     "rows": 20,
+     "cold_n": 10,
+     "hot_n": 20,
+     "error": null
+    },
+    "ctx_sessions_bounded": {
+     "cat": "get_context 聚合",
+     "label": "会话时长汇总最近 24 h（start 补下界）",
+     "cold_p50": 0.5062499985797331,
+     "cold_p95": 0.636500000837259,
+     "hot_p50": 0.06650001159869134,
+     "hot_p95": 0.06704199768137187,
+     "rows": 8,
+     "cold_n": 10,
+     "hot_n": 20,
+     "error": null
+    },
+    "ftswin_采集覆盖率": {
+     "cat": "FTS 检索（rowid 倒序 + 限最近 30 天）",
+     "label": "再加 rowid 下界：`采集覆盖率`",
+     "cold_p50": 2.0149579941062257,
+     "cold_p95": 2.0838750060647726,
+     "hot_p50": 1.2837499962188303,
+     "hot_p95": 1.36900000507012,
+     "rows": 20,
+     "cold_n": 10,
+     "hot_n": 20,
+     "error": null
+    },
+    "ftswin_tools_bench_fts_compare_py": {
+     "cat": "FTS 检索（rowid 倒序 + 限最近 30 天）",
+     "label": "再加 rowid 下界：`tools/bench/fts_compare.py`",
+     "cold_p50": 1.9292500073788688,
+     "cold_p95": 2.188958998885937,
+     "hot_p50": 1.2617909960681573,
+     "hot_p95": 1.4101670094532892,
+     "rows": 20,
+     "cold_n": 10,
+     "hot_n": 20,
+     "error": null
+    },
+    "exact_path_miss_join": {
+     "cat": "精确字段",
+     "label": "路径命中 0 行：单条 JOIN + ORDER BY ts LIMIT",
+     "cold_p50": 40.969207999296486,
+     "cold_p95": 42.24083400913514,
+     "hot_p50": 40.71174999990035,
+     "hot_p95": 40.968708010041155,
+     "rows": 0,
+     "cold_n": 10,
+     "hot_n": 20,
+     "error": null
+    },
+    "exact_path_miss_2step": {
+     "cat": "精确字段",
+     "label": "路径命中 0 行：两步式（先查 files，空集早返回）",
+     "cold_p50": 0.48795799375511706,
+     "cold_p95": 0.6246659904718399,
+     "hot_p50": 0.004375004209578037,
+     "hot_p95": 0.0061250029830262065,
+     "rows": 0,
+     "cold_n": 10,
+     "hot_n": 20,
+     "error": null
+    }
+   }
+  },
+  {
+   "tag": "3m",
+   "months": 3,
+   "days": 90,
+   "fts_scheme": "bigram",
+   "page_size": 4096,
+   "db_path": "~/Library/Caches/brosis-build/proto/capacity_3m.db",
+   "gen": {
+    "days": 90,
+    "per_day": 8640,
+    "device": "dev-mbp16",
+    "seed": 20260906,
+    "avg_chars_target": 1500,
+    "new_ratio": 0.3,
+    "fts_scheme": "bigram",
+    "observations": 777600,
+    "occurrences": 672722,
+    "text_versions": 232926,
+    "sessions": 20449,
+    "reused": 439796,
+    "thumb_refs": 194643,
+    "app_switches": 20449,
+    "text_chars": 356322996,
+    "text_bytes": 675114030,
+    "cjk_chars": 144501176,
+    "fts_body_bytes": 1179363748,
+    "build_s": 163.42822716699447,
+    "finalize_s": 0.4413566669973079,
+    "textgen_s": 113.72092921283911,
+    "page_size": 4096,
+    "path": "~/Library/Caches/brosis-build/proto/capacity_3m.db"
+   },
+   "dbstat_raw": {
+    "app_policies": {
+     "bytes": 4096,
+     "cells": 8
+    },
+    "apps": {
+     "bytes": 4096,
+     "cells": 8
+    },
+    "deletions": {
+     "bytes": 4096,
+     "cells": 0
+    },
+    "files": {
+     "bytes": 4096,
+     "cells": 5
+    },
+    "grants": {
+     "bytes": 4096,
+     "cells": 0
+    },
+    "idx_files_path": {
+     "bytes": 4096,
+     "cells": 5
+    },
+    "idx_jobs_state": {
+     "bytes": 4096,
+     "cells": 0
+    },
+    "idx_obs_app_ts": {
+     "bytes": 14606336,
+     "cells": 777600
+    },
+    "idx_obs_deleted": {
+     "bytes": 4096,
+     "cells": 0
+    },
+    "idx_obs_live": {
+     "bytes": 22261760,
+     "cells": 777600
+    },
+    "idx_obs_ts": {
+     "bytes": 13361152,
+     "cells": 777600
+    },
+    "idx_occ_obs": {
+     "bytes": 16957440,
+     "cells": 672722
+    },
+    "idx_occ_tv": {
+     "bytes": 16175104,
+     "cells": 672722
+    },
+    "idx_sessions_range": {
+     "bytes": 733184,
+     "cells": 20449
+    },
+    "idx_urls_canonical": {
+     "bytes": 4096,
+     "cells": 5
+    },
+    "idx_urls_host": {
+     "bytes": 4096,
+     "cells": 5
+    },
+    "idx_windows_title": {
+     "bytes": 4096,
+     "cells": 20
+    },
+    "jobs": {
+     "bytes": 4096,
+     "cells": 0
+    },
+    "ledgers": {
+     "bytes": 6164480,
+     "cells": 178
+    },
+    "meta": {
+     "bytes": 4096,
+     "cells": 5
+    },
+    "observations": {
+     "bytes": 106119168,
+     "cells": 803441
+    },
+    "occurrences": {
+     "bytes": 47448064,
+     "cells": 684275
+    },
+    "sessions": {
+     "bytes": 6504448,
+     "cells": 22031
+    },
+    "sqlite_autoindex_app_policies_1": {
+     "bytes": 4096,
+     "cells": 8
+    },
+    "sqlite_autoindex_apps_1": {
+     "bytes": 4096,
+     "cells": 8
+    },
+    "sqlite_autoindex_deletions_1": {
+     "bytes": 4096,
+     "cells": 0
+    },
+    "sqlite_autoindex_files_1": {
+     "bytes": 4096,
+     "cells": 5
+    },
+    "sqlite_autoindex_grants_1": {
+     "bytes": 4096,
+     "cells": 0
+    },
+    "sqlite_autoindex_ledgers_1": {
+     "bytes": 4096,
+     "cells": 90
+    },
+    "sqlite_autoindex_ledgers_2": {
+     "bytes": 4096,
+     "cells": 90
+    },
+    "sqlite_autoindex_meta_1": {
+     "bytes": 4096,
+     "cells": 5
+    },
+    "sqlite_autoindex_observations_1": {
+     "bytes": 19607552,
+     "cells": 777600
+    },
+    "sqlite_autoindex_occurrences_1": {
+     "bytes": 16953344,
+     "cells": 672722
+    },
+    "sqlite_autoindex_occurrences_2": {
+     "bytes": 17727488,
+     "cells": 672722
+    },
+    "sqlite_autoindex_sessions_1": {
+     "bytes": 471040,
+     "cells": 20449
+    },
+    "sqlite_autoindex_text_versions_1": {
+     "bytes": 5820416,
+     "cells": 232926
+    },
+    "sqlite_autoindex_text_versions_2": {
+     "bytes": 22360064,
+     "cells": 232926
+    },
+    "sqlite_autoindex_urls_1": {
+     "bytes": 4096,
+     "cells": 5
+    },
+    "sqlite_autoindex_windows_1": {
+     "bytes": 4096,
+     "cells": 20
+    },
+    "sqlite_schema": {
+     "bytes": 16384,
+     "cells": 52
+    },
+    "sqlite_stat1": {
+     "bytes": 4096,
+     "cells": 29
+    },
+    "sqlite_stat4": {
+     "bytes": 49152,
+     "cells": 445
+    },
+    "text_fts_config": {
+     "bytes": 4096,
+     "cells": 1
+    },
+    "text_fts_data": {
+     "bytes": 526618624,
+     "cells": 265151
+    },
+    "text_fts_docsize": {
+     "bytes": 3219456,
+     "cells": 233708
+    },
+    "text_fts_idx": {
+     "bytes": 303104,
+     "cells": 17365
+    },
+    "text_versions": {
+     "bytes": 954032128,
+     "cells": 459106
+    },
+    "urls": {
+     "bytes": 4096,
+     "cells": 5
+    },
+    "windows": {
+     "bytes": 4096,
+     "cells": 20
+    }
+   },
+   "dbstat_groups": {
+    "策略与运行时（meta/jobs/grants/app_policies/deletions）": {
+     "data": 20480,
+     "index": 20480
+    },
+    "规范化对象（apps/windows/urls/files）": {
+     "data": 16384,
+     "index": 32768
+    },
+    "observations（观察）": {
+     "data": 106119168,
+     "index": 69840896
+    },
+    "occurrences（出现记录）": {
+     "data": 47448064,
+     "index": 67813376
+    },
+    "sessions（会话）": {
+     "data": 6504448,
+     "index": 1204224
+    },
+    "ledgers（日台账）": {
+     "data": 6164480,
+     "index": 8192
+    },
+    "text_versions（原文）": {
+     "data": 954032128,
+     "index": 28180480
+    },
+    "sqlite_schema（表定义）": {
+     "data": 16384,
+     "index": 0
+    },
+    "sqlite_stat1/stat4（ANALYZE 统计）": {
+     "data": 53248,
+     "index": 0
+    },
+    "text_fts（全文索引）": {
+     "data": 0,
+     "index": 530145280
+    }
+   },
+   "payload_bytes": 675114030,
+   "fts_rows": 232926,
+   "freelist_pages": 611,
+   "freelist_bytes": 2502656,
+   "integrity": "ok",
+   "files": {
+    "主库": 1822351360,
+    "WAL": 0,
+    "SHM": 0
+   },
+   "total_file_bytes": 1822351360,
+   "wal_peak_bytes": 64613992,
+   "shm_peak_bytes": 131072,
+   "tmp_peak_build_bytes": 0,
+   "build_s": 163.42822716699447,
+   "finalize_s": 0.4413566669973079,
+   "temp_ops": [
+    {
+     "op": "ANALYZE 重算统计",
+     "sql": "ANALYZE",
+     "ms": 491.73974999575876,
+     "dir_peak_bytes": 0,
+     "fs_drop_peak_bytes": 0,
+     "db_delta_bytes": 0,
+     "peak_bytes": 0,
+     "ok": true,
+     "err": ""
+    },
+    {
+     "op": "全表排序 text_versions.sha256（外部归并）",
+     "sql": "SELECT sha256 FROM text_versions ORDER BY sha256",
+     "ms": 271.33741600846406,
+     "dir_peak_bytes": 0,
+     "fs_drop_peak_bytes": 15884288,
+     "db_delta_bytes": 0,
+     "peak_bytes": 15884288,
+     "ok": true,
+     "err": ""
+    },
+    {
+     "op": "全表排序 text_versions.text（最坏情况：排序键带正文）",
+     "sql": "SELECT vrow FROM text_versions ORDER BY text",
+     "ms": 1364.2036250093952,
+     "dir_peak_bytes": 0,
+     "fs_drop_peak_bytes": 700633088,
+     "db_delta_bytes": 0,
+     "peak_bytes": 700633088,
+     "ok": true,
+     "err": ""
+    },
+    {
+     "op": "按应用 + 时间分组聚合（GROUP BY 溢出）",
+     "sql": "SELECT app_id, date(ts/1000,'unixepoch'), COUNT(*) FROM observations GROUP BY 1, 2 ORDER BY 3 DESC",
+     "ms": 233.23362499650102,
+     "dir_peak_bytes": 0,
+     "fs_drop_peak_bytes": 17076224,
+     "db_delta_bytes": 0,
+     "peak_bytes": 17076224,
+     "ok": true,
+     "err": ""
+    },
+    {
+     "op": "incremental_vacuum 回收",
+     "sql": "PRAGMA incremental_vacuum",
+     "ms": 63.398916987353005,
+     "dir_peak_bytes": 0,
+     "fs_drop_peak_bytes": 0,
+     "db_delta_bytes": -2506752,
+     "peak_bytes": 0,
+     "ok": true,
+     "err": ""
+    },
+    {
+     "op": "wal_checkpoint(TRUNCATE)",
+     "sql": "PRAGMA wal_checkpoint(TRUNCATE)",
+     "ms": 56.852041991078295,
+     "dir_peak_bytes": 0,
+     "fs_drop_peak_bytes": 0,
+     "db_delta_bytes": 0,
+     "peak_bytes": 0,
+     "ok": true,
+     "err": ""
+    }
+   ],
+   "tmp_peak_ops_bytes": 700633088,
+   "latency": {
+    "exact_host": {
+     "cat": "精确字段",
+     "label": "host 等值 → 观察",
+     "cold_p50": 0.61329199525062,
+     "cold_p95": 0.7247499888762832,
+     "hot_p50": 0.042208004742860794,
+     "hot_p95": 0.0474580010632053,
+     "rows": 20,
+     "cold_n": 10,
+     "hot_n": 20,
+     "error": null
+    },
+    "exact_url_prefix": {
+     "cat": "精确字段",
+     "label": "canonical_url 前缀 → 观察",
+     "cold_p50": 0.6022080051479861,
+     "cold_p95": 0.7168339943746105,
+     "hot_p50": 0.059833007981069386,
+     "hot_p95": 0.06595799641218036,
+     "rows": 20,
+     "cold_n": 10,
+     "hot_n": 20,
+     "error": null
+    },
+    "exact_path": {
+     "cat": "精确字段",
+     "label": "files.path 子串 → 观察",
+     "cold_p50": 0.5750840064138174,
+     "cold_p95": 0.6916249985806644,
+     "hot_p50": 0.06566599768120795,
+     "hot_p95": 0.07429199467878789,
+     "rows": 20,
+     "cold_n": 10,
+     "hot_n": 20,
+     "error": null
+    },
+    "exact_title": {
+     "cat": "精确字段",
+     "label": "窗口标题前缀 → 观察",
+     "cold_p50": 0.5724999937228858,
+     "cold_p95": 0.7117920031305403,
+     "hot_p50": 0.0760830007493496,
+     "hot_p95": 0.08600000001024455,
+     "rows": 20,
+     "cold_n": 10,
+     "hot_n": 20,
+     "error": null
+    },
+    "exact_evidence": {
+     "cat": "精确字段",
+     "label": "get_evidence 主键点查 20 条",
+     "cold_p50": 0.6022910092724487,
+     "cold_p95": 0.6762499979231507,
+     "hot_p50": 0.061457991250790656,
+     "hot_p95": 0.06458300049416721,
+     "rows": 20,
+     "cold_n": 10,
+     "hot_n": 20,
+     "error": null
+    },
+    "fts_采集覆盖率": {
+     "cat": "FTS 检索",
+     "label": "中文三字以上（常见词）：`采集覆盖率`",
+     "cold_p50": 54.78787500760518,
+     "cold_p95": 55.41129100311082,
+     "hot_p50": 60.876749994349666,
+     "hot_p95": 62.8056249988731,
+     "rows": 20,
+     "cold_n": 10,
+     "hot_n": 20,
+     "error": null
+    },
+    "fts_蟠桃": {
+     "cat": "FTS 检索",
+     "label": "中文两字词（稀有，植入）：`蟠桃`",
+     "cold_p50": 3.860291006276384,
+     "cold_p95": 4.103166997083463,
+     "hot_p50": 2.6729170058388263,
+     "hot_p95": 2.9162079881643876,
+     "rows": 20,
+     "cold_n": 10,
+     "hot_n": 20,
+     "error": null
+    },
+    "fts_蟠桃调度器": {
+     "cat": "FTS 检索",
+     "label": "中文四字（稀有，植入）：`蟠桃调度器`",
+     "cold_p50": 3.9413330086972564,
+     "cold_p95": 4.392125003505498,
+     "hot_p50": 3.0889170011505485,
+     "hot_p95": 3.317333001177758,
+     "rows": 20,
+     "cold_n": 10,
+     "hot_n": 20,
+     "error": null
+    },
+    "fts_checkpoint": {
+     "cat": "FTS 检索",
+     "label": "英文单词（常见）：`checkpoint`",
+     "cold_p50": 39.73545800545253,
+     "cold_p95": 40.45529199356679,
+     "hot_p50": 48.45529100566637,
+     "hot_p95": 49.03962500975467,
+     "rows": 20,
+     "cold_n": 10,
+     "hot_n": 20,
+     "error": null
+    },
+    "fts_zygomorphic": {
+     "cat": "FTS 检索",
+     "label": "英文单词（稀有，植入）：`zygomorphic`",
+     "cold_p50": 3.8000409986125305,
+     "cold_p95": 4.0358330006711185,
+     "hot_p50": 2.5804159959079698,
+     "hot_p95": 2.8323750011622906,
+     "rows": 20,
+     "cold_n": 10,
+     "hot_n": 20,
+     "error": null
+    },
+    "fts_frobnicate_widget": {
+     "cat": "FTS 检索",
+     "label": "代码标识符（稀有，植入）：`frobnicate_widget`",
+     "cold_p50": 3.666625008918345,
+     "cold_p95": 4.06345899682492,
+     "hot_p50": 2.7112499956274405,
+     "hot_p95": 2.8956669993931428,
+     "rows": 20,
+     "cold_n": 10,
+     "hot_n": 20,
+     "error": null
+    },
+    "fts_E1042": {
+     "cat": "FTS 检索",
+     "label": "数字/错误码（常见）：`E1042`",
+     "cold_p50": 25.280084009864368,
+     "cold_p95": 25.567458011209965,
+     "hot_p50": 30.31416700105183,
+     "hot_p95": 30.726791999768466,
+     "rows": 20,
+     "cold_n": 10,
+     "hot_n": 20,
+     "error": null
+    },
+    "fts_FTS5_索引": {
+     "cat": "FTS 检索",
+     "label": "中英混排短语（常见）：`FTS5 索引`",
+     "cold_p50": 52.12470800324809,
+     "cold_p95": 52.557125003659166,
+     "hot_p50": 58.86749998899177,
+     "hot_p95": 60.33225001010578,
+     "rows": 20,
+     "cold_n": 10,
+     "hot_n": 20,
+     "error": null
+    },
+    "fts_sqlite_org": {
+     "cat": "FTS 检索",
+     "label": "URL/域名：`sqlite.org`",
+     "cold_p50": 27.339417007169686,
+     "cold_p95": 27.795999994850717,
+     "hot_p50": 30.78383298998233,
+     "hot_p95": 31.589874997735023,
+     "rows": 40,
+     "cold_n": 10,
+     "hot_n": 20,
+     "error": null
+    },
+    "fts_tools_bench_fts_compare_py": {
+     "cat": "FTS 检索",
+     "label": "文件路径：`tools/bench/fts_compare.py`",
+     "cold_p50": 28.94995799579192,
+     "cold_p95": 29.699083999730647,
+     "hot_p50": 31.61562500463333,
+     "hot_p95": 31.887666002148762,
+     "rows": 20,
+     "cold_n": 10,
+     "hot_n": 20,
+     "error": null
+    },
+    "fts_帧": {
+     "cat": "FTS 检索",
+     "label": "单个汉字（走扫描回退）：`帧`",
+     "cold_p50": 0.8366249967366457,
+     "cold_p95": 0.913249998120591,
+     "hot_p50": 0.16316700202878565,
+     "hot_p95": 0.16766700719017535,
+     "rows": 20,
+     "cold_n": 10,
+     "hot_n": 20,
+     "error": null
+    },
+    "ctx_by_app": {
+     "cat": "get_context 聚合",
+     "label": "按应用聚合最近 24 h",
+     "cold_p50": 3.0570829985663295,
+     "cold_p95": 3.2397090108133852,
+     "hot_p50": 2.384292005444877,
+     "hot_p95": 2.437457995256409,
+     "rows": 8,
+     "cold_n": 10,
+     "hot_n": 20,
+     "error": null
+    },
+    "ctx_sessions": {
+     "cat": "get_context 聚合",
+     "label": "会话时长汇总最近 24 h",
+     "cold_p50": 2.1684999956050888,
+     "cold_p95": 2.3590829950990155,
+     "hot_p50": 1.3784170005237684,
+     "hot_p95": 1.4563750009983778,
+     "rows": 8,
+     "cold_n": 10,
+     "hot_n": 20,
+     "error": null
+    },
+    "ctx_snippets": {
+     "cat": "get_context 聚合",
+     "label": "取窗口内最近 30 段正文",
+     "cold_p50": 0.6230419967323542,
+     "cold_p95": 0.7683329895371571,
+     "hot_p50": 0.0752079940866679,
+     "hot_p95": 0.07866699888836592,
+     "rows": 30,
+     "cold_n": 10,
+     "hot_n": 20,
+     "error": null
+    },
+    "ctx_full": {
+     "cat": "get_context 聚合",
+     "label": "get_context(hours=24) 三段合计",
+     "cold_p50": 4.751290995045565,
+     "cold_p95": 4.908082992187701,
+     "hot_p50": 4.126333005842753,
+     "hot_p95": 4.334917000960559,
+     "rows": 46,
+     "cold_n": 10,
+     "hot_n": 20,
+     "error": null
+    },
+    "app_count": {
+     "cat": "app + 时间范围扫描",
+     "label": "计数（最近 7 天）",
+     "cold_p50": 1.4862919924780726,
+     "cold_p95": 1.693166996119544,
+     "hot_p50": 0.8261670009233057,
+     "hot_p95": 0.8492080087307841,
+     "rows": 1,
+     "cold_n": 10,
+     "hot_n": 20,
+     "error": null
+    },
+    "app_text": {
+     "cat": "app + 时间范围扫描",
+     "label": "取 200 条并连正文",
+     "cold_p50": 1.0313749953638762,
+     "cold_p95": 1.1838749924208969,
+     "hot_p50": 0.2705829974729568,
+     "hot_p95": 0.28316699899733067,
+     "rows": 200,
+     "cold_n": 10,
+     "hot_n": 20,
+     "error": null
+    },
+    "app_scan": {
+     "cat": "app + 时间范围扫描",
+     "label": "范围内 LIKE 扫描正文",
+     "cold_p50": 0.7209169998532161,
+     "cold_p95": 0.811125006293878,
+     "hot_p50": 0.192749997950159,
+     "hot_p95": 0.21241699869278818,
+     "rows": 20,
+     "cold_n": 10,
+     "hot_n": 20,
+     "error": null
+    },
+    "ftsrid_采集覆盖率": {
+     "cat": "FTS 检索（rowid 倒序取候选）",
+     "label": "同上但按 rowid 倒序：`采集覆盖率`",
+     "cold_p50": 2.0204589964123443,
+     "cold_p95": 2.2375829867087305,
+     "hot_p50": 1.218749996041879,
+     "hot_p95": 1.2538329901872203,
+     "rows": 20,
+     "cold_n": 10,
+     "hot_n": 20,
+     "error": null
+    },
+    "ftsrid_checkpoint": {
+     "cat": "FTS 检索（rowid 倒序取候选）",
+     "label": "同上但按 rowid 倒序：`checkpoint`",
+     "cold_p50": 1.3807500072289258,
+     "cold_p95": 1.5062919992487878,
+     "hot_p50": 0.6432500085793436,
+     "hot_p95": 0.6832920043962076,
+     "rows": 20,
+     "cold_n": 10,
+     "hot_n": 20,
+     "error": null
+    },
+    "ftsrid_tools_bench_fts_compare_py": {
+     "cat": "FTS 检索（rowid 倒序取候选）",
+     "label": "同上但按 rowid 倒序：`tools/bench/fts_compare.py`",
+     "cold_p50": 2.1382920094765723,
+     "cold_p95": 2.3497079964727163,
+     "hot_p50": 1.393792001181282,
+     "hot_p95": 1.4725420041941106,
+     "rows": 20,
+     "cold_n": 10,
+     "hot_n": 20,
+     "error": null
+    },
+    "ctx_sessions_bounded": {
+     "cat": "get_context 聚合",
+     "label": "会话时长汇总最近 24 h（start 补下界）",
+     "cold_p50": 0.5777079932158813,
+     "cold_p95": 0.6344169960357249,
+     "hot_p50": 0.07437499880325049,
+     "hot_p95": 0.07716599793639034,
+     "rows": 8,
+     "cold_n": 10,
+     "hot_n": 20,
+     "error": null
+    },
+    "ftswin_采集覆盖率": {
+     "cat": "FTS 检索（rowid 倒序 + 限最近 30 天）",
+     "label": "再加 rowid 下界：`采集覆盖率`",
+     "cold_p50": 1.949875004356727,
+     "cold_p95": 2.173334010876715,
+     "hot_p50": 1.2213330046506599,
+     "hot_p95": 1.2535830028355122,
+     "rows": 20,
+     "cold_n": 10,
+     "hot_n": 20,
+     "error": null
+    },
+    "ftswin_tools_bench_fts_compare_py": {
+     "cat": "FTS 检索（rowid 倒序 + 限最近 30 天）",
+     "label": "再加 rowid 下界：`tools/bench/fts_compare.py`",
+     "cold_p50": 2.0736669976031408,
+     "cold_p95": 2.21291599154938,
+     "hot_p50": 1.3856660079909489,
+     "hot_p95": 1.421749999281019,
+     "rows": 20,
+     "cold_n": 10,
+     "hot_n": 20,
+     "error": null
+    },
+    "exact_path_miss_join": {
+     "cat": "精确字段",
+     "label": "路径命中 0 行：单条 JOIN + ORDER BY ts LIMIT",
+     "cold_p50": 126.19083300523926,
+     "cold_p95": 127.67483299830928,
+     "hot_p50": 125.98637500195764,
+     "hot_p95": 126.88362499466166,
+     "rows": 0,
+     "cold_n": 10,
+     "hot_n": 20,
+     "error": null
+    },
+    "exact_path_miss_2step": {
+     "cat": "精确字段",
+     "label": "路径命中 0 行：两步式（先查 files，空集早返回）",
+     "cold_p50": 0.5052500055171549,
+     "cold_p95": 0.5764159868704155,
+     "hot_p50": 0.0045000051613897085,
+     "hot_p95": 0.005875001079402864,
+     "rows": 0,
+     "cold_n": 10,
+     "hot_n": 20,
+     "error": null
+    }
+   }
+  },
+  {
+   "tag": "12m",
+   "months": 12,
+   "days": 360,
+   "fts_scheme": "bigram",
+   "page_size": 4096,
+   "db_path": "~/Library/Caches/brosis-build/proto/capacity_12m.db",
+   "gen": {
+    "days": 360,
+    "per_day": 8640,
+    "device": "dev-mbp16",
+    "seed": 20260906,
+    "avg_chars_target": 1500,
+    "new_ratio": 0.3,
+    "fts_scheme": "bigram",
+    "observations": 3110400,
+    "occurrences": 2690648,
+    "text_versions": 932614,
+    "sessions": 81812,
+    "reused": 1758034,
+    "thumb_refs": 778649,
+    "app_switches": 81812,
+    "text_chars": 1427554942,
+    "text_bytes": 2704793724,
+    "cjk_chars": 578940268,
+    "fts_body_bytes": 4725065223,
+    "build_s": 689.2672904589999,
+    "finalize_s": 1.7360578749940032,
+    "textgen_s": 455.20070149726234,
+    "page_size": 4096,
+    "path": "~/Library/Caches/brosis-build/proto/capacity_12m.db"
+   },
+   "dbstat_raw": {
+    "app_policies": {
+     "bytes": 4096,
+     "cells": 8
+    },
+    "apps": {
+     "bytes": 4096,
+     "cells": 8
+    },
+    "deletions": {
+     "bytes": 4096,
+     "cells": 0
+    },
+    "files": {
+     "bytes": 4096,
+     "cells": 5
+    },
+    "grants": {
+     "bytes": 4096,
+     "cells": 0
+    },
+    "idx_files_path": {
+     "bytes": 4096,
+     "cells": 5
+    },
+    "idx_jobs_state": {
+     "bytes": 4096,
+     "cells": 0
+    },
+    "idx_obs_app_ts": {
+     "bytes": 58028032,
+     "cells": 3110400
+    },
+    "idx_obs_deleted": {
+     "bytes": 4096,
+     "cells": 0
+    },
+    "idx_obs_live": {
+     "bytes": 89161728,
+     "cells": 3110400
+    },
+    "idx_obs_ts": {
+     "bytes": 53555200,
+     "cells": 3110400
+    },
+    "idx_occ_obs": {
+     "bytes": 68030464,
+     "cells": 2690648
+    },
+    "idx_occ_tv": {
+     "bytes": 65282048,
+     "cells": 2690648
+    },
+    "idx_sessions_range": {
+     "bytes": 2969600,
+     "cells": 81812
+    },
+    "idx_urls_canonical": {
+     "bytes": 4096,
+     "cells": 5
+    },
+    "idx_urls_host": {
+     "bytes": 4096,
+     "cells": 5
+    },
+    "idx_windows_title": {
+     "bytes": 4096,
+     "cells": 20
+    },
+    "jobs": {
+     "bytes": 4096,
+     "cells": 0
+    },
+    "ledgers": {
+     "bytes": 27095040,
+     "cells": 505
+    },
+    "meta": {
+     "bytes": 4096,
+     "cells": 5
+    },
+    "observations": {
+     "bytes": 425684992,
+     "cells": 3214055
+    },
+    "occurrences": {
+     "bytes": 191062016,
+     "cells": 2737172
+    },
+    "sessions": {
+     "bytes": 28311552,
+     "cells": 88705
+    },
+    "sqlite_autoindex_app_policies_1": {
+     "bytes": 4096,
+     "cells": 8
+    },
+    "sqlite_autoindex_apps_1": {
+     "bytes": 4096,
+     "cells": 8
+    },
+    "sqlite_autoindex_deletions_1": {
+     "bytes": 4096,
+     "cells": 0
+    },
+    "sqlite_autoindex_files_1": {
+     "bytes": 4096,
+     "cells": 5
+    },
+    "sqlite_autoindex_grants_1": {
+     "bytes": 4096,
+     "cells": 0
+    },
+    "sqlite_autoindex_ledgers_1": {
+     "bytes": 12288,
+     "cells": 360
+    },
+    "sqlite_autoindex_ledgers_2": {
+     "bytes": 16384,
+     "cells": 360
+    },
+    "sqlite_autoindex_meta_1": {
+     "bytes": 4096,
+     "cells": 5
+    },
+    "sqlite_autoindex_observations_1": {
+     "bytes": 78647296,
+     "cells": 3110400
+    },
+    "sqlite_autoindex_occurrences_1": {
+     "bytes": 68026368,
+     "cells": 2690648
+    },
+    "sqlite_autoindex_occurrences_2": {
+     "bytes": 71110656,
+     "cells": 2690648
+    },
+    "sqlite_autoindex_sessions_1": {
+     "bytes": 1994752,
+     "cells": 81812
+    },
+    "sqlite_autoindex_text_versions_1": {
+     "bytes": 23531520,
+     "cells": 932614
+    },
+    "sqlite_autoindex_text_versions_2": {
+     "bytes": 89317376,
+     "cells": 932614
+    },
+    "sqlite_autoindex_urls_1": {
+     "bytes": 4096,
+     "cells": 5
+    },
+    "sqlite_autoindex_windows_1": {
+     "bytes": 4096,
+     "cells": 20
+    },
+    "sqlite_schema": {
+     "bytes": 16384,
+     "cells": 52
+    },
+    "sqlite_stat1": {
+     "bytes": 4096,
+     "cells": 29
+    },
+    "sqlite_stat4": {
+     "bytes": 53248,
+     "cells": 446
+    },
+    "text_fts_config": {
+     "bytes": 4096,
+     "cells": 1
+    },
+    "text_fts_data": {
+     "bytes": 2108424192,
+     "cells": 1038621
+    },
+    "text_fts_docsize": {
+     "bytes": 13058048,
+     "cells": 935792
+    },
+    "text_fts_idx": {
+     "bytes": 425984,
+     "cells": 24500
+    },
+    "text_versions": {
+     "bytes": 3819724800,
+     "cells": 1838188
+    },
+    "urls": {
+     "bytes": 4096,
+     "cells": 5
+    },
+    "windows": {
+     "bytes": 4096,
+     "cells": 20
+    }
+   },
+   "dbstat_groups": {
+    "策略与运行时（meta/jobs/grants/app_policies/deletions）": {
+     "data": 20480,
+     "index": 20480
+    },
+    "规范化对象（apps/windows/urls/files）": {
+     "data": 16384,
+     "index": 32768
+    },
+    "observations（观察）": {
+     "data": 425684992,
+     "index": 279396352
+    },
+    "occurrences（出现记录）": {
+     "data": 191062016,
+     "index": 272449536
+    },
+    "sessions（会话）": {
+     "data": 28311552,
+     "index": 4964352
+    },
+    "ledgers（日台账）": {
+     "data": 27095040,
+     "index": 28672
+    },
+    "text_versions（原文）": {
+     "data": 3819724800,
+     "index": 112848896
+    },
+    "sqlite_schema（表定义）": {
+     "data": 16384,
+     "index": 0
+    },
+    "sqlite_stat1/stat4（ANALYZE 统计）": {
+     "data": 57344,
+     "index": 0
+    },
+    "text_fts（全文索引）": {
+     "data": 0,
+     "index": 2121912320
+    }
+   },
+   "payload_bytes": 2704793724,
+   "fts_rows": 932614,
+   "freelist_pages": 769,
+   "freelist_bytes": 3149824,
+   "integrity": "ok",
+   "files": {
+    "主库": 7295696896,
+    "WAL": 0,
+    "SHM": 0
+   },
+   "total_file_bytes": 7295696896,
+   "wal_peak_bytes": 82115752,
+   "shm_peak_bytes": 163840,
+   "tmp_peak_build_bytes": 0,
+   "build_s": 689.2672904589999,
+   "finalize_s": 1.7360578749940032,
+   "temp_ops": [
+    {
+     "op": "ANALYZE 重算统计",
+     "sql": "ANALYZE",
+     "ms": 1796.4279590087244,
+     "dir_peak_bytes": 0,
+     "fs_drop_peak_bytes": 65536,
+     "db_delta_bytes": 0,
+     "peak_bytes": 65536,
+     "ok": true,
+     "err": ""
+    },
+    {
+     "op": "全表排序 text_versions.sha256（外部归并）",
+     "sql": "SELECT sha256 FROM text_versions ORDER BY sha256",
+     "ms": 968.5826250060927,
+     "dir_peak_bytes": 0,
+     "fs_drop_peak_bytes": 66600960,
+     "db_delta_bytes": 0,
+     "peak_bytes": 66600960,
+     "ok": true,
+     "err": ""
+    },
+    {
+     "op": "全表排序 text_versions.text（最坏情况：排序键带正文）",
+     "sql": "SELECT vrow FROM text_versions ORDER BY text",
+     "ms": 4409.305624998524,
+     "dir_peak_bytes": 0,
+     "fs_drop_peak_bytes": 2819665920,
+     "db_delta_bytes": 0,
+     "peak_bytes": 2819665920,
+     "ok": true,
+     "err": ""
+    },
+    {
+     "op": "按应用 + 时间分组聚合（GROUP BY 溢出）",
+     "sql": "SELECT app_id, date(ts/1000,'unixepoch'), COUNT(*) FROM observations GROUP BY 1, 2 ORDER BY 3 DESC",
+     "ms": 853.4196250111563,
+     "dir_peak_bytes": 0,
+     "fs_drop_peak_bytes": 0,
+     "db_delta_bytes": 0,
+     "peak_bytes": 0,
+     "ok": true,
+     "err": ""
+    },
+    {
+     "op": "incremental_vacuum 回收",
+     "sql": "PRAGMA incremental_vacuum",
+     "ms": 66.42004199966323,
+     "dir_peak_bytes": 0,
+     "fs_drop_peak_bytes": 3411968,
+     "db_delta_bytes": -3153920,
+     "peak_bytes": 3411968,
+     "ok": true,
+     "err": ""
+    },
+    {
+     "op": "wal_checkpoint(TRUNCATE)",
+     "sql": "PRAGMA wal_checkpoint(TRUNCATE)",
+     "ms": 56.16366700269282,
+     "dir_peak_bytes": 0,
+     "fs_drop_peak_bytes": 0,
+     "db_delta_bytes": 0,
+     "peak_bytes": 0,
+     "ok": true,
+     "err": ""
+    }
+   ],
+   "tmp_peak_ops_bytes": 2819665920,
+   "latency": {
+    "exact_host": {
+     "cat": "精确字段",
+     "label": "host 等值 → 观察",
+     "cold_p50": 0.6262499955482781,
+     "cold_p95": 0.7032080029603094,
+     "hot_p50": 0.03770900366362184,
+     "hot_p95": 0.03954098792746663,
+     "rows": 20,
+     "cold_n": 10,
+     "hot_n": 20,
+     "error": null
+    },
+    "exact_url_prefix": {
+     "cat": "精确字段",
+     "label": "canonical_url 前缀 → 观察",
+     "cold_p50": 0.5493330099852756,
+     "cold_p95": 0.6907499919179827,
+     "hot_p50": 0.03833300434052944,
+     "hot_p95": 0.03995800216216594,
+     "rows": 20,
+     "cold_n": 10,
+     "hot_n": 20,
+     "error": null
+    },
+    "exact_path": {
+     "cat": "精确字段",
+     "label": "files.path 子串 → 观察",
+     "cold_p50": 0.5011659959563985,
+     "cold_p95": 0.6277499924181029,
+     "hot_p50": 0.023707994841970503,
+     "hot_p95": 0.024249995476566255,
+     "rows": 20,
+     "cold_n": 10,
+     "hot_n": 20,
+     "error": null
+    },
+    "exact_title": {
+     "cat": "精确字段",
+     "label": "窗口标题前缀 → 观察",
+     "cold_p50": 0.6307500007096678,
+     "cold_p95": 0.6982500053709373,
+     "hot_p50": 0.13279200356919318,
+     "hot_p95": 0.1368750090477988,
+     "rows": 20,
+     "cold_n": 10,
+     "hot_n": 20,
+     "error": null
+    },
+    "exact_evidence": {
+     "cat": "精确字段",
+     "label": "get_evidence 主键点查 20 条",
+     "cold_p50": 0.6063330074539408,
+     "cold_p95": 0.7599579985253513,
+     "hot_p50": 0.06033299723640084,
+     "hot_p95": 0.06674999895039946,
+     "rows": 20,
+     "cold_n": 10,
+     "hot_n": 20,
+     "error": null
+    },
+    "fts_采集覆盖率": {
+     "cat": "FTS 检索",
+     "label": "中文三字以上（常见词）：`采集覆盖率`",
+     "cold_p50": 209.67504198779352,
+     "cold_p95": 211.5646669990383,
+     "hot_p50": 225.10712500661612,
+     "hot_p95": 241.99762499483768,
+     "rows": 20,
+     "cold_n": 10,
+     "hot_n": 18,
+     "error": null
+    },
+    "fts_蟠桃": {
+     "cat": "FTS 检索",
+     "label": "中文两字词（稀有，植入）：`蟠桃`",
+     "cold_p50": 4.97975001053419,
+     "cold_p95": 5.2212500013411045,
+     "hot_p50": 3.857958989101462,
+     "hot_p95": 4.186791993561201,
+     "rows": 20,
+     "cold_n": 10,
+     "hot_n": 20,
+     "error": null
+    },
+    "fts_蟠桃调度器": {
+     "cat": "FTS 检索",
+     "label": "中文四字（稀有，植入）：`蟠桃调度器`",
+     "cold_p50": 5.228583002462983,
+     "cold_p95": 5.513665993930772,
+     "hot_p50": 4.3729999888455495,
+     "hot_p95": 4.52850000874605,
+     "rows": 20,
+     "cold_n": 10,
+     "hot_n": 20,
+     "error": null
+    },
+    "fts_checkpoint": {
+     "cat": "FTS 检索",
+     "label": "英文单词（常见）：`checkpoint`",
+     "cold_p50": 151.82429099513683,
+     "cold_p95": 156.26629198959563,
+     "hot_p50": 186.15887500345707,
+     "hot_p95": 189.75208299525548,
+     "rows": 20,
+     "cold_n": 10,
+     "hot_n": 20,
+     "error": null
+    },
+    "fts_zygomorphic": {
+     "cat": "FTS 检索",
+     "label": "英文单词（稀有，植入）：`zygomorphic`",
+     "cold_p50": 4.896165992249735,
+     "cold_p95": 5.180374995688908,
+     "hot_p50": 3.696375002618879,
+     "hot_p95": 3.8872089935466647,
+     "rows": 20,
+     "cold_n": 10,
+     "hot_n": 20,
+     "error": null
+    },
+    "fts_frobnicate_widget": {
+     "cat": "FTS 检索",
+     "label": "代码标识符（稀有，植入）：`frobnicate_widget`",
+     "cold_p50": 4.897916005575098,
+     "cold_p95": 5.150167009560391,
+     "hot_p50": 3.838709002593532,
+     "hot_p95": 4.011708006146364,
+     "rows": 20,
+     "cold_n": 10,
+     "hot_n": 20,
+     "error": null
+    },
+    "fts_E1042": {
+     "cat": "FTS 检索",
+     "label": "数字/错误码（常见）：`E1042`",
+     "cold_p50": 92.90662499552127,
+     "cold_p95": 94.10375000152271,
+     "hot_p50": 114.0107090031961,
+     "hot_p95": 115.34249999385793,
+     "rows": 20,
+     "cold_n": 10,
+     "hot_n": 20,
+     "error": null
+    },
+    "fts_FTS5_索引": {
+     "cat": "FTS 检索",
+     "label": "中英混排短语（常见）：`FTS5 索引`",
+     "cold_p50": 199.054333003005,
+     "cold_p95": 204.55191598739475,
+     "hot_p50": 214.61658300540876,
+     "hot_p95": 228.62179200456012,
+     "rows": 20,
+     "cold_n": 10,
+     "hot_n": 18,
+     "error": null
+    },
+    "fts_sqlite_org": {
+     "cat": "FTS 检索",
+     "label": "URL/域名：`sqlite.org`",
+     "cold_p50": 98.34337500797119,
+     "cold_p95": 101.11779198632576,
+     "hot_p50": 115.52158300764859,
+     "hot_p95": 116.67058301100042,
+     "rows": 40,
+     "cold_n": 10,
+     "hot_n": 20,
+     "error": null
+    },
+    "fts_tools_bench_fts_compare_py": {
+     "cat": "FTS 检索",
+     "label": "文件路径：`tools/bench/fts_compare.py`",
+     "cold_p50": 104.35262499959208,
+     "cold_p95": 107.89420799119398,
+     "hot_p50": 117.11983400164172,
+     "hot_p95": 119.47308300295845,
+     "rows": 20,
+     "cold_n": 10,
+     "hot_n": 20,
+     "error": null
+    },
+    "fts_帧": {
+     "cat": "FTS 检索",
+     "label": "单个汉字（走扫描回退）：`帧`",
+     "cold_p50": 0.8251249964814633,
+     "cold_p95": 0.9547090012347326,
+     "hot_p50": 0.18366599397268146,
+     "hot_p95": 0.21349999587982893,
+     "rows": 20,
+     "cold_n": 10,
+     "hot_n": 20,
+     "error": null
+    },
+    "ctx_by_app": {
+     "cat": "get_context 聚合",
+     "label": "按应用聚合最近 24 h",
+     "cold_p50": 3.0917920084903017,
+     "cold_p95": 3.1392079981742427,
+     "hot_p50": 2.3944580025272444,
+     "hot_p95": 2.4613330024294555,
+     "rows": 8,
+     "cold_n": 10,
+     "hot_n": 20,
+     "error": null
+    },
+    "ctx_sessions": {
+     "cat": "get_context 聚合",
+     "label": "会话时长汇总最近 24 h",
+     "cold_p50": 7.124582989490591,
+     "cold_p95": 7.327083993004635,
+     "hot_p50": 6.4202089997706935,
+     "hot_p95": 6.651415998931043,
+     "rows": 8,
+     "cold_n": 10,
+     "hot_n": 20,
+     "error": null
+    },
+    "ctx_snippets": {
+     "cat": "get_context 聚合",
+     "label": "取窗口内最近 30 段正文",
+     "cold_p50": 0.6242500094231218,
+     "cold_p95": 0.780709000537172,
+     "hot_p50": 0.07300000288523734,
+     "hot_p95": 0.07579200610052794,
+     "rows": 30,
+     "cold_n": 10,
+     "hot_n": 20,
+     "error": null
+    },
+    "ctx_full": {
+     "cat": "get_context 聚合",
+     "label": "get_context(hours=24) 三段合计",
+     "cold_p50": 9.840458005783148,
+     "cold_p95": 9.988374993554316,
+     "hot_p50": 9.492416007560678,
+     "hot_p95": 9.673915992607363,
+     "rows": 46,
+     "cold_n": 10,
+     "hot_n": 20,
+     "error": null
+    },
+    "app_count": {
+     "cat": "app + 时间范围扫描",
+     "label": "计数（最近 7 天）",
+     "cold_p50": 1.509957990492694,
+     "cold_p95": 1.6703750006854534,
+     "hot_p50": 0.8537919929949567,
+     "hot_p95": 0.8935420046327636,
+     "rows": 1,
+     "cold_n": 10,
+     "hot_n": 20,
+     "error": null
+    },
+    "app_text": {
+     "cat": "app + 时间范围扫描",
+     "label": "取 200 条并连正文",
+     "cold_p50": 1.0174590133829042,
+     "cold_p95": 1.070915997843258,
+     "hot_p50": 0.29441599326673895,
+     "hot_p95": 0.30504100141115487,
+     "rows": 200,
+     "cold_n": 10,
+     "hot_n": 20,
+     "error": null
+    },
+    "app_scan": {
+     "cat": "app + 时间范围扫描",
+     "label": "范围内 LIKE 扫描正文",
+     "cold_p50": 0.7611250039190054,
+     "cold_p95": 1.1734159925254062,
+     "hot_p50": 0.2612919925013557,
+     "hot_p95": 0.28254200879018754,
+     "rows": 20,
+     "cold_n": 10,
+     "hot_n": 20,
+     "error": null
+    },
+    "ftsrid_采集覆盖率": {
+     "cat": "FTS 检索（rowid 倒序取候选）",
+     "label": "同上但按 rowid 倒序：`采集覆盖率`",
+     "cold_p50": 2.1107500069774687,
+     "cold_p95": 2.2515000018756837,
+     "hot_p50": 1.3276660029077902,
+     "hot_p95": 1.3885840016882867,
+     "rows": 20,
+     "cold_n": 10,
+     "hot_n": 20,
+     "error": null
+    },
+    "ftsrid_checkpoint": {
+     "cat": "FTS 检索（rowid 倒序取候选）",
+     "label": "同上但按 rowid 倒序：`checkpoint`",
+     "cold_p50": 1.3992500025779009,
+     "cold_p95": 1.4802910009166226,
+     "hot_p50": 0.6671250012004748,
+     "hot_p95": 0.7033750007394701,
+     "rows": 20,
+     "cold_n": 10,
+     "hot_n": 20,
+     "error": null
+    },
+    "ftsrid_tools_bench_fts_compare_py": {
+     "cat": "FTS 检索（rowid 倒序取候选）",
+     "label": "同上但按 rowid 倒序：`tools/bench/fts_compare.py`",
+     "cold_p50": 2.15612500323914,
+     "cold_p95": 2.2832499962532893,
+     "hot_p50": 1.4195829862728715,
+     "hot_p95": 1.4886670105624944,
+     "rows": 20,
+     "cold_n": 10,
+     "hot_n": 20,
+     "error": null
+    },
+    "ctx_sessions_bounded": {
+     "cat": "get_context 聚合",
+     "label": "会话时长汇总最近 24 h（start 补下界）",
+     "cold_p50": 0.5776250036433339,
+     "cold_p95": 0.628541994956322,
+     "hot_p50": 0.06779099931009114,
+     "hot_p95": 0.06920899613760412,
+     "rows": 8,
+     "cold_n": 10,
+     "hot_n": 20,
+     "error": null
+    },
+    "ftswin_采集覆盖率": {
+     "cat": "FTS 检索（rowid 倒序 + 限最近 30 天）",
+     "label": "再加 rowid 下界：`采集覆盖率`",
+     "cold_p50": 1.9841250032186508,
+     "cold_p95": 2.0762079948326573,
+     "hot_p50": 1.3260830019135028,
+     "hot_p95": 1.3519589992938563,
+     "rows": 20,
+     "cold_n": 10,
+     "hot_n": 20,
+     "error": null
+    },
+    "ftswin_tools_bench_fts_compare_py": {
+     "cat": "FTS 检索（rowid 倒序 + 限最近 30 天）",
+     "label": "再加 rowid 下界：`tools/bench/fts_compare.py`",
+     "cold_p50": 2.0219159923726693,
+     "cold_p95": 2.0526669977698475,
+     "hot_p50": 1.4016669883858413,
+     "hot_p95": 1.4708340022480115,
+     "rows": 20,
+     "cold_n": 10,
+     "hot_n": 20,
+     "error": null
+    },
+    "exact_path_miss_join": {
+     "cat": "精确字段",
+     "label": "路径命中 0 行：单条 JOIN + ORDER BY ts LIMIT",
+     "cold_p50": 520.71574999718,
+     "cold_p95": 527.2614580026129,
+     "hot_p50": 520.4407499986701,
+     "hot_p95": 525.8555840118788,
+     "rows": 0,
+     "cold_n": 10,
+     "hot_n": 7,
+     "error": null
+    },
+    "exact_path_miss_2step": {
+     "cat": "精确字段",
+     "label": "路径命中 0 行：两步式（先查 files，空集早返回）",
+     "cold_p50": 0.567750001209788,
+     "cold_p95": 0.6187499966472387,
+     "hot_p50": 0.004457993782125413,
+     "hot_p95": 0.00837500556372106,
+     "rows": 0,
+     "cold_n": 10,
+     "hot_n": 20,
+     "error": null
+    }
+   }
+  }
+ ],
+ "sensitivity": [
+  {
+   "tag": "1m_ps8192",
+   "months": 1,
+   "days": 30,
+   "fts_scheme": "bigram",
+   "page_size": 8192,
+   "db_path": "~/Library/Caches/brosis-build/proto/capacity_1m_ps8192.db",
+   "gen": {
+    "days": 30,
+    "per_day": 8640,
+    "device": "dev-mbp16",
+    "seed": 20260906,
+    "avg_chars_target": 1500,
+    "new_ratio": 0.3,
+    "fts_scheme": "bigram",
+    "observations": 259200,
+    "occurrences": 224316,
+    "text_versions": 77794,
+    "sessions": 6840,
+    "reused": 146522,
+    "thumb_refs": 64641,
+    "app_switches": 6840,
+    "text_chars": 119019816,
+    "text_bytes": 225458504,
+    "cjk_chars": 48246237,
+    "fts_body_bytes": 393815851,
+    "build_s": 50.721911792003084,
+    "finalize_s": 0.13309199998911936,
+    "textgen_s": 37.89620280536474,
+    "page_size": 8192,
+    "path": "~/Library/Caches/brosis-build/proto/capacity_1m_ps8192.db"
+   },
+   "dbstat_raw": {
+    "app_policies": {
+     "bytes": 8192,
+     "cells": 8
+    },
+    "apps": {
+     "bytes": 8192,
+     "cells": 8
+    },
+    "deletions": {
+     "bytes": 8192,
+     "cells": 0
+    },
+    "files": {
+     "bytes": 8192,
+     "cells": 5
+    },
+    "grants": {
+     "bytes": 8192,
+     "cells": 0
+    },
+    "idx_files_path": {
+     "bytes": 8192,
+     "cells": 5
+    },
+    "idx_jobs_state": {
+     "bytes": 8192,
+     "cells": 0
+    },
+    "idx_obs_app_ts": {
+     "bytes": 4915200,
+     "cells": 259200
+    },
+    "idx_obs_deleted": {
+     "bytes": 8192,
+     "cells": 0
+    },
+    "idx_obs_live": {
+     "bytes": 7380992,
+     "cells": 259200
+    },
+    "idx_obs_ts": {
+     "bytes": 4431872,
+     "cells": 259200
+    },
+    "idx_occ_obs": {
+     "bytes": 5586944,
+     "cells": 224316
+    },
+    "idx_occ_tv": {
+     "bytes": 5275648,
+     "cells": 224316
+    },
+    "idx_sessions_range": {
+     "bytes": 253952,
+     "cells": 6840
+    },
+    "idx_urls_canonical": {
+     "bytes": 8192,
+     "cells": 5
+    },
+    "idx_urls_host": {
+     "bytes": 8192,
+     "cells": 5
+    },
+    "idx_windows_title": {
+     "bytes": 8192,
+     "cells": 20
+    },
+    "jobs": {
+     "bytes": 8192,
+     "cells": 0
+    },
+    "ledgers": {
+     "bytes": 1990656,
+     "cells": 44
+    },
+    "meta": {
+     "bytes": 8192,
+     "cells": 5
+    },
+    "observations": {
+     "bytes": 34963456,
+     "cells": 263461
+    },
+    "occurrences": {
+     "bytes": 15671296,
+     "cells": 226224
+    },
+    "sessions": {
+     "bytes": 2064384,
+     "cells": 7090
+    },
+    "sqlite_autoindex_app_policies_1": {
+     "bytes": 8192,
+     "cells": 8
+    },
+    "sqlite_autoindex_apps_1": {
+     "bytes": 8192,
+     "cells": 8
+    },
+    "sqlite_autoindex_deletions_1": {
+     "bytes": 8192,
+     "cells": 0
+    },
+    "sqlite_autoindex_files_1": {
+     "bytes": 8192,
+     "cells": 5
+    },
+    "sqlite_autoindex_grants_1": {
+     "bytes": 8192,
+     "cells": 0
+    },
+    "sqlite_autoindex_ledgers_1": {
+     "bytes": 8192,
+     "cells": 30
+    },
+    "sqlite_autoindex_ledgers_2": {
+     "bytes": 8192,
+     "cells": 30
+    },
+    "sqlite_autoindex_meta_1": {
+     "bytes": 8192,
+     "cells": 5
+    },
+    "sqlite_autoindex_observations_1": {
+     "bytes": 6455296,
+     "cells": 259200
+    },
+    "sqlite_autoindex_occurrences_1": {
+     "bytes": 5578752,
+     "cells": 224316
+    },
+    "sqlite_autoindex_occurrences_2": {
+     "bytes": 5849088,
+     "cells": 224316
+    },
+    "sqlite_autoindex_sessions_1": {
+     "bytes": 163840,
+     "cells": 6840
+    },
+    "sqlite_autoindex_text_versions_1": {
+     "bytes": 1884160,
+     "cells": 77794
+    },
+    "sqlite_autoindex_text_versions_2": {
+     "bytes": 7323648,
+     "cells": 77794
+    },
+    "sqlite_autoindex_urls_1": {
+     "bytes": 8192,
+     "cells": 5
+    },
+    "sqlite_autoindex_windows_1": {
+     "bytes": 8192,
+     "cells": 20
+    },
+    "sqlite_schema": {
+     "bytes": 24576,
+     "cells": 51
+    },
+    "sqlite_stat1": {
+     "bytes": 8192,
+     "cells": 29
+    },
+    "sqlite_stat4": {
+     "bytes": 57344,
+     "cells": 441
+    },
+    "text_fts_config": {
+     "bytes": 8192,
+     "cells": 1
+    },
+    "text_fts_data": {
+     "bytes": 175652864,
+     "cells": 67690
+    },
+    "text_fts_docsize": {
+     "bytes": 1040384,
+     "cells": 77919
+    },
+    "text_fts_idx": {
+     "bytes": 237568,
+     "cells": 13511
+    },
+    "text_versions": {
+     "bytes": 292749312,
+     "cells": 113484
+    },
+    "urls": {
+     "bytes": 8192,
+     "cells": 5
+    },
+    "windows": {
+     "bytes": 8192,
+     "cells": 20
+    }
+   },
+   "dbstat_groups": {
+    "策略与运行时（meta/jobs/grants/app_policies/deletions）": {
+     "data": 40960,
+     "index": 40960
+    },
+    "规范化对象（apps/windows/urls/files）": {
+     "data": 32768,
+     "index": 65536
+    },
+    "observations（观察）": {
+     "data": 34963456,
+     "index": 23191552
+    },
+    "occurrences（出现记录）": {
+     "data": 15671296,
+     "index": 22290432
+    },
+    "sessions（会话）": {
+     "data": 2064384,
+     "index": 417792
+    },
+    "ledgers（日台账）": {
+     "data": 1990656,
+     "index": 16384
+    },
+    "text_versions（原文）": {
+     "data": 292749312,
+     "index": 9207808
+    },
+    "sqlite_schema（表定义）": {
+     "data": 24576,
+     "index": 0
+    },
+    "sqlite_stat1/stat4（ANALYZE 统计）": {
+     "data": 65536,
+     "index": 0
+    },
+    "text_fts（全文索引）": {
+     "data": 0,
+     "index": 176939008
+    }
+   },
+   "payload_bytes": 225458504,
+   "fts_rows": 77794,
+   "freelist_pages": 240,
+   "freelist_bytes": 1966080,
+   "integrity": "ok",
+   "files": {
+    "主库": 582098944,
+    "WAL": 0,
+    "SHM": 0
+   },
+   "total_file_bytes": 582098944,
+   "wal_peak_bytes": 50807776,
+   "shm_peak_bytes": 65536,
+   "tmp_peak_build_bytes": 0,
+   "build_s": 50.721911792003084,
+   "finalize_s": 0.13309199998911936,
+   "variant_label": "page_size=8192，fts=bigram"
+  },
+  {
+   "tag": "1m_ps16384",
+   "months": 1,
+   "days": 30,
+   "fts_scheme": "bigram",
+   "page_size": 16384,
+   "db_path": "~/Library/Caches/brosis-build/proto/capacity_1m_ps16384.db",
+   "gen": {
+    "days": 30,
+    "per_day": 8640,
+    "device": "dev-mbp16",
+    "seed": 20260906,
+    "avg_chars_target": 1500,
+    "new_ratio": 0.3,
+    "fts_scheme": "bigram",
+    "observations": 259200,
+    "occurrences": 224316,
+    "text_versions": 77794,
+    "sessions": 6840,
+    "reused": 146522,
+    "thumb_refs": 64641,
+    "app_switches": 6840,
+    "text_chars": 119019816,
+    "text_bytes": 225458504,
+    "cjk_chars": 48246237,
+    "fts_body_bytes": 393815851,
+    "build_s": 50.32788683401304,
+    "finalize_s": 0.12555641699873377,
+    "textgen_s": 38.07873502961593,
+    "page_size": 16384,
+    "path": "~/Library/Caches/brosis-build/proto/capacity_1m_ps16384.db"
+   },
+   "dbstat_raw": {
+    "app_policies": {
+     "bytes": 16384,
+     "cells": 8
+    },
+    "apps": {
+     "bytes": 16384,
+     "cells": 8
+    },
+    "deletions": {
+     "bytes": 16384,
+     "cells": 0
+    },
+    "files": {
+     "bytes": 16384,
+     "cells": 5
+    },
+    "grants": {
+     "bytes": 16384,
+     "cells": 0
+    },
+    "idx_files_path": {
+     "bytes": 16384,
+     "cells": 5
+    },
+    "idx_jobs_state": {
+     "bytes": 16384,
+     "cells": 0
+    },
+    "idx_obs_app_ts": {
+     "bytes": 4915200,
+     "cells": 259200
+    },
+    "idx_obs_deleted": {
+     "bytes": 16384,
+     "cells": 0
+    },
+    "idx_obs_live": {
+     "bytes": 7372800,
+     "cells": 259200
+    },
+    "idx_obs_ts": {
+     "bytes": 4423680,
+     "cells": 259200
+    },
+    "idx_occ_obs": {
+     "bytes": 5586944,
+     "cells": 224316
+    },
+    "idx_occ_tv": {
+     "bytes": 5242880,
+     "cells": 224316
+    },
+    "idx_sessions_range": {
+     "bytes": 262144,
+     "cells": 6840
+    },
+    "idx_urls_canonical": {
+     "bytes": 16384,
+     "cells": 5
+    },
+    "idx_urls_host": {
+     "bytes": 16384,
+     "cells": 5
+    },
+    "idx_windows_title": {
+     "bytes": 16384,
+     "cells": 20
+    },
+    "jobs": {
+     "bytes": 16384,
+     "cells": 0
+    },
+    "ledgers": {
+     "bytes": 2048000,
+     "cells": 45
+    },
+    "meta": {
+     "bytes": 16384,
+     "cells": 5
+    },
+    "observations": {
+     "bytes": 34816000,
+     "cells": 261321
+    },
+    "occurrences": {
+     "bytes": 15597568,
+     "cells": 225266
+    },
+    "sessions": {
+     "bytes": 2048000,
+     "cells": 6963
+    },
+    "sqlite_autoindex_app_policies_1": {
+     "bytes": 16384,
+     "cells": 8
+    },
+    "sqlite_autoindex_apps_1": {
+     "bytes": 16384,
+     "cells": 8
+    },
+    "sqlite_autoindex_deletions_1": {
+     "bytes": 16384,
+     "cells": 0
+    },
+    "sqlite_autoindex_files_1": {
+     "bytes": 16384,
+     "cells": 5
+    },
+    "sqlite_autoindex_grants_1": {
+     "bytes": 16384,
+     "cells": 0
+    },
+    "sqlite_autoindex_ledgers_1": {
+     "bytes": 16384,
+     "cells": 30
+    },
+    "sqlite_autoindex_ledgers_2": {
+     "bytes": 16384,
+     "cells": 30
+    },
+    "sqlite_autoindex_meta_1": {
+     "bytes": 16384,
+     "cells": 5
+    },
+    "sqlite_autoindex_observations_1": {
+     "bytes": 6455296,
+     "cells": 259200
+    },
+    "sqlite_autoindex_occurrences_1": {
+     "bytes": 5586944,
+     "cells": 224316
+    },
+    "sqlite_autoindex_occurrences_2": {
+     "bytes": 5832704,
+     "cells": 224316
+    },
+    "sqlite_autoindex_sessions_1": {
+     "bytes": 180224,
+     "cells": 6840
+    },
+    "sqlite_autoindex_text_versions_1": {
+     "bytes": 1900544,
+     "cells": 77794
+    },
+    "sqlite_autoindex_text_versions_2": {
+     "bytes": 7192576,
+     "cells": 77794
+    },
+    "sqlite_autoindex_urls_1": {
+     "bytes": 16384,
+     "cells": 5
+    },
+    "sqlite_autoindex_windows_1": {
+     "bytes": 16384,
+     "cells": 20
+    },
+    "sqlite_schema": {
+     "bytes": 16384,
+     "cells": 50
+    },
+    "sqlite_stat1": {
+     "bytes": 16384,
+     "cells": 29
+    },
+    "sqlite_stat4": {
+     "bytes": 65536,
+     "cells": 438
+    },
+    "text_fts_config": {
+     "bytes": 16384,
+     "cells": 1
+    },
+    "text_fts_data": {
+     "bytes": 175570944,
+     "cells": 56991
+    },
+    "text_fts_docsize": {
+     "bytes": 1048576,
+     "cells": 77856
+    },
+    "text_fts_idx": {
+     "bytes": 245760,
+     "cells": 13511
+    },
+    "text_versions": {
+     "bytes": 257654784,
+     "cells": 93508
+    },
+    "urls": {
+     "bytes": 16384,
+     "cells": 5
+    },
+    "windows": {
+     "bytes": 16384,
+     "cells": 20
+    }
+   },
+   "dbstat_groups": {
+    "策略与运行时（meta/jobs/grants/app_policies/deletions）": {
+     "data": 81920,
+     "index": 81920
+    },
+    "规范化对象（apps/windows/urls/files）": {
+     "data": 65536,
+     "index": 131072
+    },
+    "observations（观察）": {
+     "data": 34816000,
+     "index": 23183360
+    },
+    "occurrences（出现记录）": {
+     "data": 15597568,
+     "index": 22249472
+    },
+    "sessions（会话）": {
+     "data": 2048000,
+     "index": 442368
+    },
+    "ledgers（日台账）": {
+     "data": 2048000,
+     "index": 32768
+    },
+    "text_versions（原文）": {
+     "data": 257654784,
+     "index": 9093120
+    },
+    "sqlite_schema（表定义）": {
+     "data": 16384,
+     "index": 0
+    },
+    "sqlite_stat1/stat4（ANALYZE 统计）": {
+     "data": 81920,
+     "index": 0
+    },
+    "text_fts（全文索引）": {
+     "data": 0,
+     "index": 176881664
+    }
+   },
+   "payload_bytes": 225458504,
+   "fts_rows": 77794,
+   "freelist_pages": 120,
+   "freelist_bytes": 1966080,
+   "integrity": "ok",
+   "files": {
+    "主库": 546652160,
+    "WAL": 0,
+    "SHM": 0
+   },
+   "total_file_bytes": 546652160,
+   "wal_peak_bytes": 50192104,
+   "shm_peak_bytes": 32768,
+   "tmp_peak_build_bytes": 0,
+   "build_s": 50.32788683401304,
+   "finalize_s": 0.12555641699873377,
+   "variant_label": "page_size=16384，fts=bigram"
+  },
+  {
+   "tag": "1m_trigram",
+   "months": 1,
+   "days": 30,
+   "fts_scheme": "trigram",
+   "page_size": 4096,
+   "db_path": "~/Library/Caches/brosis-build/proto/capacity_1m_trigram.db",
+   "gen": {
+    "days": 30,
+    "per_day": 8640,
+    "device": "dev-mbp16",
+    "seed": 20260906,
+    "avg_chars_target": 1500,
+    "new_ratio": 0.3,
+    "fts_scheme": "trigram",
+    "observations": 259200,
+    "occurrences": 224316,
+    "text_versions": 77794,
+    "sessions": 6840,
+    "reused": 146522,
+    "thumb_refs": 64641,
+    "app_switches": 6840,
+    "text_chars": 119019816,
+    "text_bytes": 225458504,
+    "cjk_chars": 48246237,
+    "fts_body_bytes": 0,
+    "build_s": 51.72677524999017,
+    "finalize_s": 0.18152437500248197,
+    "textgen_s": 4.396304155685357,
+    "page_size": 4096,
+    "path": "~/Library/Caches/brosis-build/proto/capacity_1m_trigram.db"
+   },
+   "dbstat_raw": {
+    "app_policies": {
+     "bytes": 4096,
+     "cells": 8
+    },
+    "apps": {
+     "bytes": 4096,
+     "cells": 8
+    },
+    "deletions": {
+     "bytes": 4096,
+     "cells": 0
+    },
+    "files": {
+     "bytes": 4096,
+     "cells": 5
+    },
+    "grants": {
+     "bytes": 4096,
+     "cells": 0
+    },
+    "idx_files_path": {
+     "bytes": 4096,
+     "cells": 5
+    },
+    "idx_jobs_state": {
+     "bytes": 4096,
+     "cells": 0
+    },
+    "idx_obs_app_ts": {
+     "bytes": 4849664,
+     "cells": 259200
+    },
+    "idx_obs_deleted": {
+     "bytes": 4096,
+     "cells": 0
+    },
+    "idx_obs_live": {
+     "bytes": 7397376,
+     "cells": 259200
+    },
+    "idx_obs_ts": {
+     "bytes": 4431872,
+     "cells": 259200
+    },
+    "idx_occ_obs": {
+     "bytes": 5611520,
+     "cells": 224316
+    },
+    "idx_occ_tv": {
+     "bytes": 5300224,
+     "cells": 224316
+    },
+    "idx_sessions_range": {
+     "bytes": 245760,
+     "cells": 6840
+    },
+    "idx_urls_canonical": {
+     "bytes": 4096,
+     "cells": 5
+    },
+    "idx_urls_host": {
+     "bytes": 4096,
+     "cells": 5
+    },
+    "idx_windows_title": {
+     "bytes": 4096,
+     "cells": 20
+    },
+    "jobs": {
+     "bytes": 4096,
+     "cells": 0
+    },
+    "ledgers": {
+     "bytes": 1986560,
+     "cells": 58
+    },
+    "meta": {
+     "bytes": 4096,
+     "cells": 5
+    },
+    "observations": {
+     "bytes": 35344384,
+     "cells": 267805
+    },
+    "occurrences": {
+     "bytes": 15704064,
+     "cells": 228138
+    },
+    "sessions": {
+     "bytes": 2117632,
+     "cells": 7353
+    },
+    "sqlite_autoindex_app_policies_1": {
+     "bytes": 4096,
+     "cells": 8
+    },
+    "sqlite_autoindex_apps_1": {
+     "bytes": 4096,
+     "cells": 8
+    },
+    "sqlite_autoindex_deletions_1": {
+     "bytes": 4096,
+     "cells": 0
+    },
+    "sqlite_autoindex_files_1": {
+     "bytes": 4096,
+     "cells": 5
+    },
+    "sqlite_autoindex_grants_1": {
+     "bytes": 4096,
+     "cells": 0
+    },
+    "sqlite_autoindex_ledgers_1": {
+     "bytes": 4096,
+     "cells": 30
+    },
+    "sqlite_autoindex_ledgers_2": {
+     "bytes": 4096,
+     "cells": 30
+    },
+    "sqlite_autoindex_meta_1": {
+     "bytes": 4096,
+     "cells": 5
+    },
+    "sqlite_autoindex_observations_1": {
+     "bytes": 6483968,
+     "cells": 259200
+    },
+    "sqlite_autoindex_occurrences_1": {
+     "bytes": 5603328,
+     "cells": 224316
+    },
+    "sqlite_autoindex_occurrences_2": {
+     "bytes": 5869568,
+     "cells": 224316
+    },
+    "sqlite_autoindex_sessions_1": {
+     "bytes": 159744,
+     "cells": 6840
+    },
+    "sqlite_autoindex_text_versions_1": {
+     "bytes": 1892352,
+     "cells": 77794
+    },
+    "sqlite_autoindex_text_versions_2": {
+     "bytes": 7491584,
+     "cells": 77794
+    },
+    "sqlite_autoindex_urls_1": {
+     "bytes": 4096,
+     "cells": 5
+    },
+    "sqlite_autoindex_windows_1": {
+     "bytes": 4096,
+     "cells": 20
+    },
+    "sqlite_schema": {
+     "bytes": 16384,
+     "cells": 54
+    },
+    "sqlite_stat1": {
+     "bytes": 4096,
+     "cells": 29
+    },
+    "sqlite_stat4": {
+     "bytes": 49152,
+     "cells": 455
+    },
+    "text_fts_config": {
+     "bytes": 4096,
+     "cells": 1
+    },
+    "text_fts_data": {
+     "bytes": 401207296,
+     "cells": 198496
+    },
+    "text_fts_docsize": {
+     "bytes": 847872,
+     "cells": 77999
+    },
+    "text_fts_idx": {
+     "bytes": 331776,
+     "cells": 19894
+    },
+    "text_versions": {
+     "bytes": 318590976,
+     "cells": 153320
+    },
+    "urls": {
+     "bytes": 4096,
+     "cells": 5
+    },
+    "windows": {
+     "bytes": 4096,
+     "cells": 20
+    }
+   },
+   "dbstat_groups": {
+    "策略与运行时（meta/jobs/grants/app_policies/deletions）": {
+     "data": 20480,
+     "index": 20480
+    },
+    "规范化对象（apps/windows/urls/files）": {
+     "data": 16384,
+     "index": 32768
+    },
+    "observations（观察）": {
+     "data": 35344384,
+     "index": 23166976
+    },
+    "occurrences（出现记录）": {
+     "data": 15704064,
+     "index": 22384640
+    },
+    "sessions（会话）": {
+     "data": 2117632,
+     "index": 405504
+    },
+    "ledgers（日台账）": {
+     "data": 1986560,
+     "index": 8192
+    },
+    "text_versions（原文）": {
+     "data": 318590976,
+     "index": 9383936
+    },
+    "sqlite_schema（表定义）": {
+     "data": 16384,
+     "index": 0
+    },
+    "sqlite_stat1/stat4（ANALYZE 统计）": {
+     "data": 53248,
+     "index": 0
+    },
+    "text_fts（全文索引）": {
+     "data": 0,
+     "index": 402391040
+    }
+   },
+   "payload_bytes": 225458504,
+   "fts_rows": 77794,
+   "freelist_pages": 97,
+   "freelist_bytes": 397312,
+   "integrity": "ok",
+   "files": {
+    "主库": 833060864,
+    "WAL": 0,
+    "SHM": 0
+   },
+   "total_file_bytes": 833060864,
+   "wal_peak_bytes": 273077752,
+   "shm_peak_bytes": 557056,
+   "tmp_peak_build_bytes": 0,
+   "build_s": 51.72677524999017,
+   "finalize_s": 0.18152437500248197,
+   "variant_label": "page_size=4096，fts=trigram detail=full（schema.sql 占位）"
+  }
+ ],
+ "index_probe": {
+  "db": "~/Library/Caches/brosis-build/proto/capacity_12m.db",
+  "cases": [
+   {
+    "case": "谓词命中 0 行",
+    "before_p50": 508.12170800054446,
+    "before_p95": 516.3195409986656,
+    "after_p50": 523.4383749921108,
+    "after_p95": 526.9909580092644,
+    "plan_after": "SCAN o USING INDEX idx_obs_ts / BLOOM FILTER ON f (id=?) / SEARCH f USING INTEGER PRIMARY KEY (rowid=?)"
+   },
+   {
+    "case": "谓词命中 1 行（库里真有这个 file）",
+    "before_p50": 0.025832996470853686,
+    "before_p95": 0.0421659933635965,
+    "after_p50": 0.027708010748028755,
+    "after_p95": 0.031666000722907484,
+    "plan_after": "SCAN o USING INDEX idx_obs_ts / BLOOM FILTER ON f (id=?) / SEARCH f USING INTEGER PRIMARY KEY (rowid=?)"
+   }
+  ],
+  "index_bytes": 51224576,
+  "build_ms": 1037.5359159952495,
+  "db_bytes_before": 7343824896,
+  "db_bytes_after": 7292542976,
+  "months": 12
+ },
+ "content_probe": {
+  "db": "~/Library/Caches/brosis-build/proto/capacity_1m.db",
+  "months": 1,
+  "per_app": [
+   {
+    "bundle": "com.microsoft.VSCode",
+    "name": "Visual Studio Code",
+    "versions": 10061,
+    "bytes": 29206274,
+    "share": 12.954168275684115
+   },
+   {
+    "bundle": "com.apple.dt.Xcode",
+    "name": "Xcode",
+    "versions": 9951,
+    "bytes": 28921263,
+    "share": 12.827754325913562
+   },
+   {
+    "bundle": "com.tencent.xinWeChat",
+    "name": "微信",
+    "versions": 9974,
+    "bytes": 28859315,
+    "share": 12.800277872863026
+   },
+   {
+    "bundle": "com.electron.lark",
+    "name": "飞书",
+    "versions": 9816,
+    "bytes": 28418888,
+    "share": 12.604930617298871
+   },
+   {
+    "bundle": "com.apple.Terminal",
+    "name": "Terminal",
+    "versions": 9715,
+    "bytes": 28170198,
+    "share": 12.494626505638482
+   },
+   {
+    "bundle": "com.apple.Safari",
+    "name": "Safari",
+    "versions": 9687,
+    "bytes": 28008053,
+    "share": 12.422708615151638
+   },
+   {
+    "bundle": "com.google.Chrome",
+    "name": "Google Chrome",
+    "versions": 9459,
+    "bytes": 27407794,
+    "share": 12.156469378507008
+   },
+   {
+    "bundle": "md.obsidian",
+    "name": "Obsidian",
+    "versions": 9131,
+    "bytes": 26466719,
+    "share": 11.739064408943298
+   }
+  ],
+  "total_text_bytes": 225458504,
+  "sample": 4000,
+  "sample_bytes": 11601657,
+  "codecs": [
+   {
+    "codec": "zlib level 6（逐段独立压缩）",
+    "bytes": 6925669,
+    "ratio": 0.5969551590777076,
+    "compress_mb_s": 65.82877977068776,
+    "decompress_mb_s": 438.24119677356333,
+    "us_per_doc_compress": 42.01886449664016,
+    "us_per_doc_decompress": 6.311708249995718
+   },
+   {
+    "codec": "zlib level 9（逐段独立压缩）",
+    "bytes": 6925667,
+    "ratio": 0.5969549866885394,
+    "compress_mb_s": 65.20316203005797,
+    "decompress_mb_s": 436.7175445365944,
+    "us_per_doc_compress": 42.42203124886146,
+    "us_per_doc_decompress": 6.3337290011986624
+   },
+   {
+    "codec": "lzma preset 3（逐段独立压缩）",
+    "bytes": 6944212,
+    "ratio": 0.5985534652506965,
+    "compress_mb_s": 19.82880816260435,
+    "decompress_mb_s": 51.098773067737824,
+    "us_per_doc_compress": 139.49656250042608,
+    "us_per_doc_decompress": 54.13144799967995
+   }
+  ]
+ }
+}

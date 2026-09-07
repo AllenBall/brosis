@@ -1,0 +1,62 @@
+  1  import Vision
+  2  import CoreGraphics
+  3  
+  4  enum StoreError: Error { case prepareFailed(code: Int32, msg: String) }
+  5  
+  6  @inline(__always)
+  7  func recognizeText(in image: CGImage, level: VNRequestTextRecognitionLevel) throws -> [String] {
+  8      let request = VNRecognizeTextRequest()
+  9      request.recognitionLevel = level
+ 10      request.recognitionLanguages = ["zh-Hans", "en-US"]
+ 11      request.usesLanguageCorrection = false
+ 12      request.minimumTextHeight = 0.008          // 约 18 px @ 2234 px 高
+ 13      let handler = VNImageRequestHandler(cgImage: image, options: [:])
+ 14      try handler.perform([request])
+ 15      return (request.results ?? []).compactMap { $0.topCandidates(1).first?.string }
+ 16  }
+ 17  
+ 18  let mask: UInt32 = 0x8000_0000 | CGImageAlphaInfo.premultipliedFirst.rawValue
+ 19  
+ 20  // MARK: - 持久化
+ 21  let sql = """
+ 22  SELECT o.id, o.ts, o.app, o.title, substr(o.text, 1, 240) AS snippet
+ 23    FROM observations AS o
+ 24    JOIN observations_fts AS f ON f.rowid = o.id
+ 25   WHERE f.observations_fts MATCH ?1
+ 26     AND o.ts >= unixepoch('now', '-7 day')
+ 27   ORDER BY bm25(observations_fts) ASC LIMIT 50;
+ 28  """
+ 29  guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+ 30      throw StoreError.prepareFailed(code: sqlite3_errcode(db), msg: String(cString: sqlite3_errmsg(db)))
+ 31  }
+ 32  defer { sqlite3_finalize(stmt) }
+ 33  
+ 34  # --- shell ---
+ 35  $ swiftc -O -o ~/Library/Caches/brosis-build/ocr/ocr_bench ocr_bench.swift
+ 36  $ ./ocr_bench --runs 12 --warmup 2 --out ./results 2>&1 | tee bench.log
+ 37  $ sqlite3 observations.sqlite "PRAGMA journal_mode=WAL;"   # -> wal
+ 38  $ curl -sS --max-time 30 https://api.brosis.local/v1/ingest -d @payload.json
+ 39  $ codesign -dv --verbose=4 /usr/local/bin/brosisd 2>&1 | grep TeamIdentifier
+ 40  TeamIdentifier=9K7X2QJ8AB
+ 41  # error: ERR_TCC_DENIED (errno 13) while opening /var/db/brosis/wal
+ 42  # warning: 'usesLanguageCorrection' 对 zh-Hans 的收益未验证，见 F6
+ 43  import Vision
+ 44  import CoreGraphics
+ 45  
+ 46  enum StoreError: Error { case prepareFailed(code: Int32, msg: String) }
+ 47  
+ 48  @inline(__always)
+ 49  func recognizeText(in image: CGImage, level: VNRequestTextRecognitionLevel) throws -> [String] {
+ 50      let request = VNRecognizeTextRequest()
+ 51      request.recognitionLevel = level
+ 52      request.recognitionLanguages = ["zh-Hans", "en-US"]
+ 53      request.usesLanguageCorrection = false
+ 54      request.minimumTextHeight = 0.008          // 约 18 px @ 2234 px 高
+ 55      let handler = VNImageRequestHandler(cgImage: image, options: [:])
+ 56      try handler.perform([request])
+ 57      return (request.results ?? []).compactMap { $0.topCandidates(1).first?.string }
+ 58  }
+ 59  
+ 60  let mask: UInt32 = 0x8000_0000 | CGImageAlphaInfo.premultipliedFirst.rawValue
+ 61  
+ 62  // MARK: - 持久化

@@ -1,0 +1,32 @@
+You are an activity-extraction engine. Given a screen observation, output ONLY a JSON object with keys: activity_type (one of coding|writing|browsing|communication|meeting|media|other), project (string or null), entities (array of {type: person|file|url|topic|tool|task, name: string}), summary (one sentence, Chinese). No prose.
+
+Observation (long):
+app=Xcode window="brosis — CaptureDaemon.swift" ts=2026-09-05T10:42:11+08:00
+text:
+import ScreenCaptureKit
+final class CaptureDaemon { let stream: SCStream; func start() async throws { ... } }
+// TODO: 接入 AX 文本抽取；OCR 作为回退；把 observation 写入 SQLite（FTS5 + sqlite-vec）
+// 参考 https://developer.apple.com/documentation/screencapturekit
+// 和 Allen 讨论：先做 text-only 模式，缩略图 480px WebP，保留 30 天
+
+Slack — #brosis-dev | Allen: 我看了 Screenpipe 的存储数据，视频+音频一个月 10-15GB，我们只存文本+缩略图应该能压到 1GB 以内。
+Allen: 另外 macOS 15 之后 screen recording 每个月弹一次授权，守护进程要处理这个。
+Junya: 收到。我先把 AX 抽取做出来，Chrome/Electron 要先设置 AXManualAccessibility 才能拿到 DOM 树。
+Junya: KG 这块我倾向 Graphiti 的时间边模型（valid_at/invalid_at），但存储换成 SQLite，不上 Neo4j。
+Allen: 同意。embedding 用 Qwen3-Embedding-0.6B 或 nomic v1.5，256 维 int8 就够了。
+Chrome — "Graphiti: Temporal Knowledge Graphs for Agent Memory — GitHub" https://github.com/getzep/graphiti
+Chrome — "sqlite-vec: A vector search SQLite extension" https://github.com/asg017/sqlite-vec
+Finder — ~/Projects/brosis/docs/可行性报告.md  修改于 今天 10:41
+Calendar — 14:00 与 Allen 同步 KG schema；16:30 牙医 (private)
+Terminal — $ sqlite3 brosis.db "select count(*) from observations" → 8613
+
+Slack — #brosis-dev | Allen: 我看了 Screenpipe 的存储数据，视频+音频一个月 10-15GB，我们只存文本+缩略图应该能压到 1GB 以内。
+Allen: 另外 macOS 15 之后 screen recording 每个月弹一次授权，守护进程要处理这个。
+Junya: 收到。我先把 AX 抽取做出来，Chrome/Electron 要先设置 AXManualAccessibility 才能拿到 DOM 树。
+Junya: KG 这块我倾向 Graphiti 的时间边模型（valid_at/invalid_at），但存储换成 SQLite，不上 Neo4j。
+Allen: 同意。embedding 用 Qwen3-Embedding-0.6B 或 nomic v1.5，256 维 int8 就够了。
+Chrome — "Graphiti: Temporal Knowledge Graphs for Agent Memory — GitHub" https://github.com/getzep/graphiti
+Chrome — "sqlite-vec: A vector search SQLite extension" https://github.com/asg017/sqlite-vec
+Finder — ~/Projects/brosis/docs/可行性报告.md  修改于 今天 10:41
+Calendar — 14:00 与 Allen 同步 KG schema；16:30 牙医 (private)
+Terminal — $ sqlite3 brosis.db "select count(*) from observations" → 8613

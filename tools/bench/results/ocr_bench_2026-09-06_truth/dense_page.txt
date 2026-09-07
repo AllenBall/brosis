@@ -1,0 +1,70 @@
+brosis 项目周报 · 2026 年第 36 周 · 负责人 Allen Qiu
+import Vision
+brosisd[4821] INFO  启动完成，pid=4821，配置版本 v0.14
+本周主线是把采集守护进程 brosisd 的文本通路跑通：AX 优先，OCR 兜底。
+import CoreGraphics
+brosisd[4821] DEBUG SCStream 已附着到 display 1 (3456x2234 @ 2x)
+新增 captureFrame(_:) 与 recognizeText(in:level:) 两个入口，均走 async/await。
+brosisd[4821] WARN  AX 文本为空，回退 OCR：com.apple.Terminal
+ScreenCaptureKit 文档见 https://developer.apple.com/documentation/screencapturekit
+enum StoreError: Error { case prepareFailed(code: Int32, msg: String) }
+brosisd[4821] INFO  OCR accurate 用时 1187 ms，观测 42 行，字符 1893
+Vision 的 VNRecognizeTextRequest 在 accurate 模式下对 11pt 代码字仍有可用召回。
+brosisd[4821] ERROR kTCCServiceScreenCapture 未授权，OSStatus=-25300，30 s 后重试
+二进制安装路径 /usr/local/bin/brosisd，日志写入 /var/log/brosis/daemon.log。
+@inline(__always)
+brosisd[4821] INFO  写入 observations.sqlite，rowid=88214，source=ocr
+配置文件 ~/Library/Application Support/brosis/config.json 支持热重载。
+func recognizeText(in image: CGImage, level: VNRequestTextRecognitionLevel) throws -> [String] {
+brosisd[4821] DEBUG FTS5 索引更新耗时 12.4 ms，WAL 大小 96 MB
+权限缺失时抛出 kTCCServiceScreenCapture 未授权，OSStatus 为 -25300。
+    let request = VNRecognizeTextRequest()
+brosisd[4821] WARN  磁盘剩余 18.3 GB，低于 20 GB 阈值，进入降级档 2
+另一个常见错误是 NSError Domain=NSCocoaErrorDomain Code=257，读取被拒。
+    request.recognitionLevel = level
+brosisd[4821] INFO  嵌入队列长度 137，批大小 32，预计 4.2 s 清空
+数据库 observations.sqlite 现为 1.87 GB，FTS5 索引 412 MB，向量表 96 MB。
+    request.recognitionLanguages = ["zh-Hans", "en-US"]
+brosisd[4821] ERROR HTTP 503 from https://api.brosis.local/v1/ingest (retry 2/3)
+本月云服务账单 $128.40，本地 SSD 扩容预算 ¥2,480.00，合计约 ¥3,392.16。
+    request.usesLanguageCorrection = false
+brosisd[4821] INFO  用户触发暂停，采集器进入 paused 状态
+提交 a3f9c1e 修复 OCRPipeline.swift 里 boundingBox 坐标系翻转的问题。
+    request.minimumTextHeight = 0.008          // 约 18 px @ 2234 px 高
+brosisd[4821] INFO  排除清单命中 com.agilebits.onepassword7，跳过本帧
+提交 7be20d4 把 schema 从 v0.13 升到 v0.14，新增 observations.source 列。
+    let handler = VNImageRequestHandler(cgImage: image, options: [:])
+user@m4max ~ % ps -o pid,rss,%cpu -p 4821
+The quick brown fox jumps over the lazy dog; 敏捷的棕色狐狸跳过了懒狗。
+    try handler.perform([request])
+  PID    RSS  %CPU
+Pack my box with five dozen liquor jugs. 0123456789 ABCDEFGHIJKLMNOP
+    return (request.results ?? []).compactMap { $0.topCandidates(1).first?.string }
+ 4821 412336   3.7
+下一步：先做 SQLCipher 落库，再接 sqlite-vec 做向量召回，最后补 MCP 授权。
+}
+user@m4max ~ % du -sh ~/Library/Application\ Support/brosis
+验收口径：端到端 p95 延迟 < 300 ms，单帧 OCR p50 < 1200 ms（3456×2234）。
+1.9G    /Users/allen/Library/Application Support/brosis
+存储口径统一按 UTF-8 字节计：每日 388.8 万字符约 3.89–11.66 MB。
+let mask: UInt32 = 0x8000_0000 | CGImageAlphaInfo.premultipliedFirst.rawValue
+user@m4max ~ % git log --oneline -3
+评审意见 F6 要求同源缩放，本次基准已按同一张位图做高质量插值下采样。
+a3f9c1e fix(ocr): 修正 boundingBox 坐标翻转
+风险：Air 的 16 GB 内存在跑 4B 模型时余量不足，需要在 E9 阶段实测。
+// MARK: - 持久化
+7be20d4 feat(store): schema v0.14 增加 source 列
+会议纪要 2026-09-06 10:30：确认 M0 出口为记录、找回、展开、删除四步闭环。
+let sql = """
+c15d90f chore(bench): 同源缩放与 CER 指标
+参会：Allen、Claude；缺席：无。下次评审定在 2026-09-13 14:00。
+SELECT o.id, o.ts, o.app, o.title, substr(o.text, 1, 240) AS snippet
+user@m4max ~ % swift build -c release 2>&1 | tail -2
+TODO(allen): 把 idx_obs_ts 换成 (app, ts) 复合索引，看 EXPLAIN QUERY PLAN。
+  FROM observations AS o
+[42/42] Compiling brosisd OCRPipeline.swift
+TODO(claude): 补 tools/bench/ocr_bench.swift 的真值校验与 CER 计算。
+  JOIN observations_fts AS f ON f.rowid = o.id
+Build complete! (18.42s)
+术语表：CER = character error rate，字符错误率；p95 = 95 分位延迟。
+ WHERE f.observations_fts MATCH ?1

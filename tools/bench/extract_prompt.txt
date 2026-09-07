@@ -1,0 +1,10 @@
+You are an activity-extraction engine. Given a screen observation, output ONLY a JSON object with keys: activity_type (one of coding|writing|browsing|communication|meeting|media|other), project (string or null), entities (array of {type: person|file|url|topic|tool|task, name: string}), summary (one sentence, Chinese). No prose.
+
+Observation:
+app=Xcode window="brosis — CaptureDaemon.swift" ts=2026-09-05T10:42:11+08:00
+text:
+import ScreenCaptureKit
+final class CaptureDaemon { let stream: SCStream; func start() async throws { ... } }
+// TODO: 接入 AX 文本抽取；OCR 作为回退；把 observation 写入 SQLite（FTS5 + sqlite-vec）
+// 参考 https://developer.apple.com/documentation/screencapturekit
+// 和 Allen 讨论：先做 text-only 模式，缩略图 480px WebP，保留 30 天

@@ -1,0 +1,460 @@
+{
+ "seed": 20260907,
+ "queryInstruction": "Instruct: Given a web search query, retrieve relevant passages that answer the query\nQuery:",
+ "pairs": {
+  "zh_synonym": [
+   [
+    "今天下午我在 Xcode 里调试采集模块的崩溃问题。",
+    "下午的时间都花在用 Xcode 排查采集模块崩溃上了。"
+   ],
+   [
+    "这份可行性报告里写了 OCR 的准确模式耗时。",
+    "可行性报告中记录了 OCR accurate 模式的耗时数据。"
+   ],
+   [
+    "会议纪要说下周一开始做向量检索的评估。",
+    "纪要里定的是下周一启动向量检索评估工作。"
+   ],
+   [
+    "屏幕录制权限每个月要重新授权一次。",
+    "系统每月会要求重新授予一次屏幕录制权限。"
+   ],
+   [
+    "数据库文件不能放在 iCloud Drive 里同步。",
+    "不要把数据库文件放进 iCloud Drive 做同步。"
+   ],
+   [
+    "嵌入模型只在本机跑，不把正文发到线上。",
+    "嵌入一律本地计算，正文不会外发给线上服务。"
+   ],
+   [
+    "公司那台是 16 GB 内存的 MacBook Air。",
+    "工作用的机器是内存 16 GB 的 MacBook Air。"
+   ],
+   [
+    "夜间任务跑完之后要立刻把模型卸载掉。",
+    "模型在夜间任务结束后应当马上释放内存。"
+   ],
+   [
+    "中文短词在全文检索里容易被漏掉。",
+    "全文索引对中文的一两个字的词经常检索不到。"
+   ],
+   [
+    "签名用的是 Developer ID 证书并开启强化运行时。",
+    "我们用 Developer ID 签名并启用了 hardened runtime。"
+   ]
+  ],
+  "en_synonym": [
+   [
+    "The screen recording permission has to be re-approved every month.",
+    "macOS asks you to grant screen recording again on a monthly basis."
+   ],
+   [
+    "Store the SQLite database outside of any file syncing folder.",
+    "Keep the SQLite file away from folders that sync across machines."
+   ],
+   [
+    "Embeddings run locally so no document text leaves the machine.",
+    "All embedding happens on device; no body text is sent to a server."
+   ],
+   [
+    "The build failed because the Metal shader library was missing.",
+    "Compilation broke since the metallib for Metal shaders could not be found."
+   ],
+   [
+    "Unload the language model as soon as the nightly job finishes.",
+    "Free the model memory right after the overnight task completes."
+   ],
+   [
+    "Full text search misses very short Chinese queries.",
+    "Queries of one or two Chinese characters are not found by the FTS index."
+   ],
+   [
+    "The laptop used at work is a MacBook Air with 16 GB of memory.",
+    "My office machine is a 16 GB MacBook Air."
+   ],
+   [
+    "We sign the app with a Developer ID certificate and hardened runtime.",
+    "The application is signed using Developer ID plus the hardened runtime option."
+   ],
+   [
+    "Resume the download from the byte offset already written to disk.",
+    "Continue fetching the file starting at the offset that was saved."
+   ],
+   [
+    "Verify the SHA-256 checksum of every downloaded weight file.",
+    "Check each weight file against its SHA-256 digest after downloading."
+   ]
+  ],
+  "cross_lingual": [
+   [
+    "屏幕录制权限每个月要重新授权一次。",
+    "The screen recording permission must be re-granted once a month."
+   ],
+   [
+    "数据库文件不能放在 iCloud Drive 里同步。",
+    "The database file must not be placed inside iCloud Drive for syncing."
+   ],
+   [
+    "嵌入模型只在本机跑，不把正文发到线上。",
+    "The embedding model runs locally and never sends body text online."
+   ],
+   [
+    "构建失败是因为找不到 Metal 着色器库。",
+    "The build failed because the Metal shader library could not be located."
+   ],
+   [
+    "夜间任务跑完之后要立刻把模型卸载掉。",
+    "Unload the model immediately after the nightly job is done."
+   ],
+   [
+    "中文短词在全文检索里容易被漏掉。",
+    "Short Chinese terms are easily missed by full text search."
+   ],
+   [
+    "公司那台是 16 GB 内存的 MacBook Air。",
+    "The work machine is a MacBook Air with 16 GB of RAM."
+   ],
+   [
+    "下载中断后要能从已写入的字节继续。",
+    "After an interrupted download it must resume from the bytes already written."
+   ],
+   [
+    "每个权重文件都要校验 SHA-256。",
+    "Every weight file has to be verified against its SHA-256 hash."
+   ],
+   [
+    "推荐清单随 app 打包，运行时不联网拉取。",
+    "The recommendation list ships with the app and is never fetched at runtime."
+   ]
+  ],
+  "unrelated": [
+   [
+    "今天下午我在 Xcode 里调试采集模块的崩溃问题。",
+    "楼下那家川菜馆的水煮鱼分量很足。"
+   ],
+   [
+    "The build failed because the Metal shader library was missing.",
+    "She planted three rows of tulips along the south fence."
+   ],
+   [
+    "数据库文件不能放在 iCloud Drive 里同步。",
+    "The ferry to the island leaves at a quarter past six."
+   ],
+   [
+    "嵌入模型只在本机跑，不把正文发到线上。",
+    "上周末去爬了香山，红叶还没全红。"
+   ],
+   [
+    "Verify the SHA-256 checksum of every downloaded weight file.",
+    "他小时候学过四年小提琴，后来就放下了。"
+   ],
+   [
+    "夜间任务跑完之后要立刻把模型卸载掉。",
+    "The bakery on the corner sells sourdough only on Fridays."
+   ],
+   [
+    "中文短词在全文检索里容易被漏掉。",
+    "台风过境之后，海边的栈道被冲坏了一段。"
+   ],
+   [
+    "We sign the app with a Developer ID certificate and hardened runtime.",
+    "冰箱里还剩两个鸡蛋和半盒牛奶。"
+   ],
+   [
+    "公司那台是 16 GB 内存的 MacBook Air。",
+    "The referee showed a yellow card in the eighty-second minute."
+   ],
+   [
+    "推荐清单随 app 打包，运行时不联网拉取。",
+    "他养的那只橘猫最近胖了不少。"
+   ]
+  ]
+ },
+ "mrl": {
+  "docs": [
+   "系统设置 — brosis/tools/bench/notes.txt:203  记录了耗时，模型下载器相关",
+   "Numbers · 群聊「brosis 研发」 陈静：台账口径那块回滚了一次了，28 号之前给结论",
+   "预览 — iCloud sync · Hugging Face — 模型下载器",
+   "Chrome — docs/可行性调研报告.md 第 9.5 节 内存峰值（screen capture permission）",
+   "Terminal — $ swift build -c release  Build complete (191.17s)  OCR benchmark",
+   "Xcode — 9:00 王磊 主持的OCR 基准评审，结论：记录了耗时；下一步 session segmentation",
+   "Safari — brosis/tools/e9/main.swift:275  导出了结果，OCR 基准相关",
+   "Preview · 群聊「brosis 研发」 李娜：模型下载器那块补了单元测试了，24 号之前给结论",
+   "Chrome — model downloader · Apple Developer — 向量检索评估",
+   "Preview — docs/可行性调研报告.md 第 5.2 节 公证流程（ledger）",
+   "Terminal — $ swift build -c release  error: cannot find (91.38s)  model downloader",
+   "VS Code — 9:30 Maria 主持的热降频评审，结论：重新授权；下一步 OCR benchmark",
+   "VS Code — brosis/tools/proto/Embedder.swift:691  跑了一遍基准，向量检索评估相关",
+   "Terminal · 群聊「brosis 研发」 李娜：哈希校验那块对齐了口径了，10 号之前给结论",
+   "Slack — peak memory · GitHub — 断点续传",
+   "Chrome — docs/实施计划.md 第 3.9 节 屏幕采集权限（iCloud sync）",
+   "Terminal — $ swift build -c release  warning: deprecated (13.87s)  OCR benchmark",
+   "Terminal — 11:15 Maria 主持的排除清单评审，结论：重新授权；下一步 screen capture permission",
+   "Chrome — brosis/tools/e9/catalog.json:303  补了单元测试，内存峰值相关",
+   "Slack · 群聊「brosis 研发」 Alex：向量检索评估那块补了单元测试了，21 号之前给结论",
+   "预览 — menu bar status · Apple Developer — 会话切分",
+   "钉钉 — docs/实施计划.md 第 8.6 节 菜单栏状态（peak memory）",
+   "Terminal — $ swift build -c release  Build complete (179.55s)  notarization",
+   "Notes — 10:30 刘洋 主持的内存峰值评审，结论：对齐了口径；下一步 range resume",
+   "Xcode — brosis/tools/bench/notes.txt:855  回滚了一次，菜单栏状态相关",
+   "预览 · 群聊「brosis 研发」 李娜：向量检索评估那块记录了耗时了，1 号之前给结论",
+   "Chrome — screen capture permission · Hugging Face — 热降频",
+   "预览 — docs/可行性调研报告.md 第 11.9 节 内存峰值（exclusion list）",
+   "Terminal — $ swift build -c release  Build complete (285.79s)  exclusion list",
+   "Safari — 9:00 Maria 主持的向量检索评估评审，结论：记录了耗时；下一步 range resume",
+   "飞书 — brosis/tools/probe/fts_compare.py:321  回滚了一次，内存峰值相关",
+   "飞书 · 群聊「brosis 研发」 赵敏：会话切分那块导出了结果了，20 号之前给结论",
+   "Numbers — ledger · Stack Overflow — 全文检索方案",
+   "钉钉 — docs/可行性调研报告.md 第 3.3 节 iCloud 同步（checksum verification）",
+   "Terminal — $ swift build -c release  error: cannot find (151.55s)  range resume",
+   "预览 — 11:15 刘洋 主持的哈希校验评审，结论：改了参数；下一步 peak memory",
+   "系统设置 — brosis/tools/e9/catalog.json:672  跑了一遍基准，OCR 基准相关",
+   "Slack · 群聊「brosis 研发」 刘洋：哈希校验那块回滚了一次了，11 号之前给结论",
+   "钉钉 — exclusion list · Stack Overflow — 断点续传",
+   "系统设置 — docs/调研方案评审.md 第 5.1 节 台账口径（checksum verification）",
+   "Terminal — $ swift build -c release  error: cannot find (150.66s)  checksum verification",
+   "Terminal — 14:45 王磊 主持的全文检索方案评审，结论：补了单元测试；下一步 screen capture permission",
+   "钉钉 — brosis/tools/probe/main.swift:792  补了单元测试，屏幕采集权限相关",
+   "Safari · 群聊「brosis 研发」 王磊：热降频那块跑了一遍基准了，8 号之前给结论",
+   "Obsidian — thermal throttling · Apple Developer — 菜单栏状态",
+   "Numbers — docs/可行性调研报告.md 第 4.8 节 会话切分（model downloader）",
+   "Terminal — $ swift build -c release  warning: deprecated (149.14s)  checksum verification",
+   "Obsidian — 11:00 赵敏 主持的热降频评审，结论：重新授权；下一步 peak memory",
+   "Notes — brosis/tools/e9/main.swift:520  跑了一遍基准，热降频相关",
+   "预览 · 群聊「brosis 研发」 Alex：会话切分那块补了单元测试了，27 号之前给结论",
+   "Numbers — notarization · GitHub — OCR 基准",
+   "Numbers — docs/可行性调研报告.md 第 9.5 节 断点续传（ledger）",
+   "Terminal — $ swift build -c release  Build complete (278.35s)  screen capture permission",
+   "飞书 — 14:30 Maria 主持的哈希校验评审，结论：重新授权；下一步 thermal throttling",
+   "Chrome — brosis/tools/probe/notes.txt:320  跑了一遍基准，公证流程相关",
+   "Notes · 群聊「brosis 研发」 陈静：台账口径那块编译通过了，10 号之前给结论",
+   "VS Code — full text search · Hugging Face — 哈希校验",
+   "Safari — docs/调研方案评审.md 第 5.4 节 公证流程（iCloud sync）",
+   "Terminal — $ swift build -c release  error: cannot find (271.40s)  full text search",
+   "VS Code — 18:00 王磊 主持的全文检索方案评审，结论：编译通过；下一步 exclusion list",
+   "预览 — brosis/tools/proto/Embedder.swift:25  补了单元测试，热降频相关",
+   "Slack · 群聊「brosis 研发」 Alex：哈希校验那块回滚了一次了，28 号之前给结论",
+   "Safari — checksum verification · Stack Overflow — 排除清单",
+   "Notes — docs/调研方案评审.md 第 8.1 节 iCloud 同步（menu bar status）",
+   "Terminal — $ swift build -c release  warning: deprecated (224.19s)  full text search",
+   "钉钉 — 16:45 赵敏 主持的会话切分评审，结论：定稿；下一步 checksum verification",
+   "Terminal — brosis/tools/e9/实施计划.md:508  改了参数，断点续传相关",
+   "Notes · 群聊「brosis 研发」 赵敏：向量检索评估那块回滚了一次了，14 号之前给结论",
+   "钉钉 — range resume · Apple Developer — 公证流程",
+   "飞书 — docs/实施计划.md 第 1.7 节 公证流程（notarization）",
+   "Terminal — $ swift build -c release  error: cannot find (189.97s)  OCR benchmark",
+   "系统设置 — 17:30 陈静 主持的内存峰值评审，结论：记录了耗时；下一步 exclusion list",
+   "系统设置 — brosis/tools/e9/main.swift:825  定稿，模型下载器相关",
+   "Safari · 群聊「brosis 研发」 赵敏：热降频那块编译通过了，22 号之前给结论",
+   "Numbers — checksum verification · Stack Overflow — iCloud 同步",
+   "Notes — docs/调研方案评审.md 第 5.9 节 热降频（thermal throttling）",
+   "Terminal — $ swift build -c release  error: cannot find (90.36s)  ledger",
+   "Obsidian — 10:15 赵敏 主持的全文检索方案评审，结论：回滚了一次；下一步 OCR benchmark",
+   "飞书 — brosis/tools/e9/Package.swift:561  对齐了口径，会话切分相关",
+   "Slack · 群聊「brosis 研发」 Maria：排除清单那块补了单元测试了，26 号之前给结论",
+   "钉钉 — peak memory · Apple Developer — 菜单栏状态",
+   "飞书 — docs/可行性调研报告.md 第 12.8 节 热降频（vector search evaluation）",
+   "Terminal — $ swift build -c release  warning: deprecated (265.54s)  iCloud sync",
+   "Numbers — 9:15 Alex 主持的菜单栏状态评审，结论：对齐了口径；下一步 checksum verification",
+   "系统设置 — brosis/tools/proto/Downloader.swift:435  回滚了一次，屏幕采集权限相关",
+   "Xcode · 群聊「brosis 研发」 Maria：会话切分那块改了参数了，9 号之前给结论",
+   "系统设置 — ledger · Apple Developer — 断点续传",
+   "飞书 — docs/调研方案评审.md 第 8.5 节 OCR 基准（thermal throttling）",
+   "Terminal — $ swift build -c release  error: cannot find (83.92s)  full text search",
+   "Chrome — 18:15 王磊 主持的公证流程评审，结论：跑了一遍基准；下一步 notarization",
+   "钉钉 — brosis/tools/proto/fts_compare.py:233  定稿，模型下载器相关",
+   "钉钉 · 群聊「brosis 研发」 李娜：向量检索评估那块重新授权了，17 号之前给结论",
+   "Slack — model downloader · Stack Overflow — 断点续传",
+   "钉钉 — docs/调研方案评审.md 第 3.7 节 菜单栏状态（range resume）",
+   "Terminal — $ swift build -c release  warning: deprecated (228.52s)  vector search evaluation",
+   "Obsidian — 18:45 李娜 主持的向量检索评估评审，结论：编译通过；下一步 menu bar status",
+   "微信 — brosis/tools/probe/调研方案评审.md:458  定稿，内存峰值相关",
+   "Chrome · 群聊「brosis 研发」 刘洋：全文检索方案那块重新授权了，12 号之前给结论",
+   "Chrome — OCR benchmark · Hugging Face — OCR 基准",
+   "Numbers — docs/实施计划.md 第 1.4 节 热降频（menu bar status）",
+   "Terminal — $ swift build -c release  error: cannot find (227.96s)  full text search",
+   "Numbers — 17:45 张伟 主持的iCloud 同步评审，结论：导出了结果；下一步 exclusion list",
+   "Xcode — brosis/tools/proto/Embedder.swift:98  导出了结果，模型下载器相关",
+   "Xcode · 群聊「brosis 研发」 Alex：排除清单那块编译通过了，7 号之前给结论",
+   "Terminal — exclusion list · Apple Developer — 哈希校验",
+   "预览 — docs/可行性调研报告.md 第 1.4 节 向量检索评估（full text search）",
+   "Terminal — $ swift build -c release  error: cannot find (186.32s)  checksum verification",
+   "Slack — 13:15 王磊 主持的iCloud 同步评审，结论：回滚了一次；下一步 vector search evaluation",
+   "Chrome — brosis/tools/probe/notes.txt:425  回滚了一次，OCR 基准相关",
+   "Obsidian · 群聊「brosis 研发」 李娜：内存峰值那块重新授权了，1 号之前给结论",
+   "Chrome — session segmentation · Hugging Face — 内存峰值",
+   "Preview — docs/调研方案评审.md 第 3.8 节 菜单栏状态（exclusion list）",
+   "Terminal — $ swift build -c release  error: cannot find (198.26s)  screen capture permission",
+   "VS Code — 16:30 王磊 主持的全文检索方案评审，结论：记录了耗时；下一步 model downloader",
+   "Xcode — brosis/tools/probe/build_app.sh:483  记录了耗时，屏幕采集权限相关",
+   "Terminal · 群聊「brosis 研发」 李娜：OCR 基准那块编译通过了，6 号之前给结论",
+   "Numbers — range resume · arXiv — 内存峰值",
+   "Preview — docs/可行性调研报告.md 第 7.1 节 内存峰值（checksum verification）",
+   "Terminal — $ swift build -c release  warning: deprecated (272.33s)  session segmentation",
+   "Slack — 16:45 Maria 主持的会话切分评审，结论：补了单元测试；下一步 model downloader",
+   "系统设置 — brosis/tools/proto/catalog.json:550  编译通过，台账口径相关",
+   "Xcode · 群聊「brosis 研发」 王磊：OCR 基准那块导出了结果了，1 号之前给结论",
+   "Numbers — checksum verification · arXiv — 台账口径",
+   "Terminal — docs/实施计划.md 第 4.6 节 内存峰值（checksum verification）",
+   "Terminal — $ swift build -c release  error: cannot find (138.61s)  iCloud sync",
+   "VS Code — 14:00 赵敏 主持的公证流程评审，结论：编译通过；下一步 model downloader",
+   "Numbers — brosis/tools/e9/调研方案评审.md:94  编译通过，热降频相关",
+   "Numbers · 群聊「brosis 研发」 Alex：内存峰值那块记录了耗时了，11 号之前给结论",
+   "Preview — peak memory · Stack Overflow — 向量检索评估",
+   "系统设置 — docs/调研方案评审.md 第 5.4 节 OCR 基准（OCR benchmark）",
+   "Terminal — $ swift build -c release  warning: deprecated (300.41s)  ledger",
+   "钉钉 — 13:45 Alex 主持的OCR 基准评审，结论：重新授权；下一步 screen capture permission",
+   "预览 — brosis/tools/probe/ocr_bench.py:439  改了参数，模型下载器相关",
+   "Slack · 群聊「brosis 研发」 王磊：公证流程那块改了参数了，10 号之前给结论",
+   "Terminal — exclusion list · arXiv — iCloud 同步",
+   "Terminal — docs/实施计划.md 第 7.4 节 公证流程（full text search）",
+   "Terminal — $ swift build -c release  warning: deprecated (218.32s)  range resume",
+   "Chrome — 11:00 Maria 主持的哈希校验评审，结论：改了参数；下一步 screen capture permission",
+   "Numbers — brosis/tools/bench/notes.txt:45  补了单元测试，热降频相关",
+   "微信 · 群聊「brosis 研发」 张伟：屏幕采集权限那块回滚了一次了，19 号之前给结论",
+   "Numbers — ledger · arXiv — 公证流程",
+   "Terminal — docs/调研方案评审.md 第 3.6 节 模型下载器（model downloader）",
+   "Terminal — $ swift build -c release  error: cannot find (50.50s)  menu bar status",
+   "预览 — 9:45 Maria 主持的菜单栏状态评审，结论：跑了一遍基准；下一步 OCR benchmark",
+   "Notes — brosis/tools/bench/schema.sql:132  重新授权，iCloud 同步相关",
+   "钉钉 · 群聊「brosis 研发」 赵敏：公证流程那块定稿了，10 号之前给结论",
+   "Obsidian — model downloader · Hugging Face — 全文检索方案",
+   "Preview — docs/可行性调研报告.md 第 9.3 节 公证流程（model downloader）",
+   "Terminal — $ swift build -c release  error: cannot find (3.80s)  model downloader",
+   "飞书 — 9:15 赵敏 主持的模型下载器评审，结论：记录了耗时；下一步 screen capture permission",
+   "Notes — brosis/tools/e9/实施计划.md:676  编译通过，屏幕采集权限相关",
+   "飞书 · 群聊「brosis 研发」 张伟：菜单栏状态那块记录了耗时了，10 号之前给结论",
+   "VS Code — session segmentation · GitHub — 屏幕采集权限",
+   "微信 — docs/可行性调研报告.md 第 1.2 节 热降频（session segmentation）",
+   "Terminal — $ swift build -c release  warning: deprecated (152.82s)  screen capture permission",
+   "VS Code — 12:00 王磊 主持的公证流程评审，结论：跑了一遍基准；下一步 full text search",
+   "Safari — brosis/tools/bench/Storage.swift:604  定稿，排除清单相关",
+   "Xcode · 群聊「brosis 研发」 李娜：全文检索方案那块编译通过了，21 号之前给结论",
+   "Terminal — screen capture permission · Apple Developer — 屏幕采集权限",
+   "Slack — docs/可行性调研报告.md 第 4.5 节 台账口径（notarization）",
+   "Terminal — $ swift build -c release  error: cannot find (153.67s)  screen capture permission",
+   "VS Code — 10:30 王磊 主持的菜单栏状态评审，结论：定稿；下一步 checksum verification",
+   "VS Code — brosis/tools/bench/main.swift:71  补了单元测试，公证流程相关",
+   "Safari · 群聊「brosis 研发」 赵敏：排除清单那块补了单元测试了，5 号之前给结论",
+   "Obsidian — screen capture permission · Apple Developer — 菜单栏状态",
+   "飞书 — docs/调研方案评审.md 第 9.4 节 屏幕采集权限（range resume）",
+   "Terminal — $ swift build -c release  Build complete (3.49s)  session segmentation",
+   "钉钉 — 14:30 李娜 主持的断点续传评审，结论：重新授权；下一步 screen capture permission",
+   "Preview — brosis/tools/proto/build_app.sh:417  补了单元测试，会话切分相关",
+   "Chrome · 群聊「brosis 研发」 张伟：OCR 基准那块回滚了一次了，4 号之前给结论",
+   "预览 — exclusion list · arXiv — 热降频",
+   "Notes — docs/可行性调研报告.md 第 4.2 节 公证流程（checksum verification）",
+   "Terminal — $ swift build -c release  error: cannot find (217.82s)  full text search",
+   "Slack — 15:00 刘洋 主持的模型下载器评审，结论：改了参数；下一步 model downloader",
+   "Notes — brosis/tools/proto/catalog.json:157  改了参数，OCR 基准相关",
+   "Obsidian · 群聊「brosis 研发」 王磊：屏幕采集权限那块编译通过了，19 号之前给结论",
+   "Chrome — screen capture permission · GitHub — 模型下载器",
+   "预览 — docs/实施计划.md 第 2.8 节 模型下载器（full text search）",
+   "Terminal — $ swift build -c release  error: cannot find (255.33s)  ledger",
+   "Terminal — 13:45 刘洋 主持的iCloud 同步评审，结论：回滚了一次；下一步 ledger",
+   "Chrome — brosis/tools/bench/catalog.json:382  导出了结果，会话切分相关",
+   "预览 · 群聊「brosis 研发」 李娜：内存峰值那块改了参数了，3 号之前给结论",
+   "Safari — notarization · Stack Overflow — 向量检索评估",
+   "Chrome — docs/可行性调研报告.md 第 5.6 节 公证流程（vector search evaluation）",
+   "Terminal — $ swift build -c release  Build complete (254.23s)  model downloader",
+   "Xcode — 16:30 张伟 主持的断点续传评审，结论：定稿；下一步 full text search",
+   "Chrome — brosis/tools/probe/schema.sql:304  导出了结果，热降频相关",
+   "Chrome · 群聊「brosis 研发」 王磊：菜单栏状态那块跑了一遍基准了，26 号之前给结论",
+   "Obsidian — model downloader · Apple Developer — 断点续传",
+   "Preview — docs/可行性调研报告.md 第 8.6 节 全文检索方案（checksum verification）",
+   "Terminal — $ swift build -c release  error: cannot find (57.60s)  notarization",
+   "钉钉 — 18:15 王磊 主持的屏幕采集权限评审，结论：重新授权；下一步 OCR benchmark",
+   "微信 — brosis/tools/e9/index.html:620  改了参数，向量检索评估相关",
+   "钉钉 · 群聊「brosis 研发」 张伟：台账口径那块回滚了一次了，10 号之前给结论",
+   "Safari — thermal throttling · arXiv — 会话切分",
+   "飞书 — docs/调研方案评审.md 第 11.8 节 哈希校验（checksum verification）",
+   "Terminal — $ swift build -c release  warning: deprecated (225.14s)  range resume",
+   "Chrome — 14:00 Alex 主持的全文检索方案评审，结论：跑了一遍基准；下一步 notarization",
+   "Safari — brosis/tools/bench/调研方案评审.md:394  重新授权，热降频相关",
+   "Numbers · 群聊「brosis 研发」 张伟：屏幕采集权限那块导出了结果了，16 号之前给结论"
+  ],
+  "queries": [
+   "断点续传那件事最后是什么结论？",
+   "notes about model downloader",
+   "屏幕采集权限那件事最后是什么结论？",
+   "what was the conclusion on range resume?",
+   "菜单栏状态那件事最后是什么结论？",
+   "where did I read about exclusion list?",
+   "我上次在哪里看到关于热降频的内容？",
+   "what was the conclusion on range resume?",
+   "我上次在哪里看到关于公证流程的内容？",
+   "range resume status",
+   "我上次在哪里看到关于向量检索评估的内容？",
+   "where did I read about ledger?",
+   "我上次在哪里看到关于全文检索方案的内容？",
+   "what was the conclusion on vector search evaluation?",
+   "热降频那件事最后是什么结论？",
+   "where did I read about screen capture permission?",
+   "我上次在哪里看到关于哈希校验的内容？",
+   "checksum verification status",
+   "谁在讨论排除清单？",
+   "notes about exclusion list",
+   "我上次在哪里看到关于公证流程的内容？",
+   "what was the conclusion on thermal throttling?",
+   "我上次在哪里看到关于iCloud 同步的内容？",
+   "notarization status",
+   "我上次在哪里看到关于屏幕采集权限的内容？",
+   "what was the conclusion on vector search evaluation?",
+   "我上次在哪里看到关于热降频的内容？",
+   "menu bar status status",
+   "谁在讨论屏幕采集权限？",
+   "where did I read about vector search evaluation?",
+   "谁在讨论OCR 基准？",
+   "menu bar status status",
+   "关于台账口径我记了什么？",
+   "what was the conclusion on OCR benchmark?",
+   "我上次在哪里看到关于模型下载器的内容？",
+   "checksum verification status",
+   "我上次在哪里看到关于菜单栏状态的内容？",
+   "OCR benchmark status",
+   "我上次在哪里看到关于全文检索方案的内容？",
+   "notes about menu bar status"
+  ]
+ },
+ "throughput": [
+  "采集端把当前窗口的标题、路径和可见正文写进本地数据库，不保存画面本身；夜间任务在接电且空闲时才启动，跑完立刻释放模型占用的内存。 #0-0 peak memory / 内存峰值。The collector writes window titles, paths and visible text into a local database and never keeps pixels; the nightly job only runs on AC power while idle.  #0-1 ledger / 菜单栏状态。采集端把当前窗口的标题、路径和可见正文写进本地数据库，不保存画面本身；夜间任务在接电且空闲时才启动，跑完立刻释放模型占用的内存。 #0-2 vector search evaluation / 断点续传。The collector writes window titles, paths and visible text into a local database and never keeps pixels; the nightly job only runs on",
+  "The collector writes window titles, paths and visible text into a local database and never keeps pixels; the nightly job only runs on AC power while idle.  #1-0 ledger / 台账口径。采集端把当前窗口的标题、路径和可见正文写进本地数据库，不保存画面本身；夜间任务在接电且空闲时才启动，跑完立刻释放模型占用的内存。 #1-1 model downloader / 屏幕采集权限。The collector writes window titles, paths and visible text into a local database and never keeps pixels; the nightly job only runs on AC power while idle.  #1-2 checksum verification / iCloud 同步。采集端把当前窗口的标题、路径和可见正文写进本地数据库，不保存画面本身",
+  "采集端把当前窗口的标题、路径和可见正文写进本地数据库，不保存画面本身；夜间任务在接电且空闲时才启动，跑完立刻释放模型占用的内存。 #2-0 vector search evaluation / 排除清单。The collector writes window titles, paths and visible text into a local database and never keeps pixels; the nightly job only runs on AC power while idle.  #2-1 screen capture permission / 哈希校验。采集端把当前窗口的标题、路径和可见正文写进本地数据库，不保存画面本身；夜间任务在接电且空闲时才启动，跑完立刻释放模型占用的内存。 #2-2 thermal throttling / 断点续传。The collector writes window titles, paths and visible text into a local database and never keeps pixels; the",
+  "The collector writes window titles, paths and visible text into a local database and never keeps pixels; the nightly job only runs on AC power while idle.  #3-0 notarization / 内存峰值。采集端把当前窗口的标题、路径和可见正文写进本地数据库，不保存画面本身；夜间任务在接电且空闲时才启动，跑完立刻释放模型占用的内存。 #3-1 notarization / 热降频。The collector writes window titles, paths and visible text into a local database and never keeps pixels; the nightly job only runs on AC power while idle.  #3-2 full text search / 菜单栏状态。采集端把当前窗口的标题、路径和可见正文写进本地数据库，不保存画面本身；夜间任务在接电且空",
+  "采集端把当前窗口的标题、路径和可见正文写进本地数据库，不保存画面本身；夜间任务在接电且空闲时才启动，跑完立刻释放模型占用的内存。 #4-0 peak memory / 热降频。The collector writes window titles, paths and visible text into a local database and never keeps pixels; the nightly job only runs on AC power while idle.  #4-1 session segmentation / 内存峰值。采集端把当前窗口的标题、路径和可见正文写进本地数据库，不保存画面本身；夜间任务在接电且空闲时才启动，跑完立刻释放模型占用的内存。 #4-2 thermal throttling / 模型下载器。The collector writes window titles, paths and visible text into a local database and never keeps pixels; the nightly job only ",
+  "The collector writes window titles, paths and visible text into a local database and never keeps pixels; the nightly job only runs on AC power while idle.  #5-0 vector search evaluation / iCloud 同步。采集端把当前窗口的标题、路径和可见正文写进本地数据库，不保存画面本身；夜间任务在接电且空闲时才启动，跑完立刻释放模型占用的内存。 #5-1 notarization / 模型下载器。The collector writes window titles, paths and visible text into a local database and never keeps pixels; the nightly job only runs on AC power while idle.  #5-2 thermal throttling / 内存峰值。采集端把当前窗口的标题、路径和可见正文写进本地数",
+  "采集端把当前窗口的标题、路径和可见正文写进本地数据库，不保存画面本身；夜间任务在接电且空闲时才启动，跑完立刻释放模型占用的内存。 #6-0 exclusion list / 会话切分。The collector writes window titles, paths and visible text into a local database and never keeps pixels; the nightly job only runs on AC power while idle.  #6-1 range resume / 会话切分。采集端把当前窗口的标题、路径和可见正文写进本地数据库，不保存画面本身；夜间任务在接电且空闲时才启动，跑完立刻释放模型占用的内存。 #6-2 session segmentation / iCloud 同步。The collector writes window titles, paths and visible text into a local database and never keeps pixels; the nightly job onl",
+  "The collector writes window titles, paths and visible text into a local database and never keeps pixels; the nightly job only runs on AC power while idle.  #7-0 vector search evaluation / 排除清单。采集端把当前窗口的标题、路径和可见正文写进本地数据库，不保存画面本身；夜间任务在接电且空闲时才启动，跑完立刻释放模型占用的内存。 #7-1 exclusion list / 会话切分。The collector writes window titles, paths and visible text into a local database and never keeps pixels; the nightly job only runs on AC power while idle.  #7-2 model downloader / 向量检索评估。采集端把当前窗口的标题、路径和可见正文写进本地数据库，不",
+  "采集端把当前窗口的标题、路径和可见正文写进本地数据库，不保存画面本身；夜间任务在接电且空闲时才启动，跑完立刻释放模型占用的内存。 #8-0 thermal throttling / 断点续传。The collector writes window titles, paths and visible text into a local database and never keeps pixels; the nightly job only runs on AC power while idle.  #8-1 vector search evaluation / 屏幕采集权限。采集端把当前窗口的标题、路径和可见正文写进本地数据库，不保存画面本身；夜间任务在接电且空闲时才启动，跑完立刻释放模型占用的内存。 #8-2 screen capture permission / 排除清单。The collector writes window titles, paths and visible text into a local database and never keeps pixels; t",
+  "The collector writes window titles, paths and visible text into a local database and never keeps pixels; the nightly job only runs on AC power while idle.  #9-0 checksum verification / OCR 基准。采集端把当前窗口的标题、路径和可见正文写进本地数据库，不保存画面本身；夜间任务在接电且空闲时才启动，跑完立刻释放模型占用的内存。 #9-1 ledger / 屏幕采集权限。The collector writes window titles, paths and visible text into a local database and never keeps pixels; the nightly job only runs on AC power while idle.  #9-2 iCloud sync / 屏幕采集权限。采集端把当前窗口的标题、路径和可见正文写进本地数据库，不保存画面本身；夜间任务在",
+  "采集端把当前窗口的标题、路径和可见正文写进本地数据库，不保存画面本身；夜间任务在接电且空闲时才启动，跑完立刻释放模型占用的内存。 #10-0 exclusion list / 公证流程。The collector writes window titles, paths and visible text into a local database and never keeps pixels; the nightly job only runs on AC power while idle.  #10-1 vector search evaluation / 模型下载器。采集端把当前窗口的标题、路径和可见正文写进本地数据库，不保存画面本身；夜间任务在接电且空闲时才启动，跑完立刻释放模型占用的内存。 #10-2 checksum verification / 公证流程。The collector writes window titles, paths and visible text into a local database and never keeps pixels; the nig",
+  "The collector writes window titles, paths and visible text into a local database and never keeps pixels; the nightly job only runs on AC power while idle.  #11-0 notarization / 哈希校验。采集端把当前窗口的标题、路径和可见正文写进本地数据库，不保存画面本身；夜间任务在接电且空闲时才启动，跑完立刻释放模型占用的内存。 #11-1 OCR benchmark / 断点续传。The collector writes window titles, paths and visible text into a local database and never keeps pixels; the nightly job only runs on AC power while idle.  #11-2 exclusion list / 热降频。采集端把当前窗口的标题、路径和可见正文写进本地数据库，不保存画面本身；夜间任务在接电且",
+  "采集端把当前窗口的标题、路径和可见正文写进本地数据库，不保存画面本身；夜间任务在接电且空闲时才启动，跑完立刻释放模型占用的内存。 #12-0 screen capture permission / 屏幕采集权限。The collector writes window titles, paths and visible text into a local database and never keeps pixels; the nightly job only runs on AC power while idle.  #12-1 thermal throttling / 屏幕采集权限。采集端把当前窗口的标题、路径和可见正文写进本地数据库，不保存画面本身；夜间任务在接电且空闲时才启动，跑完立刻释放模型占用的内存。 #12-2 peak memory / 会话切分。The collector writes window titles, paths and visible text into a local database and never keeps pixels; the night",
+  "The collector writes window titles, paths and visible text into a local database and never keeps pixels; the nightly job only runs on AC power while idle.  #13-0 ledger / iCloud 同步。采集端把当前窗口的标题、路径和可见正文写进本地数据库，不保存画面本身；夜间任务在接电且空闲时才启动，跑完立刻释放模型占用的内存。 #13-1 vector search evaluation / 屏幕采集权限。The collector writes window titles, paths and visible text into a local database and never keeps pixels; the nightly job only runs on AC power while idle.  #13-2 menu bar status / 哈希校验。采集端把当前窗口的标题、路径和可见正文写进本地数据库，不保",
+  "采集端把当前窗口的标题、路径和可见正文写进本地数据库，不保存画面本身；夜间任务在接电且空闲时才启动，跑完立刻释放模型占用的内存。 #14-0 model downloader / 哈希校验。The collector writes window titles, paths and visible text into a local database and never keeps pixels; the nightly job only runs on AC power while idle.  #14-1 menu bar status / 公证流程。采集端把当前窗口的标题、路径和可见正文写进本地数据库，不保存画面本身；夜间任务在接电且空闲时才启动，跑完立刻释放模型占用的内存。 #14-2 vector search evaluation / 屏幕采集权限。The collector writes window titles, paths and visible text into a local database and never keeps pixels; the nightl",
+  "The collector writes window titles, paths and visible text into a local database and never keeps pixels; the nightly job only runs on AC power while idle.  #15-0 ledger / 菜单栏状态。采集端把当前窗口的标题、路径和可见正文写进本地数据库，不保存画面本身；夜间任务在接电且空闲时才启动，跑完立刻释放模型占用的内存。 #15-1 ledger / 会话切分。The collector writes window titles, paths and visible text into a local database and never keeps pixels; the nightly job only runs on AC power while idle.  #15-2 session segmentation / 会话切分。采集端把当前窗口的标题、路径和可见正文写进本地数据库，不保存画面本身；夜间任务在接电且空闲时才启"
+ ],
+ "crosscheck": [
+  "今天下午我在 Xcode 里调试采集模块的崩溃问题。",
+  "这份可行性报告里写了 OCR 的准确模式耗时。",
+  "会议纪要说下周一开始做向量检索的评估。",
+  "屏幕录制权限每个月要重新授权一次。",
+  "数据库文件不能放在 iCloud Drive 里同步。",
+  "The screen recording permission has to be re-approved every month.",
+  "Store the SQLite database outside of any file syncing folder.",
+  "Embeddings run locally so no document text leaves the machine.",
+  "The build failed because the Metal shader library was missing.",
+  "Unload the language model as soon as the nightly job finishes.",
+  "系统设置 — brosis/tools/bench/notes.txt:203  记录了耗时，模型下载器相关",
+  "Numbers · 群聊「brosis 研发」 陈静：台账口径那块回滚了一次了，28 号之前给结论",
+  "预览 — iCloud sync · Hugging Face — 模型下载器",
+  "Chrome — docs/可行性调研报告.md 第 9.5 节 内存峰值（screen capture permission）",
+  "Terminal — $ swift build -c release  Build complete (191.17s)  OCR benchmark",
+  "断点续传那件事最后是什么结论？",
+  "notes about model downloader",
+  "屏幕采集权限那件事最后是什么结论？",
+  "what was the conclusion on range resume?",
+  "菜单栏状态那件事最后是什么结论？"
+ ]
+}

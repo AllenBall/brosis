@@ -1,0 +1,1403 @@
+{
+ "experiment": "E9 内嵌推理运行时、模型管理器与分发验证",
+ "date": "2026-09-07",
+ "plan": [
+  "4.1 E9",
+  "3.11",
+  "D18",
+  "D19",
+  "附录 A E9",
+  "报告 11.2 第 7 条"
+ ],
+ "unitsNote": "MiB = 2^20 字节，GiB = 2^30 字节；HF 页面上的 GB 是 10^9，两者不要混。",
+ "machine": {
+  "gpuMemoryLimitMiB": 124518.39999961853,
+  "hardwareModel": "Mac16,5",
+  "osVersion": "Version 26.6.2 (Build 25G83)",
+  "physicalMemoryGiB": 128,
+  "processorCount": 16,
+  "thermalStateAtStart": "nominal"
+ },
+ "toolchain": {
+  "xcode": "26.6 (17F113)",
+  "swift": "6.3.3",
+  "mlx-swift-lm": "3.31.4",
+  "mlx-swift": "0.31.6（内含 MLX_VERSION 0.31.1）",
+  "swift-transformers": "1.3.4",
+  "swiftPMProducts": [
+   "MLXEmbedders",
+   "MLXLMCommon",
+   "MLXLLM",
+   "Tokenizers"
+  ],
+  "pythonReference": "LM Studio 自带 venv：Python 3.11.9 / mlx 0.31.2 / mlx-lm 0.31.3 / transformers 5.8.1（本机已有，未下载）"
+ },
+ "sizes": {
+  "appTotalBytes": 167305035,
+  "appTotalMiB": 159.55451488494873,
+  "executableBytes": 41805760,
+  "executableMiB": 39.86907958984375,
+  "metallibBytes": 125450136,
+  "metallibMiB": 119.6385726928711,
+  "runtimeBytes": 167255896,
+  "runtimeMiB": 159.50765228271484,
+  "modelBytes": 649088604,
+  "modelMiB": 619.0191307067871,
+  "modelGiB": 0.6045108698308468,
+  "files": {
+   "Contents/Info.plist": 1115,
+   "Contents/PkgInfo": 8,
+   "Contents/_CodeSignature/CodeResources": 2956,
+   "Contents/MacOS/brosis-e9": 41805760,
+   "Contents/Resources/corpus.json": 40637,
+   "Contents/Resources/catalog.json": 4423,
+   "Contents/Resources/mlx-swift_Cmlx.bundle/default.metallib": 125450136
+  },
+  "note": "metallib 是从本机 MLX 0.31.2 Python wheel 借来的全量（非 JIT）版本，是上限；mlx-swift 自己是 JIT 构建，只预编 9 个基础 kernel，装了 Metal Toolchain 后应显著更小。"
+ },
+ "download": {
+  "avgMiBPerSecond": 11.325299810450568,
+  "baseUsed": "https://huggingface.co",
+  "files": [
+   {
+    "bytes": 117,
+    "path": "generation_config.json",
+    "rangeStatus": null,
+    "resumedFromBytes": 0,
+    "seconds": 1.4188649654388428,
+    "sha256OK": true
+   },
+   {
+    "bytes": 215,
+    "path": "config_sentence_transformers.json",
+    "rangeStatus": null,
+    "resumedFromBytes": 0,
+    "seconds": 0.5175119638442993,
+    "sha256OK": true
+   },
+   {
+    "bytes": 349,
+    "path": "modules.json",
+    "rangeStatus": null,
+    "resumedFromBytes": 0,
+    "seconds": 0.49723899364471436,
+    "sha256OK": true
+   },
+   {
+    "bytes": 493,
+    "path": "README.md",
+    "rangeStatus": null,
+    "resumedFromBytes": 0,
+    "seconds": 0.4705040454864502,
+    "sha256OK": true
+   },
+   {
+    "bytes": 613,
+    "path": "special_tokens_map.json",
+    "rangeStatus": null,
+    "resumedFromBytes": 0,
+    "seconds": 0.5664180517196655,
+    "sha256OK": true
+   },
+   {
+    "bytes": 707,
+    "path": "added_tokens.json",
+    "rangeStatus": null,
+    "resumedFromBytes": 0,
+    "seconds": 0.5119800567626953,
+    "sha256OK": true
+   },
+   {
+    "bytes": 857,
+    "path": "config.json",
+    "rangeStatus": null,
+    "resumedFromBytes": 0,
+    "seconds": 0.4999340772628784,
+    "sha256OK": true
+   },
+   {
+    "bytes": 1570,
+    "path": ".gitattributes",
+    "rangeStatus": null,
+    "resumedFromBytes": 0,
+    "seconds": 0.5215640068054199,
+    "sha256OK": true
+   },
+   {
+    "bytes": 4116,
+    "path": "chat_template.jinja",
+    "rangeStatus": null,
+    "resumedFromBytes": 0,
+    "seconds": 0.5038909912109375,
+    "sha256OK": true
+   },
+   {
+    "bytes": 5404,
+    "path": "tokenizer_config.json",
+    "rangeStatus": null,
+    "resumedFromBytes": 0,
+    "seconds": 0.5203980207443237,
+    "sha256OK": true
+   },
+   {
+    "bytes": 49731,
+    "path": "model.safetensors.index.json",
+    "rangeStatus": null,
+    "resumedFromBytes": 0,
+    "seconds": 0.5058020353317261,
+    "sha256OK": true
+   },
+   {
+    "bytes": 1671853,
+    "path": "merges.txt",
+    "rangeStatus": null,
+    "resumedFromBytes": 0,
+    "seconds": 1.4863190650939941,
+    "sha256OK": true
+   },
+   {
+    "bytes": 2776833,
+    "path": "vocab.json",
+    "rangeStatus": null,
+    "resumedFromBytes": 0,
+    "seconds": 0.8443059921264648,
+    "sha256OK": true
+   },
+   {
+    "bytes": 11423705,
+    "path": "tokenizer.json",
+    "rangeStatus": null,
+    "resumedFromBytes": 0,
+    "seconds": 4.154603004455566,
+    "sha256OK": true
+   },
+   {
+    "bytes": 633152041,
+    "path": "model.safetensors",
+    "rangeStatus": 206,
+    "resumedFromBytes": 41943040,
+    "seconds": 41.62652897834778,
+    "sha256OK": true
+   }
+  ],
+  "id": "Qwen3-Embedding-0.6B-8bit",
+  "installedAt": "~/Library/Application Support/brosis-m0/models/Qwen3-Embedding-0.6B-8bit",
+  "probes": [
+   {
+    "base": "https://huggingface.co",
+    "note": "HTTP 200，117 字节",
+    "ok": true,
+    "seconds": 1.4868849515914917
+   },
+   {
+    "base": "https://hf-mirror.com",
+    "note": "HTTP 200，117 字节",
+    "ok": true,
+    "seconds": 0.6337039470672607
+   }
+  ],
+  "repoId": "mlx-community/Qwen3-Embedding-0.6B-8bit",
+  "revision": "407ad2329cd30702720aafe83f74a1ba30fdfbca",
+  "simulateInterruptBytes": 41943040,
+  "totalBytes": 649088604,
+  "totalMiB": 619.0191307067871,
+  "totalSeconds": 54.65807890892029
+ },
+ "downloadMirror": {
+  "avgMiBPerSecond": 11.724404525637286,
+  "baseUsed": "https://hf-mirror.com",
+  "files": [
+   {
+    "bytes": 117,
+    "path": "generation_config.json",
+    "rangeStatus": null,
+    "resumedFromBytes": 0,
+    "seconds": 1.3722410202026367,
+    "sha256OK": true
+   },
+   {
+    "bytes": 215,
+    "path": "config_sentence_transformers.json",
+    "rangeStatus": null,
+    "resumedFromBytes": 0,
+    "seconds": 0.4625660181045532,
+    "sha256OK": true
+   },
+   {
+    "bytes": 349,
+    "path": "modules.json",
+    "rangeStatus": null,
+    "resumedFromBytes": 0,
+    "seconds": 0.640955924987793,
+    "sha256OK": true
+   },
+   {
+    "bytes": 493,
+    "path": "README.md",
+    "rangeStatus": null,
+    "resumedFromBytes": 0,
+    "seconds": 0.457442045211792,
+    "sha256OK": true
+   },
+   {
+    "bytes": 613,
+    "path": "special_tokens_map.json",
+    "rangeStatus": null,
+    "resumedFromBytes": 0,
+    "seconds": 0.45489501953125,
+    "sha256OK": true
+   },
+   {
+    "bytes": 707,
+    "path": "added_tokens.json",
+    "rangeStatus": null,
+    "resumedFromBytes": 0,
+    "seconds": 0.4548879861831665,
+    "sha256OK": true
+   },
+   {
+    "bytes": 857,
+    "path": "config.json",
+    "rangeStatus": null,
+    "resumedFromBytes": 0,
+    "seconds": 0.6344369649887085,
+    "sha256OK": true
+   },
+   {
+    "bytes": 1570,
+    "path": ".gitattributes",
+    "rangeStatus": null,
+    "resumedFromBytes": 0,
+    "seconds": 0.4571070671081543,
+    "sha256OK": true
+   },
+   {
+    "bytes": 4116,
+    "path": "chat_template.jinja",
+    "rangeStatus": null,
+    "resumedFromBytes": 0,
+    "seconds": 0.4557420015335083,
+    "sha256OK": true
+   },
+   {
+    "bytes": 5404,
+    "path": "tokenizer_config.json",
+    "rangeStatus": null,
+    "resumedFromBytes": 0,
+    "seconds": 0.4572669267654419,
+    "sha256OK": true
+   },
+   {
+    "bytes": 49731,
+    "path": "model.safetensors.index.json",
+    "rangeStatus": null,
+    "resumedFromBytes": 0,
+    "seconds": 0.46912598609924316,
+    "sha256OK": true
+   },
+   {
+    "bytes": 1671853,
+    "path": "merges.txt",
+    "rangeStatus": null,
+    "resumedFromBytes": 0,
+    "seconds": 1.4096909761428833,
+    "sha256OK": true
+   },
+   {
+    "bytes": 2776833,
+    "path": "vocab.json",
+    "rangeStatus": null,
+    "resumedFromBytes": 0,
+    "seconds": 0.8292809724807739,
+    "sha256OK": true
+   },
+   {
+    "bytes": 11423705,
+    "path": "tokenizer.json",
+    "rangeStatus": null,
+    "resumedFromBytes": 0,
+    "seconds": 3.758316993713379,
+    "sha256OK": true
+   },
+   {
+    "bytes": 633152041,
+    "path": "model.safetensors",
+    "rangeStatus": null,
+    "resumedFromBytes": 0,
+    "seconds": 40.47424495220184,
+    "sha256OK": true
+   }
+  ],
+  "id": "Qwen3-Embedding-0.6B-8bit",
+  "installedAt": "~/Library/Caches/brosis-build/e9/tmp-models-mirror/Qwen3-Embedding-0.6B-8bit",
+  "probes": [],
+  "repoId": "mlx-community/Qwen3-Embedding-0.6B-8bit",
+  "revision": "407ad2329cd30702720aafe83f74a1ba30fdfbca",
+  "simulateInterruptBytes": 0,
+  "totalBytes": 649088604,
+  "totalMiB": 619.0191307067871,
+  "totalSeconds": 52.79749000072479
+ },
+ "localImport": {
+  "fileCount": 15,
+  "from": "~/Library/Application Support/brosis-m0/models/Qwen3-Embedding-0.6B-8bit",
+  "id": "Qwen3-Embedding-0.6B-8bit",
+  "installedAt": "~/Library/Caches/brosis-build/e9/tmp-models-import/Qwen3-Embedding-0.6B-8bit",
+  "seconds": 0.26847898960113525,
+  "totalBytes": 649088604,
+  "totalMiB": 619.0191307067871,
+  "verified": true
+ },
+ "memoryFootprint": {
+  "note": "评审 F8 口径修正。Apple Silicon 统一内存里 Metal 缓冲（含 MLX 缓冲池）计入进程的 phys_footprint 而不计入 resident set size，批量嵌入时两者差约 8 倍。『内存峰值』一律以 peak memory footprint 为准，RSS 只作参考。",
+  "singleEmbed": {
+   "note": "热态（页缓存已暖）。真冷启动要 sudo purge 或重启后跑，见 blockers。",
+   "runs": [
+    {
+     "run": 1,
+     "secondsFromProcessStartToFirstVector": 0.3866521120071411,
+     "containerLoadSeconds": 0.34663498401641846,
+     "dimension": 1024,
+     "first8": [
+      -0.03638136386871338,
+      -0.06737479567527771,
+      -0.01736966334283352,
+      0.04233374446630478,
+      0.034020934253931046,
+      0.01938372291624546,
+      -0.060960590839385986,
+      0.03738197684288025
+     ],
+     "gpuMemoryConfig": {
+      "cacheLimitMiB": 124518.39999961853,
+      "cacheLimitOverridden": false,
+      "cacheLimitRequestedMiB": null,
+      "memoryLimitMiB": 124518.39999961853
+     },
+     "memory": {
+      "footprintMiB": 888.3761672973633,
+      "gpuActiveMiB": 603.7842712402344,
+      "gpuCacheMiB": 14.49239730834961,
+      "gpuPeakMiB": 618.2725830078125,
+      "label": "after-first-vector",
+      "peakFootprintMiB": 888.3761672973633,
+      "peakResidentMiB": 763.796875,
+      "residentMiB": 749.421875,
+      "sinceProcessStartSeconds": 0.387640118598938,
+      "thermalState": "nominal"
+     },
+     "timeMinusL": {
+      "peakResidentBytes": 800899072,
+      "peakFootprintBytes": 931595464,
+      "realSeconds": 0.4,
+      "peakResidentMiB": 763.796875,
+      "peakFootprintMiB": 888.4386672973633
+     }
+    },
+    {
+     "run": 2,
+     "secondsFromProcessStartToFirstVector": 0.3927809000015259,
+     "containerLoadSeconds": 0.35004496574401855,
+     "dimension": 1024,
+     "first8": [
+      -0.03638136386871338,
+      -0.06737479567527771,
+      -0.01736966334283352,
+      0.04233374446630478,
+      0.034020934253931046,
+      0.01938372291624546,
+      -0.060960590839385986,
+      0.03738197684288025
+     ],
+     "gpuMemoryConfig": {
+      "cacheLimitMiB": 124518.39999961853,
+      "cacheLimitOverridden": false,
+      "cacheLimitRequestedMiB": null,
+      "memoryLimitMiB": 124518.39999961853
+     },
+     "memory": {
+      "footprintMiB": 888.3137130737305,
+      "gpuActiveMiB": 603.7842712402344,
+      "gpuCacheMiB": 14.49239730834961,
+      "gpuPeakMiB": 618.2725830078125,
+      "label": "after-first-vector",
+      "peakFootprintMiB": 888.3137130737305,
+      "peakResidentMiB": 765.4375,
+      "residentMiB": 750.96875,
+      "sinceProcessStartSeconds": 0.3937399387359619,
+      "thermalState": "nominal"
+     },
+     "timeMinusL": {
+      "peakResidentBytes": 802619392,
+      "peakFootprintBytes": 931595512,
+      "realSeconds": 0.41,
+      "peakResidentMiB": 765.4375,
+      "peakFootprintMiB": 888.4387130737305
+     }
+    },
+    {
+     "run": 3,
+     "secondsFromProcessStartToFirstVector": 0.38886892795562744,
+     "containerLoadSeconds": 0.3456679582595825,
+     "dimension": 1024,
+     "first8": [
+      -0.03638136386871338,
+      -0.06737479567527771,
+      -0.01736966334283352,
+      0.04233374446630478,
+      0.034020934253931046,
+      0.01938372291624546,
+      -0.060960590839385986,
+      0.03738197684288025
+     ],
+     "gpuMemoryConfig": {
+      "cacheLimitMiB": 124518.39999961853,
+      "cacheLimitOverridden": false,
+      "cacheLimitRequestedMiB": null,
+      "memoryLimitMiB": 124518.39999961853
+     },
+     "memory": {
+      "footprintMiB": 888.0011672973633,
+      "gpuActiveMiB": 603.7842712402344,
+      "gpuCacheMiB": 14.49239730834961,
+      "gpuPeakMiB": 618.2725830078125,
+      "label": "after-first-vector",
+      "peakFootprintMiB": 888.0011672973633,
+      "peakResidentMiB": 765.140625,
+      "residentMiB": 750.6875,
+      "sinceProcessStartSeconds": 0.3898298740386963,
+      "thermalState": "nominal"
+     },
+     "timeMinusL": {
+      "peakResidentBytes": 802308096,
+      "peakFootprintBytes": 931251400,
+      "realSeconds": 0.4,
+      "peakResidentMiB": 765.140625,
+      "peakFootprintMiB": 888.1105422973633
+     }
+    },
+    {
+     "run": 4,
+     "secondsFromProcessStartToFirstVector": 0.39552509784698486,
+     "containerLoadSeconds": 0.3527219295501709,
+     "dimension": 1024,
+     "first8": [
+      -0.03638136386871338,
+      -0.06737479567527771,
+      -0.01736966334283352,
+      0.04233374446630478,
+      0.034020934253931046,
+      0.01938372291624546,
+      -0.060960590839385986,
+      0.03738197684288025
+     ],
+     "gpuMemoryConfig": {
+      "cacheLimitMiB": 124518.39999961853,
+      "cacheLimitOverridden": false,
+      "cacheLimitRequestedMiB": null,
+      "memoryLimitMiB": 124518.39999961853
+     },
+     "memory": {
+      "footprintMiB": 888.2511672973633,
+      "gpuActiveMiB": 603.7842712402344,
+      "gpuCacheMiB": 14.49239730834961,
+      "gpuPeakMiB": 618.2725830078125,
+      "label": "after-first-vector",
+      "peakFootprintMiB": 888.2511672973633,
+      "peakResidentMiB": 765.421875,
+      "residentMiB": 750.9375,
+      "sinceProcessStartSeconds": 0.3965320587158203,
+      "thermalState": "nominal"
+     },
+     "timeMinusL": {
+      "peakResidentBytes": 802603008,
+      "peakFootprintBytes": 931431624,
+      "realSeconds": 0.41,
+      "peakResidentMiB": 765.421875,
+      "peakFootprintMiB": 888.2824172973633
+     }
+    },
+    {
+     "run": 5,
+     "secondsFromProcessStartToFirstVector": 0.39011502265930176,
+     "containerLoadSeconds": 0.3501729965209961,
+     "dimension": 1024,
+     "first8": [
+      -0.03638136386871338,
+      -0.06737479567527771,
+      -0.01736966334283352,
+      0.04233374446630478,
+      0.034020934253931046,
+      0.01938372291624546,
+      -0.060960590839385986,
+      0.03738197684288025
+     ],
+     "gpuMemoryConfig": {
+      "cacheLimitMiB": 124518.39999961853,
+      "cacheLimitOverridden": false,
+      "cacheLimitRequestedMiB": null,
+      "memoryLimitMiB": 124518.39999961853
+     },
+     "memory": {
+      "footprintMiB": 888.0792922973633,
+      "gpuActiveMiB": 603.7842712402344,
+      "gpuCacheMiB": 14.49239730834961,
+      "gpuPeakMiB": 618.2725830078125,
+      "label": "after-first-vector",
+      "peakFootprintMiB": 888.0792922973633,
+      "peakResidentMiB": 765.171875,
+      "residentMiB": 750.765625,
+      "sinceProcessStartSeconds": 0.39108800888061523,
+      "thermalState": "nominal"
+     },
+     "timeMinusL": {
+      "peakResidentBytes": 802340864,
+      "peakFootprintBytes": 931300552,
+      "realSeconds": 0.4,
+      "peakResidentMiB": 765.171875,
+      "peakFootprintMiB": 888.1574172973633
+     }
+    }
+   ],
+   "secondsMin": 0.3866521120071411,
+   "secondsMax": 0.39552509784698486,
+   "secondsMean": 0.3907884120941162,
+   "first8IdenticalAcrossRuns": true,
+   "peakFootprintMiB": 888.4387130737305,
+   "peakResidentMiB": 765.4375,
+   "gpuPeakMiB": 618.2725830078125
+  },
+  "byCacheLimit": [
+   {
+    "cacheLimitMiB": "默认（= memoryLimit，实测不限）",
+    "peakFootprintBytes": 6664668480,
+    "peakFootprintMiB": 6355.923156738281,
+    "peakFootprintGiB": 6.206956207752228,
+    "peakResidentBytes": 803782656,
+    "peakResidentMiB": 766.546875,
+    "gpuPeakMiB": 1443.3079299926758,
+    "gpuCacheAtEndMiB": 5479.796802520752,
+    "textsPerSecond": 70.21812246264597,
+    "tokensPerSecond": 12327.669124848282,
+    "secondsPerBatchMean": 0.2278614044189453,
+    "timeMinusL": {
+     "peakResidentBytes": 803782656,
+     "peakFootprintBytes": 6664668480,
+     "realSeconds": 3.15,
+     "peakResidentMiB": 766.546875,
+     "peakFootprintMiB": 6355.923156738281
+    }
+   },
+   {
+    "cacheLimitMiB": 1024,
+    "peakFootprintBytes": 2896086264,
+    "peakFootprintMiB": 2761.9230880737305,
+    "peakFootprintGiB": 2.6971905156970024,
+    "peakResidentBytes": 804093952,
+    "peakResidentMiB": 766.84375,
+    "gpuPeakMiB": 1443.3108596801758,
+    "gpuCacheAtEndMiB": 1029.7061729431152,
+    "textsPerSecond": 68.5001220284341,
+    "tokensPerSecond": 12026.052673616963,
+    "secondsPerBatchMean": 0.23357622623443602,
+    "timeMinusL": {
+     "peakResidentBytes": 804093952,
+     "peakFootprintBytes": 2896086264,
+     "realSeconds": 3.09,
+     "peakResidentMiB": 766.84375,
+     "peakFootprintMiB": 2761.9230880737305
+    }
+   },
+   {
+    "cacheLimitMiB": 256,
+    "peakFootprintBytes": 2089157856,
+    "peakFootprintMiB": 1992.3761901855469,
+    "peakFootprintGiB": 1.9456798732280731,
+    "peakResidentBytes": 804257792,
+    "peakResidentMiB": 767,
+    "gpuPeakMiB": 1443.3108596801758,
+    "gpuCacheAtEndMiB": 260.61325454711914,
+    "textsPerSecond": 68.24774135915679,
+    "tokensPerSecond": 11981.744092366966,
+    "secondsPerBatchMean": 0.23443999290466308,
+    "timeMinusL": {
+     "peakResidentBytes": 804257792,
+     "peakFootprintBytes": 2089157856,
+     "realSeconds": 3.13,
+     "peakResidentMiB": 767.0,
+     "peakFootprintMiB": 1992.3761901855469
+    }
+   },
+   {
+    "cacheLimitMiB": 0,
+    "peakFootprintBytes": 1928365280,
+    "peakFootprintMiB": 1839.0324401855469,
+    "peakFootprintGiB": 1.7959301173686981,
+    "peakResidentBytes": 805076992,
+    "peakResidentMiB": 767.78125,
+    "gpuPeakMiB": 1443.3069534301758,
+    "gpuCacheAtEndMiB": 0,
+    "textsPerSecond": 65.73104274744934,
+    "tokensPerSecond": 11539.906192349075,
+    "secondsPerBatchMean": 0.2434161901473999,
+    "timeMinusL": {
+     "peakResidentBytes": 805076992,
+     "peakFootprintBytes": 1928365280,
+     "realSeconds": 3.2,
+     "peakResidentMiB": 767.78125,
+     "peakFootprintMiB": 1839.0324401855469
+    }
+   }
+  ],
+  "cacheReleaseAtEnd": {
+   "footprintAfterMiB": 893.2512817382812,
+   "footprintBeforeMiB": 6355.923156738281,
+   "gpuCacheAfterMiB": 0,
+   "gpuCacheBeforeMiB": 5479.796802520752
+  },
+  "memorySnapshotsDefaultRun": {
+   "memoryBeforeLoad": {
+    "footprintMiB": 8.547492980957031,
+    "gpuActiveMiB": 0,
+    "gpuCacheMiB": 0,
+    "gpuPeakMiB": 0,
+    "label": "before-load",
+    "peakFootprintMiB": 8.547492980957031,
+    "peakResidentMiB": 38.140625,
+    "residentMiB": 38.140625,
+    "sinceProcessStartSeconds": 0.04626584053039551,
+    "thermalState": "nominal"
+   },
+   "memoryAfterLoad": {
+    "footprintMiB": 680.6261672973633,
+    "gpuActiveMiB": 603.7842712402344,
+    "gpuCacheMiB": 0.000431060791015625,
+    "gpuPeakMiB": 603.7842712402344,
+    "label": "after-load",
+    "peakFootprintMiB": 733.6418151855469,
+    "peakResidentMiB": 766.546875,
+    "residentMiB": 733.578125,
+    "sinceProcessStartSeconds": 0.3725168704986572,
+    "thermalState": "nominal"
+   },
+   "memoryAfterFirstVector": {
+    "footprintMiB": 869.9699172973633,
+    "gpuActiveMiB": 603.7842712402344,
+    "gpuCacheMiB": 4.228176116943359,
+    "gpuPeakMiB": 608.0122680664062,
+    "label": "after-first-vector",
+    "peakFootprintMiB": 869.9699172973633,
+    "peakResidentMiB": 766.546875,
+    "residentMiB": 742.84375,
+    "sinceProcessStartSeconds": 0.3918548822402954,
+    "thermalState": "nominal"
+   },
+   "memoryAtEnd": {
+    "footprintMiB": 6355.923156738281,
+    "gpuActiveMiB": 603.7842712402344,
+    "gpuCacheMiB": 5479.796802520752,
+    "gpuPeakMiB": 1443.3079299926758,
+    "label": "end",
+    "peakFootprintMiB": 6355.923156738281,
+    "peakResidentMiB": 766.546875,
+    "residentMiB": 754.984375,
+    "sinceProcessStartSeconds": 2.883065938949585,
+    "thermalState": "nominal"
+   },
+   "memoryAfterCacheRelease": {
+    "footprintMiB": 893.2512817382812,
+    "gpuActiveMiB": 603.7842712402344,
+    "gpuCacheMiB": 0,
+    "gpuPeakMiB": 1443.3079299926758,
+    "label": "after-cache-release",
+    "peakFootprintMiB": 6355.923156738281,
+    "peakResidentMiB": 766.546875,
+    "residentMiB": 753.125,
+    "sinceProcessStartSeconds": 3.120531916618347,
+    "thermalState": "nominal"
+   }
+  }
+ },
+ "benchFromSignedApp": {
+  "cacheRelease": {
+   "footprintAfterMiB": 893.2512817382812,
+   "footprintBeforeMiB": 6355.923156738281,
+   "gpuCacheAfterMiB": 0,
+   "gpuCacheBeforeMiB": 5479.796802520752
+  },
+  "crosscheck": {
+   "count": 20,
+   "dimension": 1024,
+   "path": "~/Library/Caches/brosis-build/e9/results/crosscheck_signed_app.json"
+  },
+  "date": "2026-09-06T17:17:12Z",
+  "determinism": {
+   "dimension": 1024,
+   "identicalAcrossBatchSize": 0,
+   "identicalSameBatchSize": 8,
+   "maxAbsDiffAcrossBatchSize": 0.0004041716456413269,
+   "maxAbsDiffSameBatchSize": 0,
+   "textCount": 8
+  },
+  "environment": {
+   "gpuMemoryLimitMiB": 124518.39999961853,
+   "hardwareModel": "Mac16,5",
+   "osVersion": "Version 26.6.2 (Build 25G83)",
+   "physicalMemoryGiB": 128,
+   "processorCount": 16,
+   "thermalStateAtStart": "nominal"
+  },
+  "gpuMemoryConfig": {
+   "cacheLimitMiB": 124518.39999961853,
+   "cacheLimitOverridden": false,
+   "cacheLimitRequestedMiB": null,
+   "memoryLimitMiB": 124518.39999961853
+  },
+  "gpuPeakMiB": 1443.3079299926758,
+  "installed": {
+   "baseURLUsed": "https://huggingface.co",
+   "repoId": "mlx-community/Qwen3-Embedding-0.6B-8bit",
+   "revision": "407ad2329cd30702720aafe83f74a1ba30fdfbca",
+   "source": "huggingface",
+   "totalBytes": 649088604
+  },
+  "load": {
+   "containerLoadSeconds": 0.32591700553894043,
+   "dimension": 1024,
+   "modelDirectoryBytes": 649088992,
+   "padTokenId": 151643,
+   "poolingStrategy": "last",
+   "secondsFromProcessStartToFirstVector": 0.3916119337081909
+  },
+  "memoryAfterCacheRelease": {
+   "footprintMiB": 893.2512817382812,
+   "gpuActiveMiB": 603.7842712402344,
+   "gpuCacheMiB": 0,
+   "gpuPeakMiB": 1443.3079299926758,
+   "label": "after-cache-release",
+   "peakFootprintMiB": 6355.923156738281,
+   "peakResidentMiB": 766.546875,
+   "residentMiB": 753.125,
+   "sinceProcessStartSeconds": 3.120531916618347,
+   "thermalState": "nominal"
+  },
+  "memoryAfterFirstVector": {
+   "footprintMiB": 869.9699172973633,
+   "gpuActiveMiB": 603.7842712402344,
+   "gpuCacheMiB": 4.228176116943359,
+   "gpuPeakMiB": 608.0122680664062,
+   "label": "after-first-vector",
+   "peakFootprintMiB": 869.9699172973633,
+   "peakResidentMiB": 766.546875,
+   "residentMiB": 742.84375,
+   "sinceProcessStartSeconds": 0.3918548822402954,
+   "thermalState": "nominal"
+  },
+  "memoryAfterLoad": {
+   "footprintMiB": 680.6261672973633,
+   "gpuActiveMiB": 603.7842712402344,
+   "gpuCacheMiB": 0.000431060791015625,
+   "gpuPeakMiB": 603.7842712402344,
+   "label": "after-load",
+   "peakFootprintMiB": 733.6418151855469,
+   "peakResidentMiB": 766.546875,
+   "residentMiB": 733.578125,
+   "sinceProcessStartSeconds": 0.3725168704986572,
+   "thermalState": "nominal"
+  },
+  "memoryAtEnd": {
+   "footprintMiB": 6355.923156738281,
+   "gpuActiveMiB": 603.7842712402344,
+   "gpuCacheMiB": 5479.796802520752,
+   "gpuPeakMiB": 1443.3079299926758,
+   "label": "end",
+   "peakFootprintMiB": 6355.923156738281,
+   "peakResidentMiB": 766.546875,
+   "residentMiB": 754.984375,
+   "sinceProcessStartSeconds": 2.883065938949585,
+   "thermalState": "nominal"
+  },
+  "memoryBeforeLoad": {
+   "footprintMiB": 8.547492980957031,
+   "gpuActiveMiB": 0,
+   "gpuCacheMiB": 0,
+   "gpuPeakMiB": 0,
+   "label": "before-load",
+   "peakFootprintMiB": 8.547492980957031,
+   "peakResidentMiB": 38.140625,
+   "residentMiB": 38.140625,
+   "sinceProcessStartSeconds": 0.04626584053039551,
+   "thermalState": "nominal"
+  },
+  "metallib": [
+   {
+    "exists": false,
+    "path": "~/Library/Caches/brosis-build/e9/brosis-e9.app/Contents/MacOS/mlx.metallib",
+    "sizeMiB": 0
+   },
+   {
+    "exists": false,
+    "path": "~/Library/Caches/brosis-build/e9/brosis-e9.app/Contents/MacOS/Resources/mlx.metallib",
+    "sizeMiB": 0
+   },
+   {
+    "exists": false,
+    "path": "~/Library/Caches/brosis-build/e9/brosis-e9.app/Contents/MacOS/mlx-swift_Cmlx.bundle/default.metallib",
+    "sizeMiB": 0
+   },
+   {
+    "exists": false,
+    "path": "~/Library/Caches/brosis-build/e9/brosis-e9.app/Contents/MacOS/Resources/default.metallib",
+    "sizeMiB": 0
+   },
+   {
+    "exists": true,
+    "path": "~/Library/Caches/brosis-build/e9/brosis-e9.app/Contents/Resources/mlx-swift_Cmlx.bundle/default.metallib",
+    "sizeMiB": 119.6385726928711
+   }
+  ],
+  "modelDirectory": "~/Library/Application Support/brosis-m0/models/Qwen3-Embedding-0.6B-8bit",
+  "modelId": "Qwen3-Embedding-0.6B-8bit",
+  "mrl": {
+   "byDimension": {
+    "256": {
+     "queriesWithPerfectTop10": 11,
+     "recallAt10Mean": 0.9024999999999999,
+     "recallAt10Min": 0.8,
+     "top1AgreementRate": 0.55
+    },
+    "512": {
+     "queriesWithPerfectTop10": 18,
+     "recallAt10Mean": 0.9249999999999998,
+     "recallAt10Min": 0.6,
+     "top1AgreementRate": 0.675
+    }
+   },
+   "docCount": 200,
+   "queryCount": 40,
+   "queryInstructionUsed": true,
+   "truthDimension": 1024
+  },
+  "peakFootprintBytes": 6664668480,
+  "peakFootprintMiB": 6355.923156738281,
+  "peakResidentBytes": 803782656,
+  "peakResidentMiB": 766.546875,
+  "semantics": {
+   "cross_lingual": {
+    "cosineMax": 0.8791335465013536,
+    "cosineMean": 0.8148478818463565,
+    "cosineMin": 0.7248252062243228,
+    "cosines": [
+     0.876524794790123,
+     0.8751902831301793,
+     0.7895613654897466,
+     0.8791335465013536,
+     0.7261174781519174,
+     0.8297381101611082,
+     0.8188251933692156,
+     0.7248252062243228,
+     0.8788459238509433,
+     0.749716916794655
+    ],
+    "cosineStdev": 0.06391817523964077,
+    "pairs": 10
+   },
+   "en_synonym": {
+    "cosineMax": 0.9427895215322304,
+    "cosineMean": 0.8435486444958054,
+    "cosineMin": 0.7242663082151392,
+    "cosines": [
+     0.8309733709977435,
+     0.8948848616481282,
+     0.8073640750413406,
+     0.8513351768774664,
+     0.7242663082151392,
+     0.8314408027798712,
+     0.8895142725874725,
+     0.9004721676385036,
+     0.7624458876401582,
+     0.9427895215322304
+    ],
+    "cosineStdev": 0.06693106630056281,
+    "pairs": 10
+   },
+   "unrelated": {
+    "cosineMax": 0.30521865340127524,
+    "cosineMean": 0.23601705926902036,
+    "cosineMin": 0.1257243644632916,
+    "cosines": [
+     0.22199838827916285,
+     0.20025762164566704,
+     0.27786245189174213,
+     0.30521865340127524,
+     0.1257243644632916,
+     0.24161720801765801,
+     0.3033612030775169,
+     0.21518349609023738,
+     0.1736002445951605,
+     0.2953469612284919
+    ],
+    "cosineStdev": 0.06018136044375203,
+    "pairs": 10
+   },
+   "zh_synonym": {
+    "cosineMax": 0.928681213875706,
+    "cosineMean": 0.8678223805254011,
+    "cosineMin": 0.7179701214402364,
+    "cosines": [
+     0.9008342190451081,
+     0.928681213875706,
+     0.8804054509617584,
+     0.9201620024142954,
+     0.9280387187788708,
+     0.7897755429126249,
+     0.922892807800988,
+     0.8470410995623929,
+     0.7179701214402364,
+     0.8424226284620296
+    ],
+    "cosineStdev": 0.06990002827124586,
+    "pairs": 10
+   }
+  },
+  "throughput": {
+   "avgChars": 500,
+   "batchSize": 16,
+   "maxSeqLen": 184,
+   "memoryAfter": {
+    "footprintMiB": 6151.360656738281,
+    "gpuActiveMiB": 603.7842712402344,
+    "gpuCacheMiB": 5278.655857086182,
+    "gpuPeakMiB": 1443.3079299926758,
+    "label": "after-throughput",
+    "peakFootprintMiB": 6153.173156738281,
+    "peakResidentMiB": 766.546875,
+    "residentMiB": 753.296875,
+    "sinceProcessStartSeconds": 2.824315905570984,
+    "thermalState": "nominal"
+   },
+   "repeats": 5,
+   "secondsPerBatch": {
+    "all": [
+     0.22731196880340576,
+     0.22758805751800537,
+     0.22867703437805176,
+     0.22766900062561035,
+     0.22806096076965332
+    ],
+    "max": 0.22867703437805176,
+    "mean": 0.2278614044189453,
+    "min": 0.22731196880340576
+   },
+   "textsPerSecond": 70.21812246264597,
+   "textsPerSecondBest": 70.38784664188908,
+   "tokensPerBatch": 2809,
+   "tokensPerSecond": 12327.669124848282,
+   "tokensPerSecondBest": 12357.466326066651
+  },
+  "tool": "brosis-e9 bench",
+  "totalSeconds": 3.1205438375473022
+ },
+ "benchFromSignedAppTimeMinusL": {
+  "peakResidentBytes": 803782656,
+  "peakFootprintBytes": 6664668480,
+  "realSeconds": 3.15,
+  "peakResidentMiB": 766.546875,
+  "peakFootprintMiB": 6355.923156738281
+ },
+ "benchFromCLIBinary": {
+  "cacheRelease": {
+   "footprintAfterMiB": 883.4388046264648,
+   "footprintBeforeMiB": 6339.923179626465,
+   "gpuCacheAfterMiB": 0,
+   "gpuCacheBeforeMiB": 5456.359302520752
+  },
+  "crosscheck": {
+   "count": 20,
+   "dimension": 1024,
+   "path": "~/Library/Caches/brosis-build/e9/results/crosscheck_swift.json"
+  },
+  "date": "2026-09-06T17:17:59Z",
+  "determinism": {
+   "dimension": 1024,
+   "identicalAcrossBatchSize": 0,
+   "identicalSameBatchSize": 8,
+   "maxAbsDiffAcrossBatchSize": 0.0004041716456413269,
+   "maxAbsDiffSameBatchSize": 0,
+   "textCount": 8
+  },
+  "environment": {
+   "gpuMemoryLimitMiB": 124518.39999961853,
+   "hardwareModel": "Mac16,5",
+   "osVersion": "Version 26.6.2 (Build 25G83)",
+   "physicalMemoryGiB": 128,
+   "processorCount": 16,
+   "thermalStateAtStart": "nominal"
+  },
+  "gpuMemoryConfig": {
+   "cacheLimitMiB": 124518.39999961853,
+   "cacheLimitOverridden": false,
+   "cacheLimitRequestedMiB": null,
+   "memoryLimitMiB": 124518.39999961853
+  },
+  "gpuPeakMiB": 1443.3079299926758,
+  "installed": {
+   "baseURLUsed": "https://huggingface.co",
+   "repoId": "mlx-community/Qwen3-Embedding-0.6B-8bit",
+   "revision": "407ad2329cd30702720aafe83f74a1ba30fdfbca",
+   "source": "huggingface",
+   "totalBytes": 649088604
+  },
+  "load": {
+   "containerLoadSeconds": 0.35594403743743896,
+   "dimension": 1024,
+   "modelDirectoryBytes": 649088992,
+   "padTokenId": 151643,
+   "poolingStrategy": "last",
+   "secondsFromProcessStartToFirstVector": 1.2484010457992554
+  },
+  "memoryAfterCacheRelease": {
+   "footprintMiB": 883.4388046264648,
+   "gpuActiveMiB": 603.7842712402344,
+   "gpuCacheMiB": 0,
+   "gpuPeakMiB": 1443.3079299926758,
+   "label": "after-cache-release",
+   "peakFootprintMiB": 6339.923179626465,
+   "peakResidentMiB": 762,
+   "residentMiB": 756.625,
+   "sinceProcessStartSeconds": 4.01862096786499,
+   "thermalState": "nominal"
+  },
+  "memoryAfterFirstVector": {
+   "footprintMiB": 877.7043380737305,
+   "gpuActiveMiB": 603.7842712402344,
+   "gpuCacheMiB": 4.228176116943359,
+   "gpuPeakMiB": 608.0122680664062,
+   "label": "after-first-vector",
+   "peakFootprintMiB": 877.7043380737305,
+   "peakResidentMiB": 762,
+   "residentMiB": 746.53125,
+   "sinceProcessStartSeconds": 1.2486120462417603,
+   "thermalState": "nominal"
+  },
+  "memoryAfterLoad": {
+   "footprintMiB": 688.1886901855469,
+   "gpuActiveMiB": 603.7842712402344,
+   "gpuCacheMiB": 0.000431060791015625,
+   "gpuPeakMiB": 603.7842712402344,
+   "label": "after-load",
+   "peakFootprintMiB": 733.1730651855469,
+   "peakResidentMiB": 762,
+   "residentMiB": 737.0625,
+   "sinceProcessStartSeconds": 1.2290680408477783,
+   "thermalState": "nominal"
+  },
+  "memoryAtEnd": {
+   "footprintMiB": 6339.923179626465,
+   "gpuActiveMiB": 603.7842712402344,
+   "gpuCacheMiB": 5456.359302520752,
+   "gpuPeakMiB": 1443.3079299926758,
+   "label": "end",
+   "peakFootprintMiB": 6339.923179626465,
+   "peakResidentMiB": 762,
+   "residentMiB": 758.484375,
+   "sinceProcessStartSeconds": 3.7744879722595215,
+   "thermalState": "nominal"
+  },
+  "memoryBeforeLoad": {
+   "footprintMiB": 8.016197204589844,
+   "gpuActiveMiB": 0,
+   "gpuCacheMiB": 0,
+   "gpuPeakMiB": 0,
+   "label": "before-load",
+   "peakFootprintMiB": 8.016197204589844,
+   "peakResidentMiB": 33.59375,
+   "residentMiB": 33.59375,
+   "sinceProcessStartSeconds": 0.8727200031280518,
+   "thermalState": "nominal"
+  },
+  "metallib": [
+   {
+    "exists": true,
+    "path": "~/Library/Caches/brosis-build/e9/release/mlx.metallib",
+    "sizeMiB": 119.6385726928711
+   },
+   {
+    "exists": false,
+    "path": "~/Library/Caches/brosis-build/e9/release/Resources/mlx.metallib",
+    "sizeMiB": 0
+   },
+   {
+    "exists": false,
+    "path": "~/Library/Caches/brosis-build/e9/release/mlx-swift_Cmlx.bundle/default.metallib",
+    "sizeMiB": 0
+   },
+   {
+    "exists": false,
+    "path": "~/Library/Caches/brosis-build/e9/release/Resources/default.metallib",
+    "sizeMiB": 0
+   },
+   {
+    "exists": false,
+    "path": "~/Library/Caches/brosis-build/e9/release/mlx-swift_Cmlx.bundle/default.metallib",
+    "sizeMiB": 0
+   }
+  ],
+  "modelDirectory": "~/Library/Application Support/brosis-m0/models/Qwen3-Embedding-0.6B-8bit",
+  "modelId": "Qwen3-Embedding-0.6B-8bit",
+  "mrl": {
+   "byDimension": {
+    "256": {
+     "queriesWithPerfectTop10": 11,
+     "recallAt10Mean": 0.9024999999999999,
+     "recallAt10Min": 0.8,
+     "top1AgreementRate": 0.55
+    },
+    "512": {
+     "queriesWithPerfectTop10": 18,
+     "recallAt10Mean": 0.9249999999999998,
+     "recallAt10Min": 0.6,
+     "top1AgreementRate": 0.675
+    }
+   },
+   "docCount": 200,
+   "queryCount": 40,
+   "queryInstructionUsed": true,
+   "truthDimension": 1024
+  },
+  "peakFootprintBytes": 6647891288,
+  "peakFootprintMiB": 6339.923179626465,
+  "peakResidentBytes": 799014912,
+  "peakResidentMiB": 762,
+  "semantics": {
+   "cross_lingual": {
+    "cosineMax": 0.8791335465013536,
+    "cosineMean": 0.8148478818463565,
+    "cosineMin": 0.7248252062243228,
+    "cosines": [
+     0.876524794790123,
+     0.8751902831301793,
+     0.7895613654897466,
+     0.8791335465013536,
+     0.7261174781519174,
+     0.8297381101611082,
+     0.8188251933692156,
+     0.7248252062243228,
+     0.8788459238509433,
+     0.749716916794655
+    ],
+    "cosineStdev": 0.06391817523964077,
+    "pairs": 10
+   },
+   "en_synonym": {
+    "cosineMax": 0.9427895215322304,
+    "cosineMean": 0.8435486444958054,
+    "cosineMin": 0.7242663082151392,
+    "cosines": [
+     0.8309733709977435,
+     0.8948848616481282,
+     0.8073640750413406,
+     0.8513351768774664,
+     0.7242663082151392,
+     0.8314408027798712,
+     0.8895142725874725,
+     0.9004721676385036,
+     0.7624458876401582,
+     0.9427895215322304
+    ],
+    "cosineStdev": 0.06693106630056281,
+    "pairs": 10
+   },
+   "unrelated": {
+    "cosineMax": 0.30521865340127524,
+    "cosineMean": 0.23601705926902036,
+    "cosineMin": 0.1257243644632916,
+    "cosines": [
+     0.22199838827916285,
+     0.20025762164566704,
+     0.27786245189174213,
+     0.30521865340127524,
+     0.1257243644632916,
+     0.24161720801765801,
+     0.3033612030775169,
+     0.21518349609023738,
+     0.1736002445951605,
+     0.2953469612284919
+    ],
+    "cosineStdev": 0.06018136044375203,
+    "pairs": 10
+   },
+   "zh_synonym": {
+    "cosineMax": 0.928681213875706,
+    "cosineMean": 0.8678223805254011,
+    "cosineMin": 0.7179701214402364,
+    "cosines": [
+     0.9008342190451081,
+     0.928681213875706,
+     0.8804054509617584,
+     0.9201620024142954,
+     0.9280387187788708,
+     0.7897755429126249,
+     0.922892807800988,
+     0.8470410995623929,
+     0.7179701214402364,
+     0.8424226284620296
+    ],
+    "cosineStdev": 0.06990002827124586,
+    "pairs": 10
+   }
+  },
+  "throughput": {
+   "avgChars": 500,
+   "batchSize": 16,
+   "maxSeqLen": 184,
+   "memoryAfter": {
+    "footprintMiB": 6138.798179626465,
+    "gpuActiveMiB": 603.7842712402344,
+    "gpuCacheMiB": 5258.421482086182,
+    "gpuPeakMiB": 1443.3079299926758,
+    "label": "after-throughput",
+    "peakFootprintMiB": 6140.454429626465,
+    "peakResidentMiB": 762,
+    "residentMiB": 756.796875,
+    "sinceProcessStartSeconds": 3.7054970264434814,
+    "thermalState": "nominal"
+   },
+   "repeats": 5,
+   "secondsPerBatch": {
+    "all": [
+     0.2287600040435791,
+     0.22922205924987793,
+     0.23237299919128418,
+     0.2286280393600464,
+     0.22935402393341064
+    ],
+    "max": 0.23237299919128418,
+    "mean": 0.22966742515563965,
+    "min": 0.2286280393600464
+   },
+   "textsPerSecond": 69.66595279742965,
+   "textsPerSecondBest": 69.9826672388289,
+   "tokensPerBatch": 2809,
+   "tokensPerSecond": 12230.728837998744,
+   "tokensPerSecondBest": 12286.332017116896
+  },
+  "tool": "brosis-e9 bench",
+  "totalSeconds": 4.018635034561157
+ },
+ "benchFromCLIBinaryTimeMinusL": {
+  "peakResidentBytes": 799014912,
+  "peakFootprintBytes": 6647891288,
+  "realSeconds": 4.05,
+  "peakResidentMiB": 762.0,
+  "peakFootprintMiB": 6339.923179626465
+ },
+ "envSignedApp": {
+  "metalSmokeTest": {
+   "ok": true,
+   "value": 15
+  },
+  "executable": "~/Library/Caches/brosis-build/e9/brosis-e9.app/Contents/MacOS/brosis-e9",
+  "bundleMainPath": "~/Library/Caches/brosis-build/e9/brosis-e9.app",
+  "gpuMemoryLimitMiB": 124518.39999961853,
+  "processorCount": 16,
+  "osVersion": "Version 26.6.2 (Build 25G83)",
+  "physicalMemoryGiB": 128,
+  "thermalStateAtStart": "nominal",
+  "hardwareModel": "Mac16,5",
+  "metallibCandidates": [
+   {
+    "sizeMiB": 0,
+    "exists": false,
+    "path": "~/Library/Caches/brosis-build/e9/brosis-e9.app/Contents/MacOS/mlx.metallib"
+   },
+   {
+    "path": "~/Library/Caches/brosis-build/e9/brosis-e9.app/Contents/MacOS/Resources/mlx.metallib",
+    "exists": false,
+    "sizeMiB": 0
+   },
+   {
+    "sizeMiB": 0,
+    "path": "~/Library/Caches/brosis-build/e9/brosis-e9.app/Contents/MacOS/mlx-swift_Cmlx.bundle/default.metallib",
+    "exists": false
+   },
+   {
+    "exists": false,
+    "path": "~/Library/Caches/brosis-build/e9/brosis-e9.app/Contents/MacOS/Resources/default.metallib",
+    "sizeMiB": 0
+   },
+   {
+    "sizeMiB": 119.6385726928711,
+    "path": "~/Library/Caches/brosis-build/e9/brosis-e9.app/Contents/Resources/mlx-swift_Cmlx.bundle/default.metallib",
+    "exists": true
+   }
+  ],
+  "modelsRoot": "~/Library/Application Support/brosis-m0/models"
+ },
+ "verify": {
+  "id": "Qwen3-Embedding-0.6B-8bit",
+  "allMatch": true,
+  "directory": "~/Library/Application Support/brosis-m0/models/Qwen3-Embedding-0.6B-8bit",
+  "files": 15,
+  "seconds": 0.2473980188369751
+ },
+ "pythonCrossCheck": {
+  "modelDir": "~/Library/Application Support/brosis-m0/models/Qwen3-Embedding-0.6B-8bit",
+  "pythonMLXVersion": "0.31.2",
+  "padTokenId": 151643,
+  "count": 20,
+  "dimension": 1024,
+  "loadSeconds": 0.49103689193725586,
+  "embedSeconds": 0.06948304176330566,
+  "cosineMin": 0.9999959796104134,
+  "cosineMean": 0.9999981097728607,
+  "cosineMax": 0.9999999800437891,
+  "maxAbsElementDiff": 0.0004321262240409851,
+  "allAtLeast0_99": true,
+  "cosines": [
+   0.9999965933094018,
+   0.9999977288808631,
+   0.9999972299546445,
+   0.9999970411157993,
+   0.9999962757576764,
+   0.9999976583617552,
+   0.9999975143046874,
+   0.9999967623859742,
+   0.9999999779961554,
+   0.999999979030712,
+   0.9999999782623399,
+   0.9999999800437891,
+   0.9999999775500102,
+   0.9999999778174958,
+   0.9999999780043951,
+   0.999999978941027,
+   0.9999959796104134,
+   0.9999962884616292,
+   0.9999972530934991,
+   0.9999960425749475
+  ]
+ },
+ "generation": {
+  "directory": "~/.lmstudio/models/lmstudio-community/gemma-4-26B-A4B-it-QAT-MLX-4bit",
+  "error": "unhandledKeys(path: [\"language_model\", \"model\", \"layers\", \"0\"], modules: [\"Gemma4Model\", \"Gemma4TextModel\", \"Gemma4TextModelInner\", \"Gemma4DecoderLayer\"], keys: [\"experts\", \"post_feedforward_layernorm_1\", \"post_feedforward_layernorm_2\", \"pre_feedforward_layernorm_2\", \"router\"])",
+  "maxTokens": 64,
+  "ok": false,
+  "peakFootprintMiB": 321.71966552734375,
+  "peakResidentMiB": 354.171875,
+  "prompt": "用一句话说明什么是断点续传。"
+ },
+ "codesign": {
+  "identity": "Developer ID Application: <Company> (<TEAMID>)",
+  "options": "runtime（hardened runtime）+ --timestamp + --generate-entitlement-der",
+  "entitlements": "无（空）",
+  "dv": "Executable=~/Library/Caches/brosis-build/e9/brosis-e9.app/Contents/MacOS/brosis-e9\nIdentifier=com.brosis.e9\nFormat=app bundle with Mach-O thin (arm64)\nCodeDirectory v=20500 size=81689 flags=0x10000(runtime) hashes=2546+3 location=embedded\nVersionPlatform=1\nVersionMin=1703936\nVersionSDK=1705216\nHash type=sha256 size=32\nCandidateCDHash sha256=05832c5f741d5de383c0a33c68c18a8f1740a72e\nCandidateCDHashFull sha256=05832c5f741d5de383c0a33c68c18a8f1740a72e3b633c44f993f96822da5cd6\nHash choices=sha256\nCMSDigest=05832c5f741d5de383c0a33c68c18a8f1740a72e3b633c44f993f96822da5cd6\nCMSDigestType=2\nExecutable Segment base=0\nExecutable Segment limit=19988480\nExecutable Segment flags=0x1\nPage size=16384\nCDHash=05832c5f741d5de383c0a33c68c18a8f1740a72e\nSignature size=9111\nAuthority=Developer ID Application: <Company> (<TEAMID>)\nAuthority=Developer ID Certification Authority\nAuthority=Apple Root CA\nTimestamp=Sep 7, 2026 at 01:16:36\nInfo.plist entries=13\nTeamIdentifier=<TEAMID>\nRuntime Version=26.5.0\nSealed Resources version=2 rules=13 files=3\nInternal requirements count=1 size=176\n",
+  "verifyDeepStrict": "~/Library/Caches/brosis-build/e9/brosis-e9.app: valid on disk\n~/Library/Caches/brosis-build/e9/brosis-e9.app: satisfies its Designated Requirement\n",
+  "spctl": "~/Library/Caches/brosis-build/e9/brosis-e9.app: rejected\nsource=Unnotarized Developer ID\norigin=Developer ID Application: <Company> (<TEAMID>)\n"
+ },
+ "notarization": {
+  "keychainProfile": "brosis",
+  "available": false,
+  "error": "Error: No Keychain password item found for profile: brosis\n\nRun 'notarytool store-credentials' to create another credential profile."
+ },
+ "systemProxy": "<dictionary> {\n  ExceptionsList : <array> {\n    0 : 192.168.50.1.dns\n    1 : captive.apple.com\n    2 : localhost\n    3 : 10.0.0.0/8\n    4 : *.local\n    5 : 2408:8207:2612:32b0::1.dns\n    6 : 172.16.0.0/12\n    7 : 198.18.0.0/15\n    8 : 192.168.0.0/16\n  }\n  ExcludeSimpleHostnames : 1\n  FTPPassive : 1\n  HTTPEnable : 1\n  HTTPPort : <port>\n  HTTPProxy : 127.0.0.1\n  HTTPSEnable : 1\n  HTTPSPort : <port>\n  HTTPSProxy : 127.0.0.1\n  ProxyAutoConfigEnable : 0\n  ProxyAutoDiscoveryEnable : 0\n  SOCKSEnable : 0\n}\n"
+}

@@ -1,0 +1,11 @@
+brosis · M0 阶段出口检查表 · 2026-09-06
+
+1. 记录一段许可内容（AX 优先，OCR 兜底）
+2. 在 300 ms 内准确找回并展开原文
+3. 删除后确认 FTS5 与向量表都不可检索
+4. 关闭后台索引，CPU 占用回落到 1% 以下
+5. 导出 /var/log/brosis/audit.log 并校验 SHA-256
+6. 断网重启，确认无外发请求到 api.brosis.local
+
+负责人 Allen Qiu · 截止 2026-09-20 · schema v0.14
+详见 docs/实施计划.md 第 4 节 · brosisd/0.2.7 (build 411)

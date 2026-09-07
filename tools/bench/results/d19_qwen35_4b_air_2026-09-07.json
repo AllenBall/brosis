@@ -1,0 +1,1178 @@
+{
+  "app": {
+    "bundle": "~/Library/Caches/brosis-build/e9/brosis-e9.app",
+    "note": "SKIP_SIGN=1，钥匙串无 Developer ID",
+    "signed": false,
+    "totalBytes": 45238426,
+    "totalMiB": 43.14272499084473
+  },
+  "date": "2026-09-07",
+  "download": {
+    "avgMiBPerSecond": 12.388581998468974,
+    "baseUsed": "https://huggingface.co",
+    "files": [
+      {
+        "bytes": 385,
+        "path": "video_preprocessor_config.json",
+        "rangeStatus": null,
+        "resumedFromBytes": 0,
+        "seconds": 1.3777580261230469,
+        "sha256OK": true
+      },
+      {
+        "bytes": 390,
+        "path": "preprocessor_config.json",
+        "rangeStatus": null,
+        "resumedFromBytes": 0,
+        "seconds": 0.4505629539489746,
+        "sha256OK": true
+      },
+      {
+        "bytes": 1139,
+        "path": "tokenizer_config.json",
+        "rangeStatus": null,
+        "resumedFromBytes": 0,
+        "seconds": 0.4530280828475952,
+        "sha256OK": true
+      },
+      {
+        "bytes": 1300,
+        "path": "processor_config.json",
+        "rangeStatus": null,
+        "resumedFromBytes": 0,
+        "seconds": 0.4565030336380005,
+        "sha256OK": true
+      },
+      {
+        "bytes": 1570,
+        "path": ".gitattributes",
+        "rangeStatus": null,
+        "resumedFromBytes": 0,
+        "seconds": 0.45353901386260986,
+        "sha256OK": true
+      },
+      {
+        "bytes": 2273,
+        "path": "README.md",
+        "rangeStatus": null,
+        "resumedFromBytes": 0,
+        "seconds": 0.45529699325561523,
+        "sha256OK": true
+      },
+      {
+        "bytes": 3366,
+        "path": "config.json",
+        "rangeStatus": null,
+        "resumedFromBytes": 0,
+        "seconds": 0.47668397426605225,
+        "sha256OK": true
+      },
+      {
+        "bytes": 7756,
+        "path": "chat_template.jinja",
+        "rangeStatus": null,
+        "resumedFromBytes": 0,
+        "seconds": 0.4613339900970459,
+        "sha256OK": true
+      },
+      {
+        "bytes": 101944,
+        "path": "model.safetensors.index.json",
+        "rangeStatus": null,
+        "resumedFromBytes": 0,
+        "seconds": 0.46153199672698975,
+        "sha256OK": true
+      },
+      {
+        "bytes": 6722759,
+        "path": "vocab.json",
+        "rangeStatus": null,
+        "resumedFromBytes": 0,
+        "seconds": 1.7100239992141724,
+        "sha256OK": true
+      },
+      {
+        "bytes": 19989343,
+        "path": "tokenizer.json",
+        "rangeStatus": null,
+        "resumedFromBytes": 0,
+        "seconds": 4.233273029327393,
+        "sha256OK": true
+      },
+      {
+        "bytes": 3034300695,
+        "path": "model.safetensors",
+        "rangeStatus": null,
+        "resumedFromBytes": 0,
+        "seconds": 224.64026200771332,
+        "sha256OK": true
+      }
+    ],
+    "probes": [
+      {
+        "base": "https://huggingface.co",
+        "note": "HTTP 200，385 字节",
+        "ok": true,
+        "seconds": 2.153290033340454
+      },
+      {
+        "base": "https://hf-mirror.com",
+        "note": "HTTP 200，385 字节",
+        "ok": true,
+        "seconds": 1.7206839323043823
+      }
+    ],
+    "totalBytes": 3061132920,
+    "totalSeconds": 235.6463270187378,
+    "usrBinTime": {
+      "maxResidentBytes": 2885419008,
+      "peakFootprintBytes": 6101898112,
+      "peakFootprintMiB": 5819.2235107421875,
+      "realSeconds": 239.75,
+      "swaps": 0,
+      "sysSeconds": 22.09,
+      "userSeconds": 15.21
+    }
+  },
+  "jsonValidation": "--- 输入 1 ---\n  JSON 可解析: True | 有 ``` 围栏: False | 键齐全: True | apps 全部出自输入: True\n  apps  : ['飞书 Lark']\n  people: ['张培', '李慧敏', '我']\n  topics: ['Q3 page_view 口径对齐', 'session_id 生成规则']\n  summary: 讨论 Q3 page_view 口径不一致问题，确认以 SDK 为准，并安排整理字段映射及 session_id 规则。\n--- 输入 2 ---\n  JSON 可解析: True | 有 ``` 围栏: False | 键齐全: True | apps 全部出自输入: True\n  apps  : ['Xcode']\n  people: []\n  topics: ['AES-GCM', 'iCloud', '编译日志', '测试结果', '失败用例']\n  summary: Xcode 编译成功但测试失败，因 device_id 未保留导致同步写入 iCloud 时数据丢失。\n--- 输入 3 ---\n  JSON 可解析: True | 有 ``` 围栏: False | 键齐全: True | apps 全部出自输入: True\n  apps  : ['微信']\n  people: ['老周', '陈默', '我']\n  topics: ['模型选型会', '内存曲线', 'Apache 2.0 许可', '4bit 量化']\n  summary: 会议时间调整，准备模型选型会材料，确认内存曲线与许可说明。\n--- 输入 4 ---\n  JSON 可解析: True | 有 ``` 围栏: False | 键齐全: True | apps 全部出自输入: True\n  apps  : ['Safari']\n  people: ['kmaehashi']\n  topics: ['Deterministic sampling in MLX', 'kv cache quantization', 'mlx-swift-lm']\n  summary: 在 MLX 确定性采样中，温度设为 0 时 RNG 种子无效，kv cache 量化引入微小偏差。\n--- 输入 5 ---\n  JSON 可解析: True | 有 ``` 围栏: False | 键齐全: True | apps 全部出自输入: True\n  apps  : ['Terminal']\n  people: []\n  topics: ['模型加载', '内存占用', '系统监控', '备忘录记录']\n  summary: 终端运行模型测试，内存占用 1.7GB，交换区为 0，结果记入备忘录。\n\n合计有效：5/5\n",
+  "machine": {
+    "environment": {
+      "gpuMemoryLimitMiB": 15564.79999923706,
+      "hardwareModel": "Mac16,12",
+      "osVersion": "Version 26.6.2 (Build 25G83)",
+      "physicalMemoryGiB": 16,
+      "processorCount": 10,
+      "thermalStateAtStart": "nominal"
+    },
+    "hostname": "<air-host>",
+    "mlxMemoryLimitMiB": 15564.79999923706
+  },
+  "model": {
+    "catalogTotalBytes": 3061132920,
+    "catalogTotalGiB": 2.8509021922945976,
+    "catalogTotalMiB": 2919.323844909668,
+    "contextLength": 262144,
+    "fileCount": 12,
+    "id": "Qwen3.5-4B-MLX-4bit",
+    "installedDirBytes": 3061133297,
+    "installedDuKiB": 2999928,
+    "installedDuMiB": 2929.6171875,
+    "installedRecord": {
+      "baseURLUsed": "https://huggingface.co",
+      "catalogSchemaVersion": 1,
+      "fileCount": 12,
+      "id": "Qwen3.5-4B-MLX-4bit",
+      "installedAt": "2026-09-07T02:53:41Z",
+      "repoId": "mlx-community/Qwen3.5-4B-MLX-4bit",
+      "revision": "32f3e8ecf65426fc3306969496342d504bfa13f3",
+      "source": "huggingface",
+      "totalBytes": 3061132920,
+      "verifiedAt": "2026-09-07T02:53:41Z"
+    },
+    "license": "Apache-2.0",
+    "quantization": {
+      "bits": 4,
+      "group_size": 64,
+      "mode": "affine"
+    },
+    "repoId": "mlx-community/Qwen3.5-4B-MLX-4bit",
+    "revision": "32f3e8ecf65426fc3306969496342d504bfa13f3",
+    "weights": {
+      "languageModelBytes": 2367118848,
+      "languageModelGiB": 2.2045512199401855,
+      "languageModelMiB": 2257.46044921875,
+      "visionSharePercent": 21.9840504725814,
+      "visionTowerBytes": 667028480,
+      "visionTowerMiB": 636.1279296875
+    }
+  },
+  "prompts": {
+    "b_narrative": "以下是 2026-09-05（周五）的确定性台账，全部由本机采集器生成，未经模型加工。\n\n## 一、应用前台时长与切换次数\n\n| 应用 | 前台时长 | 切换次数 |\n|---|---|---|\n| Xcode | 3 小时 12 分 | 41 |\n| 飞书 Lark | 1 小时 48 分 | 63 |\n| Safari | 1 小时 05 分 | 37 |\n| 微信 WeChat | 42 分 | 29 |\n| Terminal | 38 分 | 22 |\n| Notes 备忘录 | 21 分 | 8 |\n| Figma | 17 分 | 5 |\n| Music | 9 分 | 3 |\n\n全天前台合计 8 小时 12 分，应用切换合计 208 次，最长一段不切换的专注时间 47 分（14:06–14:53，Xcode）。\n\n## 二、会话明细\n\n### 会话 1 · 09:14–10:02 · 飞书 Lark\n窗口标题：`群聊：M0 采集器验收 (12)`\n屏幕文本摘录：\n- 「李慧敏：昨晚那版采集器在 Air 上跑了 6 小时没崩，内存峰值 1.6 GiB。」\n- 「我：那就按 256 MiB 缓冲池这档定下来，验收表我今天补。」\n- 「张培：提醒一下周一要交 Q3 埋点口径对齐的结论。」\n\n### 会话 2 · 10:07–11:35 · Xcode\n窗口标题：`brosis — Collector/FrontmostObserver.swift`\n屏幕文本摘录：\n- 「func observeFrontmostApplication(interval: TimeInterval = 1.0)」\n- 「// TODO: 切换事件在锁屏后会漏一条，需要监听 NSWorkspace.sessionDidResignActive」\n- 编译日志：`Build succeeded — 0 errors, 3 warnings`\n\n### 会话 3 · 11:40–12:05 · Safari\n窗口标题：`Unified memory and phys_footprint — Apple Developer Forums`\n屏幕文本摘录：\n- 「Metal buffers are charged to phys_footprint, not to resident set size.」\n- 「Use `/usr/bin/time -l` and read `peak memory footprint`.」\n\n### 会话 4 · 14:06–14:53 · Xcode\n窗口标题：`brosis — Storage/EventStore.swift`\n屏幕文本摘录：\n- 「INSERT INTO events(ts, app_bundle_id, window_title, kind) VALUES (?,?,?,?)」\n- 「// 主键加 device_id，跨设备同步用」\n- 测试结果：`Executed 34 tests, with 0 failures (0 unexpected) in 2.118 seconds`\n\n### 会话 5 · 15:20–15:58 · 微信 WeChat\n窗口标题：`微信 — 老周`\n屏幕文本摘录：\n- 「老周：下周三下午要不要来公司过一下模型选型？」\n- 「我：可以，我把 Air 上的实测数字整理成一页发你。」\n\n## 三、任务\n\n只依据上面的台账，用中文写一段不超过 150 字的当日工作叙述。不要编造台账里没有的应用、人名、时间或结论；不要输出表格、列表或标题，只输出一段连续的中文文字。\n",
+    "d_1": "以下是一段会话文本，来自本机采集器，未经加工。\n\n时间：2026-09-08 10:12–10:41\n应用：飞书 Lark\n窗口标题：群聊：埋点口径对齐 (7)\n文本：\n- 张培：Q3 的 page_view 口径两边对不上，数仓那边把 tab 切换也算了一次。\n- 李慧敏：我这边 SDK 只在真实路由变化时上报，tab 切换走的是 element_click。\n- 张培：那就以 SDK 为准，我去改数仓的清洗规则，周一给结论。\n- 我：我把两边的字段映射整理成一张表，今天下班前发到这个群。\n- 李慧敏：顺便把 session_id 的生成规则也写进去，新同学老问。\n\n任务：只输出一个 JSON 对象，不要输出任何解释、Markdown 围栏或多余文字。键固定为：\n{\"apps\":[...],\"topics\":[...],\"people\":[...],\"summary\":\"...\"}\n其中 apps 是出现的应用名数组，topics 是话题短语数组，people 是出现的人名数组，summary 是一句不超过 50 字的中文摘要。\n",
+    "e_long_4k": "以下是 2026-09-05（周五）的确定性台账，全部由本机采集器生成，未经模型加工。所有时间为本机时区。\n\n## 一、应用前台时长与切换次数\n\n| 应用 | 前台时长（分钟） | 切换次数 | 首次出现 | 末次出现 |\n|---|---|---|---|---|\n| Xcode | 192 | 41 | 08:41 | 14:53 |\n| 飞书 Lark | 108 | 63 | 09:14 | 19:55 |\n| Safari | 65 | 37 | 11:40 | 21:52 |\n| 微信 WeChat | 42 | 29 | 15:20 | 15:58 |\n| Terminal | 38 | 22 | 13:02 | 13:48 |\n| Notes 备忘录 | 21 | 8 | 20:11 | 20:52 |\n| Figma | 17 | 5 | 16:05 | 16:40 |\n| Music | 9 | 3 | 21:00 | 21:18 |\n| Preview 预览 | 14 | 6 | 17:30 | 18:05 |\n| Mail 邮件 | 26 | 15 | 08:41 | 09:10 |\n| Calendar 日历 | 11 | 4 | 21:20 | 21:31 |\n| Slack | 33 | 12 | 16:48 | 17:22 |\n\n全天前台合计 576 分钟（约 9 小时 36 分），应用切换合计 245 次，最长一段不切换的专注时间 47 分（14:06–14:53，Xcode）。\n\n## 二、会话明细\n\n### 会话 1 · 08:41–09:10 · Mail 邮件\n窗口标题：`收件箱 — 法务：开源许可确认`\n屏幕文本摘录：\n- 「刘婧：Apache 2.0 可以随产品分发，需要在 About 页保留 NOTICE 文件。」\n- 「刘婧：另外确认一下模型权重本身的许可，和代码许可不一定是同一份。」\n- 「我：收到，我把 NOTICE 放进 app 的 Resources 目录，再去核对权重那份。」\n\n### 会话 2 · 09:14–10:02 · 飞书 Lark\n窗口标题：`群聊：M0 采集器验收 (12)`\n屏幕文本摘录：\n- 「李慧敏：昨晚那版采集器在 Air 上跑了 6 小时没崩，内存峰值 1.6 GiB。」\n- 「我：那就按 256 MiB 缓冲池这档定下来，验收表我今天补。」\n- 「张培：提醒一下周一要交 Q3 埋点口径对齐的结论。」\n- 「李慧敏：验收表里内存那一列要写清楚是 footprint 不是 RSS。」\n\n### 会话 3 · 10:07–11:35 · Xcode\n窗口标题：`brosis — Collector/FrontmostObserver.swift`\n屏幕文本摘录：\n- 「func observeFrontmostApplication(interval: TimeInterval = 1.0)」\n- 「// TODO: 切换事件在锁屏后会漏一条，需要监听 NSWorkspace.sessionDidResignActive」\n- 「编译日志：Build succeeded — 0 errors, 3 warnings」\n- 「警告：变量 lastBundleID 在某条分支上未使用，位于 FrontmostObserver.swift:142」\n\n### 会话 4 · 11:40–12:05 · Safari\n窗口标题：`Unified memory and phys_footprint — Apple Developer Forums`\n屏幕文本摘录：\n- 「Metal buffers are charged to phys_footprint, not to resident set size.」\n- 「Use /usr/bin/time -l and read peak memory footprint.」\n- 「回帖里有人贴了 ledger_phys_footprint_peak 的字段说明。」\n\n### 会话 5 · 13:02–13:48 · Terminal\n窗口标题：`zsh — brosis-e9 — 120×36`\n屏幕文本摘录：\n- 「$ /usr/bin/time -l \"$APP\" bench --id Qwen3-Embedding-0.6B-8bit --cache-limit-mib 256」\n- 「[   0.40s] 加载模型 …」\n- 「[  10.61s] 结果写入 air_bench.json」\n- 「peak memory footprint: 1730626760」\n- 「vm.swapusage: total = 0.00M  used = 0.00M  free = 0.00M」\n\n### 会话 6 · 14:06–14:53 · Xcode\n窗口标题：`brosis — Storage/EventStore.swift`\n屏幕文本摘录：\n- 「INSERT INTO events(ts, app_bundle_id, window_title, kind) VALUES (?,?,?,?)」\n- 「// 主键加 device_id，跨设备同步用」\n- 「测试结果：Executed 34 tests, with 0 failures (0 unexpected) in 2.118 seconds」\n- 「// 索引 idx_events_ts_app 建在 (ts, app_bundle_id) 上」\n\n### 会话 7 · 15:20–15:58 · 微信 WeChat\n窗口标题：`微信 — 老周`\n屏幕文本摘录：\n- 「老周：下周三下午要不要来公司过一下模型选型？」\n- 「我：可以，我把 Air 上的实测数字整理成一页发你。」\n- 「老周：把 Apache 2.0 那句也写上。」\n- 「我：好，一页速度一页内存，周三之前发你。」\n\n### 会话 8 · 16:05–16:40 · Figma\n窗口标题：`brosis / 模型面板 v3`\n屏幕文本摘录：\n- 「画板名：模型面板 — 未安装状态」\n- 「注释：内存不足的项要置灰并写明原因」\n- 「注释：下载进度条要显示已校验文件数」\n- 「注释：本地导入入口放在列表底部，不要和下载混在一起」\n\n### 会话 9 · 16:48–17:22 · Slack\n窗口标题：`#brosis-dev — 构建失败`\n屏幕文本摘录：\n- 「王一舟：CI 上 swift build 报找不到 metallib。」\n- 「我：CI 机器没装 Metal Toolchain，先跳过这一步。」\n- 「王一舟：那 CI 就只跑单元测试，不跑推理相关的用例。」\n\n### 会话 10 · 17:30–18:05 · Preview 预览\n窗口标题：`预览 — air_bench_summary.pdf`\n屏幕文本摘录：\n- 「第 2 页：三档缓冲池的峰值 footprint 对比图」\n- 「第 3 页：热状态随时间的曲线，第 130 秒起变成 fair」\n- 「第 4 页：跨机器向量逐位相同的对照表」\n\n### 会话 11 · 19:12–19:55 · 飞书 Lark\n窗口标题：`文档：Q3 埋点口径对齐`\n屏幕文本摘录：\n- 「张培：page_view 的口径两边对不上，数仓那边把 tab 切换也算了一次。」\n- 「李慧敏：SDK 只在真实路由变化时上报，tab 切换走的是 element_click。」\n- 「我：我把两边的字段映射整理成一张表，今天下班前发到群里。」\n- 「张培：顺便把 session_id 的生成规则也写进去。」\n\n### 会话 12 · 20:11–20:52 · Notes 备忘录\n窗口标题：`备忘录 — M0 待办`\n屏幕文本摘录：\n- 「- 补 E9 验收表的内存那一列」\n- 「- 问法务模型权重的许可」\n- 「- 周五前把 Air 数字整理成一页」\n- 「- 确认 CI 是否需要 Metal Toolchain」\n\n### 会话 13 · 21:00–21:18 · Music\n窗口标题：`Music — 专注歌单`\n屏幕文本摘录：\n- 「正在播放：Ambient Works Vol.3」\n- 「播放时长 9 分钟，未切歌」\n\n### 会话 14 · 21:20–21:31 · Calendar 日历\n窗口标题：`日历 — 本周`\n屏幕文本摘录：\n- 「周四 10:00 模型选型评审 B2-07」\n- 「周五 15:00 M0 验收」\n- 「周一 09:30 埋点口径结论」\n\n### 会话 15 · 21:35–21:52 · Safari\n窗口标题：`Qwen3.5 model card — Hugging Face`\n屏幕文本摘录：\n- 「Context length: 262,144 tokens.」\n- 「License: Apache-2.0.」\n- 「页面下方有一段说明：非思考模式需要在对话模板里设 enable_thinking=false。」\n\n## 三、当天出现过的联系人\n\n李慧敏、张培、老周、陈默、王一舟、刘婧。这六个人之外当天没有其他联系人出现。\n\n## 四、当天产生的文件\n\n- `air_bench.json`（10:61 秒那次基准的结果，2026-09-05 13:48 写入）\n- `air_bench_summary.pdf`（4 页，2026-09-05 17:30 打开）\n- `NOTICE`（2026-09-05 09:08 由邮件附件另存）\n\n## 六、逐次前台切换记录（节选 55 条，格式：时刻 前一个应用 → 后一个应用 · 停留秒数）\n\n- 08:42:42 Mail 邮件 → Safari · 102s\n- 08:44:43 Safari → Xcode · 121s\n- 08:45:21 Xcode → Preview 预览 · 38s\n- 08:46:05 Preview 预览 → Notes 备忘录 · 44s\n- 08:48:54 Notes 备忘录 → Xcode · 169s\n- 08:51:23 Xcode → Terminal · 149s\n- 08:51:52 Terminal → 飞书 Lark · 29s\n- 08:54:03 飞书 Lark → Mail 邮件 · 131s\n- 08:54:40 Mail 邮件 → 微信 WeChat · 37s\n- 08:55:23 微信 WeChat → Preview 预览 · 43s\n- 08:57:31 Preview 预览 → Xcode · 128s\n- 09:01:22 Xcode → Safari · 231s\n- 09:02:39 Safari → Xcode · 77s\n- 09:05:26 Xcode → Mail 邮件 · 167s\n- 09:05:58 Mail 邮件 → 微信 WeChat · 32s\n- 09:06:29 微信 WeChat → Preview 预览 · 31s\n- 09:10:28 Preview 预览 → Safari · 239s\n- 09:12:02 Safari → Mail 邮件 · 94s\n- 09:12:58 Mail 邮件 → Preview 预览 · 56s\n- 09:13:48 Preview 预览 → Terminal · 50s\n- 09:16:31 Terminal → Safari · 163s\n- 09:17:17 Safari → Terminal · 46s\n- 09:19:12 Terminal → 飞书 Lark · 115s\n- 09:21:52 飞书 Lark → Safari · 160s\n- 09:24:36 Safari → Xcode · 164s\n- 09:27:34 Xcode → Terminal · 178s\n- 09:30:01 Terminal → Preview 预览 · 147s\n- 09:32:10 Preview 预览 → Notes 备忘录 · 129s\n- 09:34:29 Notes 备忘录 → Slack · 139s\n- 09:36:21 Slack → Terminal · 112s\n- 09:37:44 Terminal → Safari · 83s\n- 09:41:02 Safari → Terminal · 198s\n- 09:41:42 Terminal → Notes 备忘录 · 40s\n- 09:44:16 Notes 备忘录 → Slack · 154s\n- 09:46:03 Slack → Mail 邮件 · 107s\n- 09:47:36 Mail 邮件 → 飞书 Lark · 93s\n- 09:48:26 飞书 Lark → Preview 预览 · 50s\n- 09:50:33 Preview 预览 → Safari · 127s\n- 09:54:06 Safari → Figma · 213s\n- 09:55:04 Figma → Slack · 58s\n- 09:57:11 Slack → Xcode · 127s\n- 10:00:22 Xcode → Safari · 191s\n- 10:03:57 Safari → Preview 预览 · 215s\n- 10:06:43 Preview 预览 → Notes 备忘录 · 166s\n- 10:08:30 Notes 备忘录 → Figma · 107s\n- 10:11:22 Figma → Slack · 172s\n- 10:14:10 Slack → Mail 邮件 · 168s\n- 10:14:47 Mail 邮件 → 飞书 Lark · 37s\n- 10:16:16 飞书 Lark → Slack · 89s\n- 10:19:34 Slack → 飞书 Lark · 198s\n- 10:20:09 飞书 Lark → Notes 备忘录 · 35s\n- 10:23:14 Notes 备忘录 → Slack · 185s\n- 10:24:46 Slack → Figma · 92s\n- 10:27:57 Figma → Notes 备忘录 · 191s\n- 10:28:22 Notes 备忘录 → Slack · 25s\n\n## 五、任务\n\n只依据上面的台账，用中文写一段不超过 150 字的当日工作叙述。不要编造台账里没有的应用、人名、时间或结论；不要输出表格、列表或标题，只输出一段连续的中文文字。\n"
+  },
+  "rawFilesDirectory": "~/Library/Caches/brosis-build/e9/results/d19",
+  "steps": {
+    "a_firstRunColdKernels": {
+      "answersIdentical": true,
+      "cacheLimitMiB": 256,
+      "cacheLimitOverridden": true,
+      "cacheRelease": {
+        "footprintAfterMiB": 507.95433807373047,
+        "footprintBeforeMiB": 613.7825088500977,
+        "gpuCacheAfterMiB": 0,
+        "gpuCacheBeforeMiB": 438.61805629730225
+      },
+      "file": "a_warmup.json",
+      "footprintWithModelLoadedMiB": null,
+      "gpuActiveAfterLoadMiB": 2257.8548889160156,
+      "gpuCacheWithModelLoadedMiB": null,
+      "gpuPeakMiB": 2378.403779029846,
+      "loadSeconds": 0.8250560760498047,
+      "maxTokens": 64,
+      "ok": true,
+      "peakFootprintBytes": 2693974608,
+      "peakFootprintMiB": 2569.1743927001953,
+      "peakResidentMiB": 2377.09375,
+      "repeat": 1,
+      "runs": [
+        {
+          "answer": "断点续传是一种允许文件传输在意外中断后，从上次成功保存的位置继续完成剩余部分下载的技术。",
+          "answerChars": 44,
+          "generateSeconds": 2.693036913871765,
+          "generateTimeSeconds": 0.782709002494812,
+          "generationTokens": 25,
+          "index": 0,
+          "outputChars": 44,
+          "promptSeconds": 1.8834630250930786,
+          "promptTokens": 21,
+          "promptTokensPerSecond": 11.149674679152357,
+          "stopReason": "stop",
+          "thinkingChars": 0,
+          "thinkingDetected": false,
+          "timeToFirstTokenSeconds": 1.8991719484329224,
+          "tokensPerSecond": 31.940350654348972
+        }
+      ],
+      "temperature": 0,
+      "thermalStateAtEnd": "nominal",
+      "thermalStateAtStart": "nominal",
+      "thinkingOn": false,
+      "totalSeconds": 3.841184973716736,
+      "usrBinTime": {
+        "maxResidentBytes": 2492563456,
+        "peakFootprintBytes": 2693974608,
+        "peakFootprintMiB": 2569.1743927001953,
+        "realSeconds": 3.86,
+        "swaps": 0,
+        "sysSeconds": 0.82,
+        "userSeconds": 1.09
+      }
+    },
+    "a_warmLoad": [
+      {
+        "answersIdentical": true,
+        "cacheLimitMiB": 256,
+        "cacheLimitOverridden": true,
+        "cacheRelease": {
+          "footprintAfterMiB": 171.36033630371094,
+          "footprintBeforeMiB": 623.9543838500977,
+          "gpuCacheAfterMiB": 0,
+          "gpuCacheBeforeMiB": 438.6505937576294
+        },
+        "file": "a_load_1.json",
+        "footprintWithModelLoadedMiB": 2565.830596923828,
+        "gpuActiveAfterLoadMiB": 2257.8548889160156,
+        "gpuCacheWithModelLoadedMiB": 135.5255937576294,
+        "gpuPeakMiB": 2378.2791414260864,
+        "loadSeconds": 0.7705680131912231,
+        "maxTokens": 64,
+        "ok": true,
+        "peakFootprintBytes": 2690468384,
+        "peakFootprintMiB": 2565.830596923828,
+        "peakResidentMiB": 2523.859375,
+        "repeat": 1,
+        "runs": [
+          {
+            "answer": "断点续传是一种允许文件传输在意外中断后，从上次成功保存的位置继续完成剩余部分下载的技术。",
+            "answerChars": 44,
+            "generateSeconds": 0.8956069946289062,
+            "generateTimeSeconds": 0.7090150117874146,
+            "generationTokens": 25,
+            "index": 0,
+            "outputChars": 44,
+            "promptSeconds": 0.16427791118621826,
+            "promptTokens": 21,
+            "promptTokensPerSecond": 127.83215861684117,
+            "stopReason": "stop",
+            "thinkingChars": 0,
+            "thinkingDetected": false,
+            "timeToFirstTokenSeconds": 0.17391490936279297,
+            "tokensPerSecond": 35.260184318207074
+          }
+        ],
+        "temperature": 0,
+        "thermalStateAtEnd": "nominal",
+        "thermalStateAtStart": "nominal",
+        "thinkingOn": false,
+        "totalSeconds": 2.8773540258407593,
+        "usrBinTime": {
+          "maxResidentBytes": 2646458368,
+          "peakFootprintBytes": 2690468384,
+          "peakFootprintMiB": 2565.830596923828,
+          "realSeconds": 2.9,
+          "swaps": 0,
+          "sysSeconds": 0.63,
+          "userSeconds": 1.08
+        }
+      },
+      {
+        "answersIdentical": true,
+        "cacheLimitMiB": 256,
+        "cacheLimitOverridden": true,
+        "cacheRelease": {
+          "footprintAfterMiB": 157.39158630371094,
+          "footprintBeforeMiB": 609.9699859619141,
+          "gpuCacheAfterMiB": 0,
+          "gpuCacheBeforeMiB": 438.6505937576294
+        },
+        "file": "a_load_2.json",
+        "footprintWithModelLoadedMiB": 2551.8774948120117,
+        "gpuActiveAfterLoadMiB": 2257.8548889160156,
+        "gpuCacheWithModelLoadedMiB": 135.5255937576294,
+        "gpuPeakMiB": 2378.2791414260864,
+        "loadSeconds": 0.8455359935760498,
+        "maxTokens": 64,
+        "ok": true,
+        "peakFootprintBytes": 2675837496,
+        "peakFootprintMiB": 2551.8774948120117,
+        "peakResidentMiB": 2455.90625,
+        "repeat": 1,
+        "runs": [
+          {
+            "answer": "断点续传是一种允许文件传输在意外中断后，从上次成功保存的位置继续完成剩余部分下载的技术。",
+            "answerChars": 44,
+            "generateSeconds": 0.8739299774169922,
+            "generateTimeSeconds": 0.6980310678482056,
+            "generationTokens": 25,
+            "index": 0,
+            "outputChars": 44,
+            "promptSeconds": 0.15515196323394775,
+            "promptTokens": 21,
+            "promptTokensPerSecond": 135.3511716015794,
+            "stopReason": "stop",
+            "thinkingChars": 0,
+            "thinkingDetected": false,
+            "timeToFirstTokenSeconds": 0.16448092460632324,
+            "tokensPerSecond": 35.81502479118382
+          }
+        ],
+        "temperature": 0,
+        "thermalStateAtEnd": "nominal",
+        "thermalStateAtStart": "nominal",
+        "thinkingOn": false,
+        "totalSeconds": 2.0273319482803345,
+        "usrBinTime": {
+          "maxResidentBytes": 2575204352,
+          "peakFootprintBytes": 2675837496,
+          "peakFootprintMiB": 2551.8774948120117,
+          "realSeconds": 2.04,
+          "swaps": 0,
+          "sysSeconds": 0.63,
+          "userSeconds": 1.1
+        }
+      },
+      {
+        "answersIdentical": true,
+        "cacheLimitMiB": 256,
+        "cacheLimitOverridden": true,
+        "cacheRelease": {
+          "footprintAfterMiB": 155.65723419189453,
+          "footprintBeforeMiB": 608.2356338500977,
+          "gpuCacheAfterMiB": 0,
+          "gpuCacheBeforeMiB": 438.6505937576294
+        },
+        "file": "a_load_3.json",
+        "footprintWithModelLoadedMiB": 2550.1274948120117,
+        "gpuActiveAfterLoadMiB": 2257.8548889160156,
+        "gpuCacheWithModelLoadedMiB": 135.5255937576294,
+        "gpuPeakMiB": 2378.2791414260864,
+        "loadSeconds": 0.7834479808807373,
+        "maxTokens": 64,
+        "ok": true,
+        "peakFootprintBytes": 2674002488,
+        "peakFootprintMiB": 2550.1274948120117,
+        "peakResidentMiB": 2524.375,
+        "repeat": 1,
+        "runs": [
+          {
+            "answer": "断点续传是一种允许文件传输在意外中断后，从上次成功保存的位置继续完成剩余部分下载的技术。",
+            "answerChars": 44,
+            "generateSeconds": 0.886227011680603,
+            "generateTimeSeconds": 0.7087260484695435,
+            "generationTokens": 25,
+            "index": 0,
+            "outputChars": 44,
+            "promptSeconds": 0.15512192249298096,
+            "promptTokens": 21,
+            "promptTokensPerSecond": 135.3773835606648,
+            "stopReason": "stop",
+            "thinkingChars": 0,
+            "thinkingDetected": false,
+            "timeToFirstTokenSeconds": 0.16463398933410645,
+            "tokensPerSecond": 35.2745606768457
+          }
+        ],
+        "temperature": 0,
+        "thermalStateAtEnd": "nominal",
+        "thermalStateAtStart": "nominal",
+        "thinkingOn": false,
+        "totalSeconds": 1.971040964126587,
+        "usrBinTime": {
+          "maxResidentBytes": 2646999040,
+          "peakFootprintBytes": 2674002488,
+          "peakFootprintMiB": 2550.1274948120117,
+          "realSeconds": 1.98,
+          "swaps": 0,
+          "sysSeconds": 0.7,
+          "userSeconds": 1.11
+        }
+      }
+    ],
+    "b_narrative_repeat3": {
+      "answersIdentical": true,
+      "cacheLimitMiB": 256,
+      "cacheLimitOverridden": true,
+      "cacheRelease": {
+        "footprintAfterMiB": 174.6732940673828,
+        "footprintBeforeMiB": 710.0172958374023,
+        "gpuCacheAfterMiB": 0,
+        "gpuCacheBeforeMiB": 520.7880802154541
+      },
+      "file": "b_narrative.json",
+      "footprintWithModelLoadedMiB": 2651.3310317993164,
+      "gpuActiveAfterLoadMiB": 2257.8548889160156,
+      "gpuCacheWithModelLoadedMiB": 217.6630802154541,
+      "gpuPeakMiB": 3111.976219177246,
+      "loadSeconds": 0.8484070301055908,
+      "maxTokens": 400,
+      "ok": true,
+      "peakFootprintBytes": 3689384912,
+      "peakFootprintMiB": 3518.471633911133,
+      "peakResidentMiB": 2524.265625,
+      "repeat": 3,
+      "runs": [
+        {
+          "answer": "9 月 5 日全天共专注 8 小时 12 分，应用切换 208 次。上午在飞书确认采集器 Air 端运行稳定，内存峰值 1.6 GiB；随后在 Xcode 中完善 FrontmostObserver 逻辑，解决锁屏切换漏事件问题，编译通过 3 个警告。下午查阅 Safari 内存论坛关于 Metal 缓冲的说明，并在 Xcode 中完成事件存储 SQL 插入，34 项测试全过。15 时 20 分在微信与老周沟通，确认下周三下午在公司进行模型选型会议，并承诺整理 Air 实测数据。",
+          "answerChars": 242,
+          "generateSeconds": 6.997437953948975,
+          "generateTimeSeconds": 4.296157002449036,
+          "generationTokens": 147,
+          "index": 0,
+          "outputChars": 242,
+          "promptSeconds": 2.6753610372543335,
+          "promptTokens": 837,
+          "promptTokensPerSecond": 312.8549711028891,
+          "stopReason": "stop",
+          "thinkingChars": 0,
+          "thinkingDetected": false,
+          "timeToFirstTokenSeconds": 2.6897330284118652,
+          "tokensPerSecond": 34.216626607501134
+        },
+        {
+          "answer": "9 月 5 日全天共专注 8 小时 12 分，应用切换 208 次。上午在飞书确认采集器 Air 端运行稳定，内存峰值 1.6 GiB；随后在 Xcode 中完善 FrontmostObserver 逻辑，解决锁屏切换漏事件问题，编译通过 3 个警告。下午查阅 Safari 内存论坛关于 Metal 缓冲的说明，并在 Xcode 中完成事件存储 SQL 插入，34 项测试全过。15 时 20 分在微信与老周沟通，确认下周三下午在公司进行模型选型会议，并承诺整理 Air 实测数据。",
+          "answerChars": 242,
+          "generateSeconds": 6.758507966995239,
+          "generateTimeSeconds": 4.118754982948303,
+          "generationTokens": 147,
+          "index": 1,
+          "outputChars": 242,
+          "promptSeconds": 2.614945888519287,
+          "promptTokens": 837,
+          "promptTokensPerSecond": 320.08310522782983,
+          "stopReason": "stop",
+          "thinkingChars": 0,
+          "thinkingDetected": false,
+          "timeToFirstTokenSeconds": 2.627755045890808,
+          "tokensPerSecond": 35.690396881723196
+        },
+        {
+          "answer": "9 月 5 日全天共专注 8 小时 12 分，应用切换 208 次。上午在飞书确认采集器 Air 端运行稳定，内存峰值 1.6 GiB；随后在 Xcode 中完善 FrontmostObserver 逻辑，解决锁屏切换漏事件问题，编译通过 3 个警告。下午查阅 Safari 内存论坛关于 Metal 缓冲的说明，并在 Xcode 中完成事件存储 SQL 插入，34 项测试全过。15 时 20 分在微信与老周沟通，确认下周三下午在公司进行模型选型会议，并承诺整理 Air 实测数据。",
+          "answerChars": 242,
+          "generateSeconds": 6.70419704914093,
+          "generateTimeSeconds": 4.056702971458435,
+          "generationTokens": 147,
+          "index": 2,
+          "outputChars": 242,
+          "promptSeconds": 2.6218650341033936,
+          "promptTokens": 837,
+          "promptTokensPerSecond": 319.23840057092457,
+          "stopReason": "stop",
+          "thinkingChars": 0,
+          "thinkingDetected": false,
+          "timeToFirstTokenSeconds": 2.635274052619934,
+          "tokensPerSecond": 36.236323199958534
+        }
+      ],
+      "temperature": 0,
+      "thermalStateAtEnd": "nominal",
+      "thermalStateAtStart": "nominal",
+      "thinkingOn": false,
+      "totalSeconds": 21.597914934158325,
+      "usrBinTime": {
+        "maxResidentBytes": 2646884352,
+        "peakFootprintBytes": 3689384912,
+        "peakFootprintMiB": 3518.471633911133,
+        "realSeconds": 21.6,
+        "swaps": 0,
+        "sysSeconds": 2.05,
+        "userSeconds": 4.9
+      }
+    },
+    "c_thinking_max1500": {
+      "answersIdentical": true,
+      "cacheLimitMiB": 256,
+      "cacheLimitOverridden": true,
+      "cacheRelease": {
+        "footprintAfterMiB": 174.00139617919922,
+        "footprintBeforeMiB": 526.22021484375,
+        "gpuCacheAfterMiB": 0,
+        "gpuCacheBeforeMiB": 256.0302143096924
+      },
+      "file": "c_thinking.json",
+      "footprintWithModelLoadedMiB": 2806.5497817993164,
+      "gpuActiveAfterLoadMiB": 2257.8548889160156,
+      "gpuCacheWithModelLoadedMiB": 256.0302143096924,
+      "gpuPeakMiB": 3111.8980865478516,
+      "loadSeconds": 0.7699600458145142,
+      "maxTokens": 1500,
+      "ok": true,
+      "peakFootprintBytes": 3676982224,
+      "peakFootprintMiB": 3506.643508911133,
+      "peakResidentMiB": 2524.515625,
+      "repeat": 1,
+      "runs": [
+        {
+          "answer": "Thinking Process:\n\n1.  **Analyze the Request:**\n    *   **Role:** Assistant that writes based *only* on the provided ledger (台账).\n    *   **Constraint:** No fabrication of facts not in the ledger.\n    *   **Input Data:** A ledger for 2026-09-05 (Friday) containing app usage stats, session details, and a task.\n    *   **Output Format:** A single continuous paragraph of Chinese text.\n    *   **Length:** Not exceeding 150 Chinese characters.\n    WeChat, Xcode, Lark, Safari, Terminal, Notes, Figma, Music.\n    *   **Content:** Work narrative based on the ledger.\n    *   **Restrictions:** No tables, no lists, no titles. No fabrication.\n\n2.  **Review the Ledger Data:**\n    *   **Date:** 2026-09-05 (Friday).\n    *   **Total Time:** 8 小时 12 分.\n    *   **Total Switches:** 208 次.\n    *   **Top Apps:** Xcode (3 小时 12 分), Lark (1 小时 48 分), Safari (1 小时 05 分).\n    *   **Sessions:**\n        1.  Lark 09:14-10:02: M0 采集器验收，Air 上跑 6 小时无崩，内存峰值 1.6 GiB，定 256 MiB 缓冲池，补验收表。Q3 埋点口径对齐周一交。\n        2.  Xcode 10:07-11:35: `brosis — Collector/FrontmostObserver.swift`, 监听 NSWorkspace.sessionDidResignActive 解决锁屏漏事件，编译成功。\n        3.  Safari 11:40-12:05: Apple Developer Forums, Metal buffers charged to phys_footprint.\n        4.  Xcode 14:06-14:53: `brosis — Storage/EventStore.swift`, INSERT INTO events..., 主键加 device_id, 跨设备同步，34 测试通过。\n        5.  WeChat 15:20-15:58: 老周约下周三下午公司过模型选型，整理 Air 实测数字发他。\n    *   **Focus:** 47 分 (14:06–14:53).\n\n3.  **Drafting the Narrative:**\n    *   Need to summarize the day's work flow.\n    *   Start with the date/time context.\n    *   Mention key tasks: M0 采集器验收，代码开发 (Xcode), 查阅资料 (Safari), 沟通 (WeChat).\n    *   Include specific details like \"Air 上跑了 6 小时\", \"256 MiB 缓冲池\", \"锁屏后漏事件\", \"34 测试通过\", \"老周约下周三\".\n    *   Keep it under 150 characters.\n\n    *Draft 1:*\n    2026 年 9 月 5 日全天工作共 8 小时 12 分，切换 208 次。上午在飞书确认 M0 采集器验收，Air 上运行 6 小时无崩，定 256 MiB 缓冲池。Xcode 开发中，修复锁屏后切换事件漏监听问题，编译通过。下午查阅 Safari 开发者论坛关于 Metal 内存问题。14 点专注 47 分钟完成 EventStore 存储逻辑，34 测试全过。15 点微信联系老周，确认下周三下午公司过模型选型，并准备整理 Air 实测数据。\n\n    *Count 1:* 148 characters (including punctuation). Let's check carefully.\n    2026 年 9 月 5 日 (6) 全天工作共 (5) 8 小时 12 分 (5) ，(1) 切换 208 次 (5) 。(1) 上午在飞书确认 M0 采集器验收 (13) ，(1) Air 上运行 6 小时无崩 (10) ，(1) 定 256 MiB 缓冲池 (9) 。(1) Xcode 开发中 (6) ，(1) 修复锁屏后切换事件漏监听问题 (13) ，(1) 编译通过 (4) 。(1) 下午查阅 Safari 开发者论坛关于 Metal 内存问题 (19) 。(1) 14 点专注 47 分钟完成 EventStore 存储逻辑 (19) ，(1) 34 测试全过 (5) 。(1) 15 点微信联系老周 (8) ，(1) 确认下周三下午公司过模型选型 (14) ，(1) 并准备整理 Air 实测数据 (11) 。(1)\n    Total: 6+5+5+1+5+1+13+1+10+1+9+1+6+1+13+1+4+1+19+1+19+1+5+1+8+1+14+1+11+1 = 190 approx. Too long. Need to condense.\n\n    *Draft 2 (Condensing):*\n    2026 年 9 月 5 日工作 8 小时 12 分，切换 208 次。上午飞书确认 M0 采集器验收，Air 运行 6 小时无崩，定 256 MiB 缓冲池。Xcode 开发中修复锁屏事件漏监听，编译通过。下午查阅 Safari 论坛 Metal 内存问题。14 点专注 47 分钟完成 EventStore 存储逻辑，34 测试全过。15 点微信联系老周，确认下周三下午公司过模型选型，准备整理 Air 实测数据。\n\n    *Count 2:*\n    2026 年 9 月 5 日 (6) 工作 (2) 8 小时 12 分 (5) ，(1) 切换 208 次 (5) 。(1) 上午飞书确认 M0 采集器验收 (13) ，(1) Air 运行 6 小时无崩 (10) ，(1) 定 256 MiB 缓冲池 (9) 。(1) Xcode 开发中 (",
+          "answerChars": 2995,
+          "generateSeconds": 44.92344796657562,
+          "generateTimeSeconds": 42.285176038742065,
+          "generationTokens": 1500,
+          "index": 0,
+          "outputChars": 2995,
+          "promptSeconds": 2.6100029945373535,
+          "promptTokens": 835,
+          "promptTokensPerSecond": 319.9230045895067,
+          "stopReason": "length",
+          "thinkingChars": 0,
+          "thinkingDetected": false,
+          "timeToFirstTokenSeconds": 2.626924991607666,
+          "tokensPerSecond": 35.473424507578876
+        }
+      ],
+      "temperature": 0,
+      "thermalStateAtEnd": "nominal",
+      "thermalStateAtStart": "nominal",
+      "thinkingOn": true,
+      "totalSeconds": 45.978692054748535,
+      "usrBinTime": {
+        "maxResidentBytes": 2647146496,
+        "peakFootprintBytes": 3676982224,
+        "peakFootprintMiB": 3506.643508911133,
+        "realSeconds": 45.98,
+        "swaps": 0,
+        "sysSeconds": 4.04,
+        "userSeconds": 15.69
+      }
+    },
+    "c_thinking_max4000": {
+      "answersIdentical": true,
+      "cacheLimitMiB": 256,
+      "cacheLimitOverridden": true,
+      "cacheRelease": {
+        "footprintAfterMiB": 159.07947540283203,
+        "footprintBeforeMiB": 474.9076690673828,
+        "gpuCacheAfterMiB": 0,
+        "gpuCacheBeforeMiB": 256.23561668395996
+      },
+      "file": "c_thinking_4000.json",
+      "footprintWithModelLoadedMiB": 2826.377883911133,
+      "gpuActiveAfterLoadMiB": 2257.8548889160156,
+      "gpuCacheWithModelLoadedMiB": 256.23561668395996,
+      "gpuPeakMiB": 3111.8980865478516,
+      "loadSeconds": 0.7957550287246704,
+      "maxTokens": 4000,
+      "ok": true,
+      "peakFootprintBytes": 3668429776,
+      "peakFootprintMiB": 3498.487258911133,
+      "peakResidentMiB": 2524.78125,
+      "repeat": 1,
+      "runs": [
+        {
+          "answer": "Thinking Process:\n\n1.  **Analyze the Request:**\n    *   **Role:** Assistant that writes based *only* on the provided ledger (台账).\n    *   **Constraint:** No fabrication of facts not in the ledger.\n    *   **Input Data:** A ledger for 2026-09-05 (Friday) containing app usage stats, session details, and a task.\n    *   **Output Format:** A single continuous paragraph of Chinese text.\n    *   **Length:** Not exceeding 150 Chinese characters.\n    WeChat, Xcode, Lark, Safari, Terminal, Notes, Figma, Music.\n    *   **Content:** Work narrative based on the ledger.\n    *   **Restrictions:** No tables, no lists, no titles. No fabrication.\n\n2.  **Review the Ledger Data:**\n    *   **Date:** 2026-09-05 (Friday).\n    *   **Total Time:** 8 小时 12 分.\n    *   **Total Switches:** 208 次.\n    *   **Top Apps:** Xcode (3 小时 12 分), Lark (1 小时 48 分), Safari (1 小时 05 分).\n    *   **Sessions:**\n        1.  Lark 09:14-10:02: M0 采集器验收，Air 上跑 6 小时无崩，内存峰值 1.6 GiB，定 256 MiB 缓冲池，补验收表。Q3 埋点口径对齐周一交。\n        2.  Xcode 10:07-11:35: `brosis — Collector/FrontmostObserver.swift`, 监听 NSWorkspace.sessionDidResignActive 解决锁屏漏事件，编译成功。\n        3.  Safari 11:40-12:05: Apple Developer Forums, Metal buffers charged to phys_footprint.\n        4.  Xcode 14:06-14:53: `brosis — Storage/EventStore.swift`, INSERT INTO events..., 主键加 device_id, 跨设备同步，34 测试通过。\n        5.  WeChat 15:20-15:58: 老周约下周三下午公司过模型选型，整理 Air 实测数字发他。\n    *   **Focus:** 47 分 (14:06–14:53).\n\n3.  **Drafting the Narrative:**\n    *   Need to summarize the day's work flow.\n    *   Start with the date/time context.\n    *   Mention key tasks: M0 采集器验收，代码开发 (Xcode), 查阅资料 (Safari), 沟通 (WeChat).\n    *   Include specific details like \"Air 上跑了 6 小时\", \"256 MiB 缓冲池\", \"锁屏后漏事件\", \"34 测试通过\", \"老周约下周三\".\n    *   Keep it under 150 characters.\n\n    *Draft 1:*\n    2026 年 9 月 5 日全天工作共 8 小时 12 分，切换 208 次。上午在飞书确认 M0 采集器验收，Air 上运行 6 小时无崩，定 256 MiB 缓冲池。Xcode 开发中，修复锁屏后切换事件漏监听问题，编译通过。下午查阅 Safari 开发者论坛关于 Metal 内存问题。14 点专注 47 分钟完成 EventStore 存储逻辑，34 测试全过。15 点微信联系老周，确认下周三下午公司过模型选型，并准备整理 Air 实测数据。\n\n    *Count 1:* 148 characters (including punctuation). Let's check carefully.\n    2026 年 9 月 5 日 (6) 全天工作共 (5) 8 小时 12 分 (5) ，(1) 切换 208 次 (5) 。(1) 上午在飞书确认 M0 采集器验收 (13) ，(1) Air 上运行 6 小时无崩 (10) ，(1) 定 256 MiB 缓冲池 (9) 。(1) Xcode 开发中 (6) ，(1) 修复锁屏后切换事件漏监听问题 (13) ，(1) 编译通过 (4) 。(1) 下午查阅 Safari 开发者论坛关于 Metal 内存问题 (19) 。(1) 14 点专注 47 分钟完成 EventStore 存储逻辑 (19) ，(1) 34 测试全过 (5) 。(1) 15 点微信联系老周 (8) ，(1) 确认下周三下午公司过模型选型 (14) ，(1) 并准备整理 Air 实测数据 (11) 。(1)\n    Total: 6+5+5+1+5+1+13+1+10+1+9+1+6+1+13+1+4+1+19+1+19+1+5+1+8+1+14+1+11+1 = 190 approx. Too long. Need to condense.\n\n    *Draft 2 (Condensing):*\n    2026 年 9 月 5 日工作 8 小时 12 分，切换 208 次。上午飞书确认 M0 采集器验收，Air 运行 6 小时无崩，定 256 MiB 缓冲池。Xcode 开发中修复锁屏事件漏监听，编译通过。下午查阅 Safari 论坛 Metal 内存问题。14 点专注 47 分钟完成 EventStore 存储逻辑，34 测试全过。15 点微信联系老周，确认下周三下午公司过模型选型，准备整理 Air 实测数据。\n\n    *Count 2:*\n    2026 年 9 月 5 日 (6) 工作 (2) 8 小时 12 分 (5) ，(1) 切换 208 次 (5) 。(1) 上午飞书确认 M0 采集器验收 (13) ，(1) Air 运行 6 小时无崩 (10) ，(1) 定 256 MiB 缓冲池 (9) 。(1) Xcode 开发中 (6) 修复锁屏事件漏监听 (10) ，(1) 编译通过 (4) 。(1) 下午查阅 Safari 论坛 Metal 内存问题 (16) 。(1) 14 点专注 47 分钟完成 EventStore 存储逻辑 (19) ，(1) 34 测试全过 (5) 。(1) 15 点微信联系老周 (8) ，(1) 确认下周三下午公司过模型选型 (14) ，(1) 准备整理 Air 实测数据 (11) 。(1)\n    Total: 6+2+5+1+5+1+13+1+10+1+9+1+6+10+1+4+1+16+1+19+1+5+1+8+1+14+1+11+1 = 180. Still too long. Need to cut ~40 chars.\n\n    *Draft 3 (Aggressive Cutting):*\n    2026 年 9 月 5 日工作 8 小时 12 分，切换 208 次。上午飞书确认 M0 采集器验收，Air 运行 6 小时无崩，定 256 MiB 缓冲池。Xcode 修复锁屏事件漏监听，编译通过。下午查阅 Safari 论坛 Metal 内存问题。14 点专注 47 分钟完成 EventStore 存储逻辑，34 测试全过。15 点微信联系老周，确认下周三下午公司过模型选型，准备整理 Air 实测数据。\n\n    *Wait, I need to count exactly.*\n    2026 年 9 月 5 日 (6)\n    工作 (2)\n    8 小时 12 分 (5)\n    ，(1)\n    切换 208 次 (5)\n    。(1)\n    上午飞书确认 M0 采集器验收 (13)\n    ，(1)\n    Air 运行 6 小时无崩 (10)\n    ，(1)\n    定 256 MiB 缓冲池 (9)\n    。(1)\n    Xcode 修复锁屏事件漏监听 (11)\n    ，(1)\n    编译通过 (4)\n    。(1)\n    下午查阅 Safari 论坛 Metal 内存问题 (16)\n    。(1)\n    14 点专注 47 分钟完成 EventStore 存储逻辑 (19)\n    ，(1)\n    34 测试全过 (5)\n    。(1)\n    15 点微信联系老周 (8)\n    ，(1)\n    确认下周三下午公司过模型选型 (14)\n    ，(1)\n    准备整理 Air 实测数据 (11)\n    。(1)\n\n    Sum: 6+2+5+1+5+1+13+1+10+1+9+1+11+1+4+1+16+1+19+1+5+1+8+1+14+1+11+1 = 180.\n    I need to remove ~35 characters.\n    Remove \"2026 年 9 月 5 日\" -> \"当日\".\n    Remove \"上午\", \"下午\".\n    Remove \"34 测试全过\" -> \"测试通过\".\n    Remove \"准备整理 Air 实测数据\" -> \"整理 Air 实测数据\".\n    Remove \"M0 采集器验收\" -> \"采集器验收\".\n    Remove \"Xcode 修复\" -> \"修复\".\n    Remove \"14 点专注 47 分钟完成\" -> \"14 点专注 47 分钟\".\n    Remove \"15 点微信联系老周\" -> \"15 点联系老周\".\n\n    *Draft 4:*\n    当日工作 8 小时 12 分，切换 208 次。飞书确认采集器验收，Air 运行 6 小时无崩，定 256 MiB 缓冲池。修复锁屏事件漏监听，编译通过。查阅 Safari 论坛 Metal 内存问题。14 点专注 47 分钟完成 EventStore 存储逻辑，测试通过。15 点联系老周，确认下周三下午公司过模型选型，整理 Air 实测数据。\n\n    *Count 4:*\n    当日工作 (4)\n    8 小时 12 分 (5)\n    ，(1)\n    切换 208 次 (5)\n    。(1)\n    飞书确认采集器验收 (9)\n    ，(1)\n    Air 运行 6 小时无崩 (10)\n    ，(1)\n    定 256 MiB 缓冲池 (9)\n    。(1)\n    修复锁屏事件漏监听 (10)\n    ，(1)\n    编译通过 (4)\n    。(1)\n    查阅 Safari 论坛 Metal 内存问题 (16)\n    。(1)\n    14 点专注 47 分钟完成 EventStore 存储逻辑 (19)\n    ，(1)\n    测试通过 (4)\n    。(1)\n    15 点联系老周 (6)\n    ，(1)\n    确认下周三下午公司过模型选型 (14)\n    ，(1)\n    整理 Air 实测数据 (9)\n    。(1)\n\n    Sum: 4+5+1+5+1+9+1+10+1+9+1+10+1+4+1+16+1+19+1+4+1+6+1+14+1+9+1 = 169. Still over 150.\n    Need to cut 20 more chars.\n    Cut \"当日工作\" -> \"全天\".\n    Cut \"飞书确认采集器验收\" -> \"飞书确认验收\".\n    Cut \"查阅 Safari 论坛 Metal 内存问题\" -> \"查阅 Safari 论坛 Metal 问题\".\n    Cut \"14 点专注 47 分钟完成 EventStore 存储逻辑\" -> \"14 点专注 47 分钟完成存储逻辑\".\n    Cut \"15 点联系老周\" -> \"15 点联系老周\".\n    Cut \"确认下周三下午公司过模型选型\" -> \"确认下周三下午公司过模型选型\".\n    Cut \"整理 Air 实测数据\" -> \"整理 Air 实测数据\".\n\n    Let's try to merge sentences.\n    \"当日工作 8 小时 12 分，切换 208 次。飞书确认验收，Air 运行 6 小时无崩，定 256 MiB 缓冲池。修复锁屏事件漏监听，编译通过。查阅 Safari 论坛 Metal 问题。14 点专注 47 分钟完成存储逻辑，测试通过。15 点联系老周，确认下周三下午公司过模型选型，整理 Air 实测数据。\"\n\n    Count:\n    当日工作 (4)\n    8 小时 12 分 (5)\n    ，(1)\n    切换 208 次 (5)\n    。(1)\n    飞书确认验收 (6)\n    ，(1)\n    Air 运行 6 小时无崩 (10)\n    ，(1)\n    定 256 MiB 缓冲池 (9)\n    。(1)\n    修复锁屏事件漏监听 (10)\n    ，(1)\n    编译通过 (4)\n    。(1)\n    查阅 Safari 论坛 Metal 问题 (14)\n    。(1)\n    14 点专注 47 分钟完成存储逻辑 (15)\n    ，(1)\n    测试通过 (4)\n    。(1)\n    15 点联系老周 (6)\n    ，(1)\n    确认下周三下午公司过模型选型 (14)\n    ，(1)\n    整理 Air 实测数据 (9)\n    。(1)\n\n    Sum: 4+5+1+5+1+6+1+10+1+9+1+10+1+4+1+14+1+15+1+4+1+6+1+14+1+9+1 = 166.\n    Still 16 chars over.\n    Remove \"当日工作\" -> \"全天\". (4 -> 2)\n    Remove \"14 点专注 47 分钟完成\" -> \"14 点专注 47 分钟\".\n    Remove \"15 点联系老周\" -> \"15 点联系老周\".\n    Remove \"确认下周三下午公司过模型选型\" -> \"确认下周三下午公司过模型选型\".\n    Remove \"整理 Air 实测数据\" -> \"整理 Air 实测数据\".\n\n    Let's try to be more concise.\n    \"全天工作 8 小时 12 分，切换 208 次。飞书确认验收，Air 运行 6 小时无崩，定 256 MiB 缓冲池。修复锁屏事件漏监听，编译通过。查阅 Safari 论坛 Metal 问题。14 点专注 47 分钟完成存储逻辑，测试通过。15 点联系老周，确认下周三下午公司过模型选型，整理 Air 实测数据。\"\n    (166 chars)\n\n    Need to cut 16 chars.\n    \"查阅 Safari 论坛 Metal 问题\" -> \"查阅 Safari 论坛 Metal 问题\" (14 chars).\n    \"14 点专注 47 分钟完成存储逻辑\" -> \"14 点专注 47 分钟完成存储逻辑\" (15 chars).\n    \"15 点联系老周\" -> \"15 点联系老周\" (6 chars).\n    \"确认下周三下午公司过模型选型\" -> \"确认下周三下午公司过模型选型\" (14 chars).\n    \"整理 Air 实测数据\" -> \"整理 Air 实测数据\" (9 chars).\n\n    Let's remove \"全天工作\" -> \"工作\".\n    Let's remove \"14 点专注 47 分钟完成\" -> \"14 点专注 47 分钟\".\n    Let's remove \"15 点联系老周\" -> \"15 点联系老周\".\n    Let's remove \"确认下周三下午公司过模型选型\" -> \"确认下周三下午公司过模型选型\".\n    Let's remove \"整理 Air 实测数据\" -> \"整理 Air 实测数据\".\n\n    Okay, I will write",
+          "answerChars": 7182,
+          "generateSeconds": 122.7243709564209,
+          "generateTimeSeconds": 119.9091260433197,
+          "generationTokens": 4000,
+          "index": 0,
+          "outputChars": 7182,
+          "promptSeconds": 2.78815495967865,
+          "promptTokens": 835,
+          "promptTokensPerSecond": 299.481202470984,
+          "stopReason": "length",
+          "thinkingChars": 0,
+          "thinkingDetected": false,
+          "timeToFirstTokenSeconds": 2.8035119771957397,
+          "tokensPerSecond": 33.358595229481665
+        }
+      ],
+      "temperature": 0,
+      "thermalStateAtEnd": "fair",
+      "thermalStateAtStart": "nominal",
+      "thinkingOn": true,
+      "totalSeconds": 123.84048104286194,
+      "usrBinTime": {
+        "maxResidentBytes": 2647425024,
+        "peakFootprintBytes": 3668429776,
+        "peakFootprintMiB": 3498.487258911133,
+        "realSeconds": 123.85,
+        "swaps": 0,
+        "sysSeconds": 9.49,
+        "userSeconds": 40.33
+      }
+    },
+    "d_jsonExtraction": [
+      {
+        "answersIdentical": true,
+        "cacheLimitMiB": 256,
+        "cacheLimitOverridden": true,
+        "cacheRelease": {
+          "footprintAfterMiB": 156.20447540283203,
+          "footprintBeforeMiB": 510.0326690673828,
+          "gpuCacheAfterMiB": 0,
+          "gpuCacheBeforeMiB": 257.3300037384033
+        },
+        "file": "d_json_1.json",
+        "footprintWithModelLoadedMiB": 2720.5340881347656,
+        "gpuActiveAfterLoadMiB": 2257.8548889160156,
+        "gpuCacheWithModelLoadedMiB": 257.3300037384033,
+        "gpuPeakMiB": 3020.582851409912,
+        "loadSeconds": 1.0109410285949707,
+        "maxTokens": 300,
+        "ok": true,
+        "peakFootprintBytes": 3389803424,
+        "peakFootprintMiB": 3232.7684631347656,
+        "peakResidentMiB": 2099.3125,
+        "repeat": 1,
+        "runs": [
+          {
+            "answer": "{\"apps\":[\"飞书 Lark\"],\"topics\":[\"Q3 page_view 口径对齐\",\"session_id 生成规则\"],\"people\":[\"张培\",\"李慧敏\",\"我\"],\"summary\":\"讨论 Q3 page_view 口径不一致问题，确认以 SDK 为准，并安排整理字段映射及 session_id 规则。\"}",
+            "answerChars": 168,
+            "generateSeconds": 2.915352940559387,
+            "generateTimeSeconds": 1.7989970445632935,
+            "generationTokens": 65,
+            "index": 0,
+            "outputChars": 168,
+            "promptSeconds": 1.0903409719467163,
+            "promptTokens": 309,
+            "promptTokensPerSecond": 283.3975865809255,
+            "stopReason": "stop",
+            "thinkingChars": 0,
+            "thinkingDetected": false,
+            "timeToFirstTokenSeconds": 1.1044689416885376,
+            "tokensPerSecond": 36.13124334830619
+          }
+        ],
+        "temperature": 0,
+        "thermalStateAtEnd": "nominal",
+        "thermalStateAtStart": "nominal",
+        "thinkingOn": false,
+        "totalSeconds": 4.231260895729065,
+        "usrBinTime": {
+          "maxResidentBytes": 2201288704,
+          "peakFootprintBytes": 3389803424,
+          "peakFootprintMiB": 3232.7684631347656,
+          "realSeconds": 4.24,
+          "swaps": 0,
+          "sysSeconds": 0.95,
+          "userSeconds": 1.51
+        }
+      },
+      {
+        "answersIdentical": true,
+        "cacheLimitMiB": 256,
+        "cacheLimitOverridden": true,
+        "cacheRelease": {
+          "footprintAfterMiB": 171.50132751464844,
+          "footprintBeforeMiB": 467.9544982910156,
+          "gpuCacheAfterMiB": 0,
+          "gpuCacheBeforeMiB": 257.8372802734375
+        },
+        "file": "d_json_2.json",
+        "footprintWithModelLoadedMiB": 2725.0184631347656,
+        "gpuActiveAfterLoadMiB": 2257.8548889160156,
+        "gpuCacheWithModelLoadedMiB": 257.8372802734375,
+        "gpuPeakMiB": 3044.9422664642334,
+        "loadSeconds": 0.8052060604095459,
+        "maxTokens": 300,
+        "ok": true,
+        "peakFootprintBytes": 3411463072,
+        "peakFootprintMiB": 3253.4247131347656,
+        "peakResidentMiB": 2524.5625,
+        "repeat": 1,
+        "runs": [
+          {
+            "answer": "{\"apps\":[\"Xcode\"],\"topics\":[\"AES-GCM\",\"iCloud\",\"编译日志\",\"测试结果\",\"失败用例\"],\"people\":[],\"summary\":\"Xcode 编译成功但测试失败，因 device_id 未保留导致同步写入 iCloud 时数据丢失。\"}",
+            "answerChars": 145,
+            "generateSeconds": 2.5538549423217773,
+            "generateTimeSeconds": 1.4541200399398804,
+            "generationTokens": 53,
+            "index": 0,
+            "outputChars": 145,
+            "promptSeconds": 1.0756489038467407,
+            "promptTokens": 305,
+            "promptTokensPerSecond": 283.54977066332475,
+            "stopReason": "stop",
+            "thinkingChars": 0,
+            "thinkingDetected": false,
+            "timeToFirstTokenSeconds": 1.0879859924316406,
+            "tokensPerSecond": 36.44816008600724
+          }
+        ],
+        "temperature": 0,
+        "thermalStateAtEnd": "nominal",
+        "thermalStateAtStart": "nominal",
+        "thinkingOn": false,
+        "totalSeconds": 3.6762079000473022,
+        "usrBinTime": {
+          "maxResidentBytes": 2647195648,
+          "peakFootprintBytes": 3411463072,
+          "peakFootprintMiB": 3253.4247131347656,
+          "realSeconds": 3.69,
+          "swaps": 0,
+          "sysSeconds": 0.74,
+          "userSeconds": 1.45
+        }
+      },
+      {
+        "answersIdentical": true,
+        "cacheLimitMiB": 256,
+        "cacheLimitOverridden": true,
+        "cacheRelease": {
+          "footprintAfterMiB": 171.75130462646484,
+          "footprintBeforeMiB": 525.2045211791992,
+          "gpuCacheAfterMiB": 0,
+          "gpuCacheBeforeMiB": 257.2528591156006
+        },
+        "file": "d_json_3.json",
+        "footprintWithModelLoadedMiB": 2747.549736022949,
+        "gpuActiveAfterLoadMiB": 2257.8548889160156,
+        "gpuCacheWithModelLoadedMiB": 257.2528591156006,
+        "gpuPeakMiB": 3009.238744735718,
+        "loadSeconds": 0.7613159418106079,
+        "maxTokens": 300,
+        "ok": true,
+        "peakFootprintBytes": 3393768376,
+        "peakFootprintMiB": 3236.549736022949,
+        "peakResidentMiB": 2524.609375,
+        "repeat": 1,
+        "runs": [
+          {
+            "answer": "{\"apps\":[\"微信\"],\"topics\":[\"模型选型会\",\"内存曲线\",\"Apache 2.0 许可\",\"4bit 量化\"],\"people\":[\"老周\",\"陈默\",\"我\"],\"summary\":\"会议时间调整，准备模型选型会材料，确认内存曲线与许可说明。\"}",
+            "answerChars": 134,
+            "generateSeconds": 2.6760300397872925,
+            "generateTimeSeconds": 1.5716439485549927,
+            "generationTokens": 57,
+            "index": 0,
+            "outputChars": 134,
+            "promptSeconds": 1.0799870491027832,
+            "promptTokens": 290,
+            "promptTokensPerSecond": 268.52173851614447,
+            "stopReason": "stop",
+            "thinkingChars": 0,
+            "thinkingDetected": false,
+            "timeToFirstTokenSeconds": 1.092352032661438,
+            "tokensPerSecond": 36.26775648034479
+          }
+        ],
+        "temperature": 0,
+        "thermalStateAtEnd": "nominal",
+        "thermalStateAtStart": "nominal",
+        "thinkingOn": false,
+        "totalSeconds": 3.746548056602478,
+        "usrBinTime": {
+          "maxResidentBytes": 2647244800,
+          "peakFootprintBytes": 3393768376,
+          "peakFootprintMiB": 3236.549736022949,
+          "realSeconds": 3.76,
+          "swaps": 0,
+          "sysSeconds": 0.69,
+          "userSeconds": 1.44
+        }
+      },
+      {
+        "answersIdentical": true,
+        "cacheLimitMiB": 256,
+        "cacheLimitOverridden": true,
+        "cacheRelease": {
+          "footprintAfterMiB": 172.62632751464844,
+          "footprintBeforeMiB": 413.04822540283203,
+          "gpuCacheAfterMiB": 0,
+          "gpuCacheBeforeMiB": 256.13369941711426
+        },
+        "file": "d_json_4.json",
+        "footprintWithModelLoadedMiB": 2722.4090881347656,
+        "gpuActiveAfterLoadMiB": 2257.8548889160156,
+        "gpuCacheWithModelLoadedMiB": 256.13369941711426,
+        "gpuPeakMiB": 2988.50412940979,
+        "loadSeconds": 0.7670940160751343,
+        "maxTokens": 300,
+        "ok": true,
+        "peakFootprintBytes": 3360213920,
+        "peakFootprintMiB": 3204.5497131347656,
+        "peakResidentMiB": 2524.734375,
+        "repeat": 1,
+        "runs": [
+          {
+            "answer": "{\"apps\":[\"Safari\"],\"topics\":[\"Deterministic sampling in MLX\",\"kv cache quantization\",\"mlx-swift-lm\"],\"people\":[\"kmaehashi\"],\"summary\":\"在 MLX 确定性采样中，温度设为 0 时 RNG 种子无效，kv cache 量化引入微小偏差。\"}",
+            "answerChars": 186,
+            "generateSeconds": 2.7573909759521484,
+            "generateTimeSeconds": 1.7354450225830078,
+            "generationTokens": 63,
+            "index": 0,
+            "outputChars": 186,
+            "promptSeconds": 0.9985660314559937,
+            "promptTokens": 281,
+            "promptTokensPerSecond": 281.4035238013036,
+            "stopReason": "stop",
+            "thinkingChars": 0,
+            "thinkingDetected": false,
+            "timeToFirstTokenSeconds": 1.0104869604110718,
+            "tokensPerSecond": 36.30192785146938
+          }
+        ],
+        "temperature": 0,
+        "thermalStateAtEnd": "nominal",
+        "thermalStateAtStart": "nominal",
+        "thinkingOn": false,
+        "totalSeconds": 3.8405500650405884,
+        "usrBinTime": {
+          "maxResidentBytes": 2647375872,
+          "peakFootprintBytes": 3360213920,
+          "peakFootprintMiB": 3204.5497131347656,
+          "realSeconds": 3.86,
+          "swaps": 0,
+          "sysSeconds": 0.74,
+          "userSeconds": 1.48
+        }
+      },
+      {
+        "answersIdentical": true,
+        "cacheLimitMiB": 256,
+        "cacheLimitOverridden": true,
+        "cacheRelease": {
+          "footprintAfterMiB": 171.79817962646484,
+          "footprintBeforeMiB": 442.23570251464844,
+          "gpuCacheAfterMiB": 0,
+          "gpuCacheBeforeMiB": 256.73866844177246
+        },
+        "file": "d_json_5.json",
+        "footprintWithModelLoadedMiB": 2750.3778381347656,
+        "gpuActiveAfterLoadMiB": 2257.8548889160156,
+        "gpuCacheWithModelLoadedMiB": 256.73866844177246,
+        "gpuPeakMiB": 3075.6618003845215,
+        "loadSeconds": 0.7792420387268066,
+        "maxTokens": 300,
+        "ok": true,
+        "peakFootprintBytes": 3480210336,
+        "peakFootprintMiB": 3318.9872131347656,
+        "peakResidentMiB": 2524.78125,
+        "repeat": 1,
+        "runs": [
+          {
+            "answer": "{\"apps\":[\"Terminal\"],\"topics\":[\"模型加载\",\"内存占用\",\"系统监控\",\"备忘录记录\"],\"people\":[],\"summary\":\"终端运行模型测试，内存占用 1.7GB，交换区为 0，结果记入备忘录。\"}",
+            "answerChars": 121,
+            "generateSeconds": 2.737278938293457,
+            "generateTimeSeconds": 1.5103670358657837,
+            "generationTokens": 49,
+            "index": 0,
+            "outputChars": 121,
+            "promptSeconds": 1.2019339799880981,
+            "promptTokens": 340,
+            "promptTokensPerSecond": 282.8774339197622,
+            "stopReason": "stop",
+            "thinkingChars": 0,
+            "thinkingDetected": false,
+            "timeToFirstTokenSeconds": 1.214181900024414,
+            "tokensPerSecond": 32.44244533707786
+          }
+        ],
+        "temperature": 0,
+        "thermalStateAtEnd": "nominal",
+        "thermalStateAtStart": "nominal",
+        "thinkingOn": false,
+        "totalSeconds": 3.8090580701828003,
+        "usrBinTime": {
+          "maxResidentBytes": 2647425024,
+          "peakFootprintBytes": 3480210336,
+          "peakFootprintMiB": 3318.9872131347656,
+          "realSeconds": 3.81,
+          "swaps": 0,
+          "sysSeconds": 0.79,
+          "userSeconds": 1.37
+        }
+      }
+    ],
+    "e_longInput_3664tok": {
+      "answersIdentical": true,
+      "cacheLimitMiB": 256,
+      "cacheLimitOverridden": true,
+      "cacheRelease": {
+        "footprintAfterMiB": 156.4702377319336,
+        "footprintBeforeMiB": 453.0484085083008,
+        "gpuCacheAfterMiB": 0,
+        "gpuCacheBeforeMiB": 257.53887939453125
+      },
+      "file": "e_long_4k.json",
+      "footprintWithModelLoadedMiB": 2776.971725463867,
+      "gpuActiveAfterLoadMiB": 2257.8548889160156,
+      "gpuCacheWithModelLoadedMiB": 257.53887939453125,
+      "gpuPeakMiB": 3234.2604026794434,
+      "loadSeconds": 0.9325060844421387,
+      "maxTokens": 300,
+      "ok": true,
+      "peakFootprintBytes": 3768814640,
+      "peakFootprintMiB": 3594.221725463867,
+      "peakResidentMiB": 1857.15625,
+      "repeat": 1,
+      "runs": [
+        {
+          "answer": "周五全天工作约 9 小时 36 分，核心围绕 M0 采集器验收与 Air 基准测试展开。上午在 Xcode 中修复锁屏切换漏事件，并编译通过；下午通过 Terminal 运行基准测试，获取 1730MB 峰值内存数据，并在 Figma 绘制对比图。期间与法务确认 Apache 2.0 许可细节，与老周约定周三过模型选型，同时整理了 Q3 埋点口径对齐表。",
+          "answerChars": 178,
+          "generateSeconds": 13.793799996376038,
+          "generateTimeSeconds": 3.104019045829773,
+          "generationTokens": 107,
+          "index": 0,
+          "outputChars": 178,
+          "promptSeconds": 10.644388914108276,
+          "promptTokens": 3664,
+          "promptTokensPerSecond": 344.2189147320298,
+          "stopReason": "stop",
+          "thinkingChars": 0,
+          "thinkingDetected": false,
+          "timeToFirstTokenSeconds": 10.67768394947052,
+          "tokensPerSecond": 34.471437971282334
+        }
+      ],
+      "temperature": 0,
+      "thermalStateAtEnd": "nominal",
+      "thermalStateAtStart": "nominal",
+      "thinkingOn": false,
+      "totalSeconds": 15.053074836730957,
+      "usrBinTime": {
+        "maxResidentBytes": 1947369472,
+        "peakFootprintBytes": 3768814640,
+        "peakFootprintMiB": 3594.221725463867,
+        "realSeconds": 15.06,
+        "swaps": 0,
+        "sysSeconds": 1.47,
+        "userSeconds": 2.28
+      }
+    },
+    "e_longInput_5354tok": {
+      "answersIdentical": true,
+      "cacheLimitMiB": 256,
+      "cacheLimitOverridden": true,
+      "cacheRelease": {
+        "footprintAfterMiB": 158.01702117919922,
+        "footprintBeforeMiB": 460.1889419555664,
+        "gpuCacheAfterMiB": 0,
+        "gpuCacheBeforeMiB": 256.7047462463379
+      },
+      "file": "e_long.json",
+      "footprintWithModelLoadedMiB": 2821.0341567993164,
+      "gpuActiveAfterLoadMiB": 2257.8548889160156,
+      "gpuCacheWithModelLoadedMiB": 256.7047462463379,
+      "gpuPeakMiB": 3257.186231613159,
+      "loadSeconds": 0.821869969367981,
+      "maxTokens": 300,
+      "ok": true,
+      "peakFootprintBytes": 3866315752,
+      "peakFootprintMiB": 3687.2060317993164,
+      "peakResidentMiB": 2524.3125,
+      "repeat": 1,
+      "runs": [
+        {
+          "answer": "周五全天工作约 9 小时 36 分，核心围绕 M0 采集器验收与 Air 基准测试展开。上午在 Xcode 中修复锁屏切换漏事件，下午完成 Q3 埋点口径对齐并整理 Air 实测数据。通过终端运行基准测试，确认 256MiB 缓冲池下峰值 footprint 为 1.73GB。下午处理 CI 构建失败问题，确认需安装 Metal Toolchain。晚间在飞书与 Slack 协调法务确认 Apache 2.0 许可细节，并规划下周三模型选型评审。",
+          "answerChars": 225,
+          "generateSeconds": 19.645749926567078,
+          "generateTimeSeconds": 3.832413077354431,
+          "generationTokens": 128,
+          "index": 0,
+          "outputChars": 225,
+          "promptSeconds": 15.764876961708069,
+          "promptTokens": 5354,
+          "promptTokensPerSecond": 339.61571745878774,
+          "stopReason": "stop",
+          "thinkingChars": 0,
+          "thinkingDetected": false,
+          "timeToFirstTokenSeconds": 15.801582932472229,
+          "tokensPerSecond": 33.39932241551587
+        }
+      ],
+      "temperature": 0,
+      "thermalStateAtEnd": "nominal",
+      "thermalStateAtStart": "nominal",
+      "thinkingOn": false,
+      "totalSeconds": 20.778883934020996,
+      "usrBinTime": {
+        "maxResidentBytes": 2646933504,
+        "peakFootprintBytes": 3866315752,
+        "peakFootprintMiB": 3687.2060317993164,
+        "realSeconds": 20.79,
+        "swaps": 0,
+        "sysSeconds": 2.02,
+        "userSeconds": 2.3
+      }
+    },
+    "f_cacheLimit256": {
+      "answersIdentical": true,
+      "cacheLimitMiB": 256,
+      "cacheLimitOverridden": true,
+      "cacheRelease": {
+        "footprintAfterMiB": 465.42352294921875,
+        "footprintBeforeMiB": 679.3454208374023,
+        "gpuCacheAfterMiB": 0,
+        "gpuCacheBeforeMiB": 520.8342380523682
+      },
+      "file": "f_limit256.json",
+      "footprintWithModelLoadedMiB": 2634.8466567993164,
+      "gpuActiveAfterLoadMiB": 2257.8548889160156,
+      "gpuCacheWithModelLoadedMiB": 217.70923805236816,
+      "gpuPeakMiB": 3111.898094177246,
+      "loadSeconds": 0.7674390077590942,
+      "maxTokens": 400,
+      "ok": true,
+      "peakFootprintBytes": 3670002664,
+      "peakFootprintMiB": 3499.9872817993164,
+      "peakResidentMiB": 2524.828125,
+      "repeat": 1,
+      "runs": [
+        {
+          "answer": "9 月 5 日全天共专注 8 小时 12 分，应用切换 208 次。上午在飞书确认采集器 Air 端运行稳定，内存峰值 1.6 GiB；随后在 Xcode 中完善 FrontmostObserver 逻辑，解决锁屏切换漏事件问题，编译通过 3 个警告。下午查阅 Safari 内存论坛关于 Metal 缓冲的说明，并在 Xcode 中完成事件存储 SQL 插入，34 项测试全过。15 时 20 分在微信与老周沟通，确认下周三下午在公司进行模型选型会议，并承诺整理 Air 实测数据。",
+          "answerChars": 242,
+          "generateSeconds": 6.733423948287964,
+          "generateTimeSeconds": 4.1132330894470215,
+          "generationTokens": 147,
+          "index": 0,
+          "outputChars": 242,
+          "promptSeconds": 2.5937799215316772,
+          "promptTokens": 837,
+          "promptTokensPerSecond": 322.6950725664247,
+          "stopReason": "stop",
+          "thinkingChars": 0,
+          "thinkingDetected": false,
+          "timeToFirstTokenSeconds": 2.608863949775696,
+          "tokensPerSecond": 35.73831018162954
+        }
+      ],
+      "temperature": 0,
+      "thermalStateAtEnd": "nominal",
+      "thermalStateAtStart": "nominal",
+      "thinkingOn": false,
+      "totalSeconds": 7.809121012687683,
+      "usrBinTime": {
+        "maxResidentBytes": 2647474176,
+        "peakFootprintBytes": 3670002664,
+        "peakFootprintMiB": 3499.9872817993164,
+        "realSeconds": 7.82,
+        "swaps": 0,
+        "sysSeconds": 1.09,
+        "userSeconds": 2.23
+      }
+    },
+    "f_cacheUnlimited": {
+      "answersIdentical": true,
+      "cacheLimitMiB": 15564.79999923706,
+      "cacheLimitOverridden": false,
+      "cacheRelease": {
+        "footprintAfterMiB": 516.0643310546875,
+        "footprintBeforeMiB": 4137.346862792969,
+        "gpuCacheAfterMiB": 0,
+        "gpuCacheBeforeMiB": 3961.4385147094727
+      },
+      "file": "f_nolimit.json",
+      "footprintWithModelLoadedMiB": 4137.315612792969,
+      "gpuActiveAfterLoadMiB": 2257.8548889160156,
+      "gpuCacheWithModelLoadedMiB": 1703.5874404907227,
+      "gpuPeakMiB": 3111.898094177246,
+      "loadSeconds": 0.7943320274353027,
+      "maxTokens": 400,
+      "ok": true,
+      "peakFootprintBytes": 4338486464,
+      "peakFootprintMiB": 4137.503112792969,
+      "peakResidentMiB": 2524.734375,
+      "repeat": 1,
+      "runs": [
+        {
+          "answer": "9 月 5 日全天共专注 8 小时 12 分，应用切换 208 次。上午在飞书确认采集器 Air 端运行稳定，内存峰值 1.6 GiB；随后在 Xcode 中完善 FrontmostObserver 逻辑，解决锁屏切换漏事件问题，编译通过 3 个警告。下午查阅 Safari 内存论坛关于 Metal 缓冲的说明，并在 Xcode 中完成事件存储 SQL 插入，34 项测试全过。15 时 20 分在微信与老周沟通，确认下周三下午在公司进行模型选型会议，并承诺整理 Air 实测数据。",
+          "answerChars": 242,
+          "generateSeconds": 6.728150010108948,
+          "generateTimeSeconds": 4.103930950164795,
+          "generationTokens": 147,
+          "index": 0,
+          "outputChars": 242,
+          "promptSeconds": 2.597485065460205,
+          "promptTokens": 837,
+          "promptTokensPerSecond": 322.23476898093577,
+          "stopReason": "stop",
+          "thinkingChars": 0,
+          "thinkingDetected": false,
+          "timeToFirstTokenSeconds": 2.6127970218658447,
+          "tokensPerSecond": 35.81931611059323
+        }
+      ],
+      "temperature": 0,
+      "thermalStateAtEnd": "nominal",
+      "thermalStateAtStart": "nominal",
+      "thinkingOn": false,
+      "totalSeconds": 7.906030058860779,
+      "usrBinTime": {
+        "maxResidentBytes": 2647375872,
+        "peakFootprintBytes": 4338486464,
+        "peakFootprintMiB": 4137.503112792969,
+        "realSeconds": 7.93,
+        "swaps": 0,
+        "sysSeconds": 1.01,
+        "userSeconds": 2.2
+      }
+    }
+  },
+  "systemMemory": {
+    "a": {
+      "after": "vm.swapusage: total = 1024.00M  used = 349.25M  free = 674.75M  (encrypted)\nFile I/O:\nPageins: 3651668 \nPageouts: 16443 \n\nSystem-wide memory free percentage: 59%\n",
+      "before": "vm.swapusage: total = 1024.00M  used = 349.25M  free = 674.75M  (encrypted)\nFile I/O:\nPageins: 3628744 \nPageouts: 16022 \n\nSystem-wide memory free percentage: 63%\n"
+    },
+    "b": {
+      "after": "vm.swapusage: total = 1024.00M  used = 349.25M  free = 674.75M  (encrypted)\nFile I/O:\nPageins: 3879690 \nPageouts: 16769 \n\nSystem-wide memory free percentage: 64%\n",
+      "before": "vm.swapusage: total = 1024.00M  used = 349.25M  free = 674.75M  (encrypted)\nFile I/O:\nPageins: 3865177 \nPageouts: 16532 \n\nSystem-wide memory free percentage: 66%\n"
+    },
+    "c": {
+      "after": "vm.swapusage: total = 1024.00M  used = 325.25M  free = 698.75M  (encrypted)\nFile I/O:\nPageins: 3979713 \nPageouts: 16967 \n\nSystem-wide memory free percentage: 63%\n",
+      "before": "vm.swapusage: total = 1024.00M  used = 341.25M  free = 682.75M  (encrypted)\nFile I/O:\nPageins: 3891356 \nPageouts: 16769 \n\nSystem-wide memory free percentage: 65%\n"
+    },
+    "d": {
+      "after": "vm.swapusage: total = 1024.00M  used = 317.25M  free = 706.75M  (encrypted)\nFile I/O:\nPageins: 4279771 \nPageouts: 17819 \n\nSystem-wide memory free percentage: 58%\n",
+      "before": "vm.swapusage: total = 1024.00M  used = 317.25M  free = 706.75M  (encrypted)\nFile I/O:\nPageins: 4084647 \nPageouts: 17453 \n\nSystem-wide memory free percentage: 68%\n"
+    },
+    "e": {
+      "after": "vm.swapusage: total = 1024.00M  used = 317.25M  free = 706.75M  (encrypted)\nFile I/O:\nPageins: 4370556 \nPageouts: 18565 \n\nSystem-wide memory free percentage: 63%\n",
+      "before": "vm.swapusage: total = 1024.00M  used = 317.25M  free = 706.75M  (encrypted)\nFile I/O:\nPageins: 4331639 \nPageouts: 17819 \n\nSystem-wide memory free percentage: 65%\n"
+    },
+    "f": {
+      "after": "vm.swapusage: total = 1024.00M  used = 317.25M  free = 706.75M  (encrypted)\nFile I/O:\nPageins: 4624239 \nPageouts: 19172 \n\nSystem-wide memory free percentage: 61%\n",
+      "before": "vm.swapusage: total = 1024.00M  used = 317.25M  free = 706.75M  (encrypted)\nFile I/O:\nPageins: 4548672 \nPageouts: 18746 \n\nSystem-wide memory free percentage: 62%\n"
+    },
+    "f256": {
+      "after": "vm.swapusage: total = 1024.00M  used = 317.25M  free = 706.75M  (encrypted)\nFile I/O:\nPageins: 4696989 \nPageouts: 19221 \n\nSystem-wide memory free percentage: 60%\n",
+      "before": "vm.swapusage: total = 1024.00M  used = 317.25M  free = 706.75M  (encrypted)\nFile I/O:\nPageins: 4631315 \nPageouts: 19172 \n\nSystem-wide memory free percentage: 59%\n"
+    }
+  },
+  "tool": "brosis-e9 generate（D19 Qwen3.5-4B 在 Air 上的验证）",
+  "verify": {
+    "allMatch": true,
+    "directory": "~/Library/Application Support/brosis-m0/models/Qwen3.5-4B-MLX-4bit",
+    "files": 12,
+    "id": "Qwen3.5-4B-MLX-4bit",
+    "seconds": 1.271638035774231,
+    "usrBinTime": {
+      "maxResidentBytes": 2853519360,
+      "peakFootprintBytes": 3078441648,
+      "peakFootprintMiB": 2935.8307342529297,
+      "realSeconds": 1.47,
+      "swaps": 0,
+      "sysSeconds": 0.44,
+      "userSeconds": 0.92
+    }
+  }
+}

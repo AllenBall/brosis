@@ -1,0 +1,11 @@
+# brosis 采集排除清单（报告 3.4）。一行一个 bundle id，# 开头为注释。
+# 这些应用会通过 SCContentFilter(display:excludingApplications:) 从采集流里排除。
+# 本文件存在时完全覆盖代码里的默认集合。
+com.apple.keychainaccess
+com.apple.Passwords
+com.agilebits.onepassword7
+com.1password.1password
+com.lastpass.LastPass
+org.keepassxc.keepassxc
+com.apple.ScreenSharing
+com.apple.iPhoneMirroring

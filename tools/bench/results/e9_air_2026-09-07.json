@@ -1,0 +1,2014 @@
+{
+ "experiment": "E9 Air（M4 / 16 GiB / 无风扇）复测 + 真实 Metal Toolchain 编出的 metallib 体积",
+ "date": "2026-09-07",
+ "plan": [
+  "4.1 E9",
+  "3.11",
+  "D26",
+  "D27",
+  "D17",
+  "tools/e9/README.md 第 7 节 Air 复测清单"
+ ],
+ "unitsNote": "MiB = 2^20 字节，GiB = 2^30 字节。内存一律以 /usr/bin/time -l 的 peak memory footprint（JSON 里 peakFootprintMiB）为准，RSS 只作参考。",
+ "intermediateDirectory": "~/Library/Caches/brosis-build/e9/results/air",
+ "signedThisRound": false,
+ "signingNote": "本轮 SKIP_SIGN=1，未签名（钥匙串里只有 Apple Development，没有 Developer ID Application <TEAMID>）。家里机实测签名与否结果逐位相同，不影响本轮数字。",
+ "machine": {
+  "gpuMemoryLimitMiB": 15564.79999923706,
+  "hardwareModel": "Mac16,12",
+  "osVersion": "Version 26.6.2 (Build 25G83)",
+  "physicalMemoryGiB": 16,
+  "processorCount": 10,
+  "thermalStateAtStart": "nominal"
+ },
+ "baselineMachine": {
+  "gpuMemoryLimitMiB": 124518.39999961853,
+  "hardwareModel": "Mac16,5",
+  "osVersion": "Version 26.6.2 (Build 25G83)",
+  "physicalMemoryGiB": 128,
+  "processorCount": 16,
+  "thermalStateAtStart": "nominal"
+ },
+ "toolchain": {
+  "xcode": "26.6 (17F113)（DEVELOPER_DIR 显式指向 /Applications/Xcode.app，xcode-select 仍指 CommandLineTools）",
+  "swift": "6.3.3 (swiftlang-6.3.3.1.3 clang-2100.1.1.101)",
+  "metal": "Apple metal 32023.883 (metalfe-32023.883)，Metal Toolchain 已装",
+  "os": "macOS 26.6.2 (25G83) / Darwin 25.6.0",
+  "mlx-swift-lm": "3.31.4",
+  "mlx-swift": "0.31.6（内含 MLX_VERSION 0.31.1）",
+  "swift-transformers": "1.3.4"
+ },
+ "build": {
+  "command": "DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer SKIP_SIGN=1 tools/e9/build_app.sh",
+  "log": "~/Library/Caches/brosis-build/e9/results/air/build_app.log",
+  "swiftBuildSeconds": 174.89,
+  "totalSeconds": 181,
+  "metalSourceFiles": 9,
+  "metalCompileSeconds": 5,
+  "metallibSource": "xcrun metal 现编（Metal Toolchain 已装）",
+  "timeMinusL": {
+   "realSeconds": 180.87,
+   "userSeconds": 531.81,
+   "sysSeconds": 31.94,
+   "peakResidentBytes": 3138043904
+  }
+ },
+ "sizes": {
+  "appTotalBytes": 45213881,
+  "appTotalMiB": 43.119317054748535,
+  "appDuBytes": 45228032,
+  "appDuMiB": 43.1328125,
+  "executableBytes": 42031832,
+  "executableMiB": 40.084678649902344,
+  "metallibBytes": 3135866,
+  "metallibMiB": 2.9905948638916016,
+  "runtimeBytes": 45167698,
+  "runtimeMiB": 43.075273513793945,
+  "files": {
+   "Contents/Info.plist": 1115,
+   "Contents/PkgInfo": 8,
+   "Contents/MacOS/brosis-e9": 42031832,
+   "Contents/Resources/corpus.json": 40637,
+   "Contents/Resources/catalog.json": 4423,
+   "Contents/Resources/mlx-swift_Cmlx.bundle/default.metallib": 3135866
+  },
+  "modelBytes": 649088992,
+  "modelMiB": 619.0195007324219,
+  "modelGiB": 0.6045112311840057,
+  "modelDuBytes": 661905408,
+  "modelDuMiB": 631.2421875,
+  "modelFileCount": 16,
+  "baselineAppTotalMiB": 159.55451488494873,
+  "baselineMetallibMiB": 119.6385726928711,
+  "baselineExecutableMiB": 39.86907958984375,
+  "metallibDeltaMiB": 116.64797782897949,
+  "appDeltaMiB": 116.4351978302002,
+  "note": "本轮 metallib 是本机用 xcrun metal 从 mlx-swift 0.31.6 自带的 9 个 .metal 现编的 JIT 版，与运行时版本严格对齐；家里机那份 119.64 MiB 是从 MLX 0.31.2 Python wheel 借来的全量非 JIT 版。"
+ },
+ "env": {
+  "executable": "~/Library/Caches/brosis-build/e9/brosis-e9.app/Contents/MacOS/brosis-e9",
+  "hardwareModel": "Mac16,12",
+  "thermalStateAtStart": "nominal",
+  "bundleMainPath": "~/Library/Caches/brosis-build/e9/brosis-e9.app",
+  "processorCount": 10,
+  "physicalMemoryGiB": 16,
+  "modelsRoot": "~/Library/Application Support/brosis-m0/models",
+  "gpuMemoryLimitMiB": 15564.79999923706,
+  "osVersion": "Version 26.6.2 (Build 25G83)",
+  "metalSmokeTest": {
+   "ok": true,
+   "value": 15
+  },
+  "metallibCandidates": [
+   {
+    "exists": false,
+    "sizeMiB": 0,
+    "path": "~/Library/Caches/brosis-build/e9/brosis-e9.app/Contents/MacOS/mlx.metallib"
+   },
+   {
+    "exists": false,
+    "sizeMiB": 0,
+    "path": "~/Library/Caches/brosis-build/e9/brosis-e9.app/Contents/MacOS/Resources/mlx.metallib"
+   },
+   {
+    "path": "~/Library/Caches/brosis-build/e9/brosis-e9.app/Contents/MacOS/mlx-swift_Cmlx.bundle/default.metallib",
+    "exists": false,
+    "sizeMiB": 0
+   },
+   {
+    "path": "~/Library/Caches/brosis-build/e9/brosis-e9.app/Contents/MacOS/Resources/default.metallib",
+    "exists": false,
+    "sizeMiB": 0
+   },
+   {
+    "exists": true,
+    "sizeMiB": 2.9905948638916016,
+    "path": "~/Library/Caches/brosis-build/e9/brosis-e9.app/Contents/Resources/mlx-swift_Cmlx.bundle/default.metallib"
+   }
+  ]
+ },
+ "download": {
+  "avgMiBPerSecond": 12.330546006676109,
+  "baseUsed": "https://huggingface.co",
+  "files": [
+   {
+    "bytes": 117,
+    "path": "generation_config.json",
+    "rangeStatus": null,
+    "resumedFromBytes": 0,
+    "seconds": 1.2923250198364258,
+    "sha256OK": true
+   },
+   {
+    "bytes": 215,
+    "path": "config_sentence_transformers.json",
+    "rangeStatus": null,
+    "resumedFromBytes": 0,
+    "seconds": 0.4407850503921509,
+    "sha256OK": true
+   },
+   {
+    "bytes": 349,
+    "path": "modules.json",
+    "rangeStatus": null,
+    "resumedFromBytes": 0,
+    "seconds": 0.4339669942855835,
+    "sha256OK": true
+   },
+   {
+    "bytes": 493,
+    "path": "README.md",
+    "rangeStatus": null,
+    "resumedFromBytes": 0,
+    "seconds": 0.44210004806518555,
+    "sha256OK": true
+   },
+   {
+    "bytes": 613,
+    "path": "special_tokens_map.json",
+    "rangeStatus": null,
+    "resumedFromBytes": 0,
+    "seconds": 0.4387010335922241,
+    "sha256OK": true
+   },
+   {
+    "bytes": 707,
+    "path": "added_tokens.json",
+    "rangeStatus": null,
+    "resumedFromBytes": 0,
+    "seconds": 0.4439549446105957,
+    "sha256OK": true
+   },
+   {
+    "bytes": 857,
+    "path": "config.json",
+    "rangeStatus": null,
+    "resumedFromBytes": 0,
+    "seconds": 0.43614304065704346,
+    "sha256OK": true
+   },
+   {
+    "bytes": 1570,
+    "path": ".gitattributes",
+    "rangeStatus": null,
+    "resumedFromBytes": 0,
+    "seconds": 0.43624699115753174,
+    "sha256OK": true
+   },
+   {
+    "bytes": 4116,
+    "path": "chat_template.jinja",
+    "rangeStatus": null,
+    "resumedFromBytes": 0,
+    "seconds": 0.4349459409713745,
+    "sha256OK": true
+   },
+   {
+    "bytes": 5404,
+    "path": "tokenizer_config.json",
+    "rangeStatus": null,
+    "resumedFromBytes": 0,
+    "seconds": 0.44206690788269043,
+    "sha256OK": true
+   },
+   {
+    "bytes": 49731,
+    "path": "model.safetensors.index.json",
+    "rangeStatus": null,
+    "resumedFromBytes": 0,
+    "seconds": 0.4435769319534302,
+    "sha256OK": true
+   },
+   {
+    "bytes": 1671853,
+    "path": "merges.txt",
+    "rangeStatus": null,
+    "resumedFromBytes": 0,
+    "seconds": 1.5237939357757568,
+    "sha256OK": true
+   },
+   {
+    "bytes": 2776833,
+    "path": "vocab.json",
+    "rangeStatus": null,
+    "resumedFromBytes": 0,
+    "seconds": 0.7909389734268188,
+    "sha256OK": true
+   },
+   {
+    "bytes": 11423705,
+    "path": "tokenizer.json",
+    "rangeStatus": null,
+    "resumedFromBytes": 0,
+    "seconds": 3.7417941093444824,
+    "sha256OK": true
+   },
+   {
+    "bytes": 633152041,
+    "path": "model.safetensors",
+    "rangeStatus": null,
+    "resumedFromBytes": 0,
+    "seconds": 38.44753098487854,
+    "sha256OK": true
+   }
+  ],
+  "id": "Qwen3-Embedding-0.6B-8bit",
+  "installedAt": "~/Library/Application Support/brosis-m0/models/Qwen3-Embedding-0.6B-8bit",
+  "probes": [
+   {
+    "base": "https://huggingface.co",
+    "note": "HTTP 200，117 字节",
+    "ok": true,
+    "seconds": 1.4217320680618286
+   },
+   {
+    "base": "https://hf-mirror.com",
+    "note": "HTTP 200，117 字节",
+    "ok": true,
+    "seconds": 1.7492049932479858
+   }
+  ],
+  "repoId": "mlx-community/Qwen3-Embedding-0.6B-8bit",
+  "revision": "407ad2329cd30702720aafe83f74a1ba30fdfbca",
+  "simulateInterruptBytes": 0,
+  "totalBytes": 649088604,
+  "totalMiB": 619.0191307067871,
+  "totalSeconds": 50.202085971832275
+ },
+ "downloadMirrorResume": {
+  "avgMiBPerSecond": 10.549398248837813,
+  "baseUsed": "https://hf-mirror.com",
+  "files": [
+   {
+    "bytes": 117,
+    "path": "generation_config.json",
+    "rangeStatus": null,
+    "resumedFromBytes": 0,
+    "seconds": 1.3995460271835327,
+    "sha256OK": true
+   },
+   {
+    "bytes": 215,
+    "path": "config_sentence_transformers.json",
+    "rangeStatus": null,
+    "resumedFromBytes": 0,
+    "seconds": 1.8621079921722412,
+    "sha256OK": true
+   },
+   {
+    "bytes": 349,
+    "path": "modules.json",
+    "rangeStatus": null,
+    "resumedFromBytes": 0,
+    "seconds": 0.7463890314102173,
+    "sha256OK": true
+   },
+   {
+    "bytes": 493,
+    "path": "README.md",
+    "rangeStatus": null,
+    "resumedFromBytes": 0,
+    "seconds": 0.7474271059036255,
+    "sha256OK": true
+   },
+   {
+    "bytes": 613,
+    "path": "special_tokens_map.json",
+    "rangeStatus": null,
+    "resumedFromBytes": 0,
+    "seconds": 0.7396529912948608,
+    "sha256OK": true
+   },
+   {
+    "bytes": 707,
+    "path": "added_tokens.json",
+    "rangeStatus": null,
+    "resumedFromBytes": 0,
+    "seconds": 0.7375791072845459,
+    "sha256OK": true
+   },
+   {
+    "bytes": 857,
+    "path": "config.json",
+    "rangeStatus": null,
+    "resumedFromBytes": 0,
+    "seconds": 0.7502139806747437,
+    "sha256OK": true
+   },
+   {
+    "bytes": 1570,
+    "path": ".gitattributes",
+    "rangeStatus": null,
+    "resumedFromBytes": 0,
+    "seconds": 0.7410659790039062,
+    "sha256OK": true
+   },
+   {
+    "bytes": 4116,
+    "path": "chat_template.jinja",
+    "rangeStatus": null,
+    "resumedFromBytes": 0,
+    "seconds": 0.7497519254684448,
+    "sha256OK": true
+   },
+   {
+    "bytes": 5404,
+    "path": "tokenizer_config.json",
+    "rangeStatus": null,
+    "resumedFromBytes": 0,
+    "seconds": 0.743690013885498,
+    "sha256OK": true
+   },
+   {
+    "bytes": 49731,
+    "path": "model.safetensors.index.json",
+    "rangeStatus": null,
+    "resumedFromBytes": 0,
+    "seconds": 0.7662919759750366,
+    "sha256OK": true
+   },
+   {
+    "bytes": 1671853,
+    "path": "merges.txt",
+    "rangeStatus": null,
+    "resumedFromBytes": 0,
+    "seconds": 1.6739789247512817,
+    "sha256OK": true
+   },
+   {
+    "bytes": 2776833,
+    "path": "vocab.json",
+    "rangeStatus": null,
+    "resumedFromBytes": 0,
+    "seconds": 1.1077970266342163,
+    "sha256OK": true
+   },
+   {
+    "bytes": 11423705,
+    "path": "tokenizer.json",
+    "rangeStatus": null,
+    "resumedFromBytes": 0,
+    "seconds": 3.8446069955825806,
+    "sha256OK": true
+   },
+   {
+    "bytes": 633152041,
+    "path": "model.safetensors",
+    "rangeStatus": 206,
+    "resumedFromBytes": 41943040,
+    "seconds": 42.05532503128052,
+    "sha256OK": true
+   }
+  ],
+  "id": "Qwen3-Embedding-0.6B-8bit",
+  "installedAt": "~/Library/Caches/brosis-build/e9/models-mirror/Qwen3-Embedding-0.6B-8bit",
+  "probes": [],
+  "repoId": "mlx-community/Qwen3-Embedding-0.6B-8bit",
+  "revision": "407ad2329cd30702720aafe83f74a1ba30fdfbca",
+  "simulateInterruptBytes": 41943040,
+  "totalBytes": 649088604,
+  "totalMiB": 619.0191307067871,
+  "totalSeconds": 58.67814600467682
+ },
+ "verify": {
+  "directory": "~/Library/Application Support/brosis-m0/models/Qwen3-Embedding-0.6B-8bit",
+  "files": 15,
+  "id": "Qwen3-Embedding-0.6B-8bit",
+  "seconds": 0.26352500915527344,
+  "allMatch": true
+ },
+ "verifyTimeMinusL": {
+  "peakResidentBytes": 671662080,
+  "peakFootprintBytes": 655754224,
+  "realSeconds": 0.29,
+  "peakResidentMiB": 640.546875,
+  "peakResidentGiB": 0.6255340576171875,
+  "peakFootprintMiB": 625.3759613037109,
+  "peakFootprintGiB": 0.6107187122106552
+ },
+ "firstLoad": {
+  "coldStart": null,
+  "coldStartNote": "未测：真冷启动要 sudo purge 或重启，本机无 sudo 权限（任务硬约束）。air_embed_1 是下载后的首次运行（页缓存半冷），1.144 s，仅供参考。",
+  "semiColdRun1Seconds": 1.1440980434417725,
+  "hotRuns": [
+   {
+    "run": 6,
+    "secondsFromProcessStartToFirstVector": 0.41621196269989014,
+    "containerLoadSeconds": 0.35245001316070557,
+    "dimension": 1024,
+    "first8": [
+     -0.03638136386871338,
+     -0.06737479567527771,
+     -0.01736966334283352,
+     0.04233374446630478,
+     0.034020934253931046,
+     0.01938372291624546,
+     -0.060960590839385986,
+     0.03738197684288025
+    ],
+    "thermalState": "nominal",
+    "gpuMemoryConfig": {
+     "cacheLimitMiB": 15564.79999923706,
+     "cacheLimitOverridden": false,
+     "cacheLimitRequestedMiB": null,
+     "memoryLimitMiB": 15564.79999923706
+    },
+    "memory": {
+     "footprintMiB": 751.3448944091797,
+     "gpuActiveMiB": 603.7842712402344,
+     "gpuCacheMiB": 13.05489730834961,
+     "gpuPeakMiB": 616.8158187866211,
+     "label": "after-first-vector",
+     "peakFootprintMiB": 751.3448944091797,
+     "peakResidentMiB": 762.375,
+     "residentMiB": 747.515625,
+     "sinceProcessStartSeconds": 0.41717398166656494,
+     "thermalState": "nominal"
+    },
+    "timeMinusL": {
+     "peakResidentBytes": 799408128,
+     "peakFootprintBytes": 787956912,
+     "realSeconds": 0.43,
+     "peakResidentMiB": 762.375,
+     "peakResidentGiB": 0.7445068359375,
+     "peakFootprintMiB": 751.4542694091797,
+     "peakFootprintGiB": 0.733842059969902
+    },
+    "sourceFiles": [
+     "air_embed_6.json",
+     "air_embed_6.err"
+    ]
+   },
+   {
+    "run": 7,
+    "secondsFromProcessStartToFirstVector": 0.39545202255249023,
+    "containerLoadSeconds": 0.34463202953338623,
+    "dimension": 1024,
+    "first8": [
+     -0.03638136386871338,
+     -0.06737479567527771,
+     -0.01736966334283352,
+     0.04233374446630478,
+     0.034020934253931046,
+     0.01938372291624546,
+     -0.060960590839385986,
+     0.03738197684288025
+    ],
+    "thermalState": "nominal",
+    "gpuMemoryConfig": {
+     "cacheLimitMiB": 15564.79999923706,
+     "cacheLimitOverridden": false,
+     "cacheLimitRequestedMiB": null,
+     "memoryLimitMiB": 15564.79999923706
+    },
+    "memory": {
+     "footprintMiB": 751.2667465209961,
+     "gpuActiveMiB": 603.7842712402344,
+     "gpuCacheMiB": 13.05489730834961,
+     "gpuPeakMiB": 616.8158187866211,
+     "label": "after-first-vector",
+     "peakFootprintMiB": 751.2667465209961,
+     "peakResidentMiB": 762.296875,
+     "residentMiB": 747.453125,
+     "sinceProcessStartSeconds": 0.39635908603668213,
+     "thermalState": "nominal"
+    },
+    "timeMinusL": {
+     "peakResidentBytes": 799326208,
+     "peakFootprintBytes": 787825816,
+     "realSeconds": 0.41,
+     "peakResidentMiB": 762.296875,
+     "peakResidentGiB": 0.7444305419921875,
+     "peakFootprintMiB": 751.3292465209961,
+     "peakFootprintGiB": 0.7337199673056602
+    },
+    "sourceFiles": [
+     "air_embed_7.json",
+     "air_embed_7.err"
+    ]
+   },
+   {
+    "run": 8,
+    "secondsFromProcessStartToFirstVector": 0.3938990831375122,
+    "containerLoadSeconds": 0.34249699115753174,
+    "dimension": 1024,
+    "first8": [
+     -0.03638136386871338,
+     -0.06737479567527771,
+     -0.01736966334283352,
+     0.04233374446630478,
+     0.034020934253931046,
+     0.01938372291624546,
+     -0.060960590839385986,
+     0.03738197684288025
+    ],
+    "thermalState": "nominal",
+    "gpuMemoryConfig": {
+     "cacheLimitMiB": 15564.79999923706,
+     "cacheLimitOverridden": false,
+     "cacheLimitRequestedMiB": null,
+     "memoryLimitMiB": 15564.79999923706
+    },
+    "memory": {
+     "footprintMiB": 743.5792922973633,
+     "gpuActiveMiB": 603.7842712402344,
+     "gpuCacheMiB": 13.05489730834961,
+     "gpuPeakMiB": 616.8158187866211,
+     "label": "after-first-vector",
+     "peakFootprintMiB": 743.5792922973633,
+     "peakResidentMiB": 762.34375,
+     "residentMiB": 739.71875,
+     "sinceProcessStartSeconds": 0.39477014541625977,
+     "thermalState": "nominal"
+    },
+    "timeMinusL": {
+     "peakResidentBytes": 799375360,
+     "peakFootprintBytes": 779814088,
+     "realSeconds": 0.41,
+     "peakResidentMiB": 762.34375,
+     "peakResidentGiB": 0.744476318359375,
+     "peakFootprintMiB": 743.6886672973633,
+     "peakFootprintGiB": 0.7262584641575813
+    },
+    "sourceFiles": [
+     "air_embed_8.json",
+     "air_embed_8.err"
+    ]
+   },
+   {
+    "run": 9,
+    "secondsFromProcessStartToFirstVector": 0.3962090015411377,
+    "containerLoadSeconds": 0.3464829921722412,
+    "dimension": 1024,
+    "first8": [
+     -0.03638136386871338,
+     -0.06737479567527771,
+     -0.01736966334283352,
+     0.04233374446630478,
+     0.034020934253931046,
+     0.01938372291624546,
+     -0.060960590839385986,
+     0.03738197684288025
+    ],
+    "thermalState": "nominal",
+    "gpuMemoryConfig": {
+     "cacheLimitMiB": 15564.79999923706,
+     "cacheLimitOverridden": false,
+     "cacheLimitRequestedMiB": null,
+     "memoryLimitMiB": 15564.79999923706
+    },
+    "memory": {
+     "footprintMiB": 751.3761672973633,
+     "gpuActiveMiB": 603.7842712402344,
+     "gpuCacheMiB": 13.05489730834961,
+     "gpuPeakMiB": 616.8158187866211,
+     "label": "after-first-vector",
+     "peakFootprintMiB": 751.3761672973633,
+     "peakResidentMiB": 762.328125,
+     "residentMiB": 747.53125,
+     "sinceProcessStartSeconds": 0.39706504344940186,
+     "thermalState": "nominal"
+    },
+    "timeMinusL": {
+     "peakResidentBytes": 799358976,
+     "peakFootprintBytes": 787956936,
+     "realSeconds": 0.41,
+     "peakResidentMiB": 762.328125,
+     "peakResidentGiB": 0.7444610595703125,
+     "peakFootprintMiB": 751.4542922973633,
+     "peakFootprintGiB": 0.7338420823216438
+    },
+    "sourceFiles": [
+     "air_embed_9.json",
+     "air_embed_9.err"
+    ]
+   },
+   {
+    "run": 10,
+    "secondsFromProcessStartToFirstVector": 0.40341484546661377,
+    "containerLoadSeconds": 0.35176193714141846,
+    "dimension": 1024,
+    "first8": [
+     -0.03638136386871338,
+     -0.06737479567527771,
+     -0.01736966334283352,
+     0.04233374446630478,
+     0.034020934253931046,
+     0.01938372291624546,
+     -0.060960590839385986,
+     0.03738197684288025
+    ],
+    "thermalState": "nominal",
+    "gpuMemoryConfig": {
+     "cacheLimitMiB": 15564.79999923706,
+     "cacheLimitOverridden": false,
+     "cacheLimitRequestedMiB": null,
+     "memoryLimitMiB": 15564.79999923706
+    },
+    "memory": {
+     "footprintMiB": 751.5792694091797,
+     "gpuActiveMiB": 603.7842712402344,
+     "gpuCacheMiB": 13.05489730834961,
+     "gpuPeakMiB": 616.8158187866211,
+     "label": "after-first-vector",
+     "peakFootprintMiB": 751.5792694091797,
+     "peakResidentMiB": 762.421875,
+     "residentMiB": 747.75,
+     "sinceProcessStartSeconds": 0.4042809009552002,
+     "thermalState": "nominal"
+    },
+    "timeMinusL": {
+     "peakResidentBytes": 799457280,
+     "peakFootprintBytes": 788169904,
+     "realSeconds": 0.42,
+     "peakResidentMiB": 762.421875,
+     "peakResidentGiB": 0.7445526123046875,
+     "peakFootprintMiB": 751.6573944091797,
+     "peakFootprintGiB": 0.7340404242277145
+    },
+    "sourceFiles": [
+     "air_embed_10.json",
+     "air_embed_10.err"
+    ]
+   }
+  ],
+  "allRuns": [
+   {
+    "run": 1,
+    "secondsFromProcessStartToFirstVector": 1.1440980434417725,
+    "containerLoadSeconds": 0.3628690242767334,
+    "dimension": 1024,
+    "first8": [
+     -0.03638136386871338,
+     -0.06737479567527771,
+     -0.01736966334283352,
+     0.04233374446630478,
+     0.034020934253931046,
+     0.01938372291624546,
+     -0.060960590839385986,
+     0.03738197684288025
+    ],
+    "thermalState": "nominal",
+    "gpuMemoryConfig": {
+     "cacheLimitMiB": 15564.79999923706,
+     "cacheLimitOverridden": false,
+     "cacheLimitRequestedMiB": null,
+     "memoryLimitMiB": 15564.79999923706
+    },
+    "memory": {
+     "footprintMiB": 743.9698715209961,
+     "gpuActiveMiB": 603.7842712402344,
+     "gpuCacheMiB": 13.05489730834961,
+     "gpuPeakMiB": 616.8158187866211,
+     "label": "after-first-vector",
+     "peakFootprintMiB": 743.9698715209961,
+     "peakResidentMiB": 762.5,
+     "residentMiB": 740.171875,
+     "sinceProcessStartSeconds": 1.1450749635696411,
+     "thermalState": "nominal"
+    },
+    "timeMinusL": {
+     "peakResidentBytes": 799539200,
+     "peakFootprintBytes": 780190872,
+     "realSeconds": 1.16,
+     "peakResidentMiB": 762.5,
+     "peakResidentGiB": 0.74462890625,
+     "peakFootprintMiB": 744.0479965209961,
+     "peakFootprintGiB": 0.7266093716025352
+    },
+    "sourceFiles": [
+     "air_embed_1.json",
+     "air_embed_1.err"
+    ]
+   },
+   {
+    "run": 2,
+    "secondsFromProcessStartToFirstVector": 0.4022608995437622,
+    "containerLoadSeconds": 0.34803998470306396,
+    "dimension": 1024,
+    "first8": [
+     -0.03638136386871338,
+     -0.06737479567527771,
+     -0.01736966334283352,
+     0.04233374446630478,
+     0.034020934253931046,
+     0.01938372291624546,
+     -0.060960590839385986,
+     0.03738197684288025
+    ],
+    "thermalState": "nominal",
+    "gpuMemoryConfig": {
+     "cacheLimitMiB": 15564.79999923706,
+     "cacheLimitOverridden": false,
+     "cacheLimitRequestedMiB": null,
+     "memoryLimitMiB": 15564.79999923706
+    },
+    "memory": {
+     "footprintMiB": 751.4230422973633,
+     "gpuActiveMiB": 603.7842712402344,
+     "gpuCacheMiB": 13.05489730834961,
+     "gpuPeakMiB": 616.8158187866211,
+     "label": "after-first-vector",
+     "peakFootprintMiB": 751.4230422973633,
+     "peakResidentMiB": 762.265625,
+     "residentMiB": 747.578125,
+     "sinceProcessStartSeconds": 0.40313899517059326,
+     "thermalState": "nominal"
+    },
+    "timeMinusL": {
+     "peakResidentBytes": 799293440,
+     "peakFootprintBytes": 788055240,
+     "realSeconds": 0.42,
+     "peakResidentMiB": 762.265625,
+     "peakResidentGiB": 0.7444000244140625,
+     "peakFootprintMiB": 751.5480422973633,
+     "peakFootprintGiB": 0.7339336350560188
+    },
+    "sourceFiles": [
+     "air_embed_2.json",
+     "air_embed_2.err"
+    ]
+   },
+   {
+    "run": 3,
+    "secondsFromProcessStartToFirstVector": 0.4041099548339844,
+    "containerLoadSeconds": 0.3508859872817993,
+    "dimension": 1024,
+    "first8": [
+     -0.03638136386871338,
+     -0.06737479567527771,
+     -0.01736966334283352,
+     0.04233374446630478,
+     0.034020934253931046,
+     0.01938372291624546,
+     -0.060960590839385986,
+     0.03738197684288025
+    ],
+    "thermalState": "nominal",
+    "gpuMemoryConfig": {
+     "cacheLimitMiB": 15564.79999923706,
+     "cacheLimitOverridden": false,
+     "cacheLimitRequestedMiB": null,
+     "memoryLimitMiB": 15564.79999923706
+    },
+    "memory": {
+     "footprintMiB": 751.3292465209961,
+     "gpuActiveMiB": 603.7842712402344,
+     "gpuCacheMiB": 13.05489730834961,
+     "gpuPeakMiB": 616.8158187866211,
+     "label": "after-first-vector",
+     "peakFootprintMiB": 751.3292465209961,
+     "peakResidentMiB": 762.296875,
+     "residentMiB": 747.515625,
+     "sinceProcessStartSeconds": 0.4049649238586426,
+     "thermalState": "nominal"
+    },
+    "timeMinusL": {
+     "peakResidentBytes": 799326208,
+     "peakFootprintBytes": 787940504,
+     "realSeconds": 0.42,
+     "peakResidentMiB": 762.296875,
+     "peakResidentGiB": 0.7444305419921875,
+     "peakFootprintMiB": 751.4386215209961,
+     "peakFootprintGiB": 0.7338267788290977
+    },
+    "sourceFiles": [
+     "air_embed_3.json",
+     "air_embed_3.err"
+    ]
+   },
+   {
+    "run": 4,
+    "secondsFromProcessStartToFirstVector": 0.3976399898529053,
+    "containerLoadSeconds": 0.3491039276123047,
+    "dimension": 1024,
+    "first8": [
+     -0.03638136386871338,
+     -0.06737479567527771,
+     -0.01736966334283352,
+     0.04233374446630478,
+     0.034020934253931046,
+     0.01938372291624546,
+     -0.060960590839385986,
+     0.03738197684288025
+    ],
+    "thermalState": "nominal",
+    "gpuMemoryConfig": {
+     "cacheLimitMiB": 15564.79999923706,
+     "cacheLimitOverridden": false,
+     "cacheLimitRequestedMiB": null,
+     "memoryLimitMiB": 15564.79999923706
+    },
+    "memory": {
+     "footprintMiB": 751.4386215209961,
+     "gpuActiveMiB": 603.7842712402344,
+     "gpuCacheMiB": 13.05489730834961,
+     "gpuPeakMiB": 616.8158187866211,
+     "label": "after-first-vector",
+     "peakFootprintMiB": 751.4386215209961,
+     "peakResidentMiB": 762.375,
+     "residentMiB": 747.625,
+     "sinceProcessStartSeconds": 0.3985089063644409,
+     "thermalState": "nominal"
+    },
+    "timeMinusL": {
+     "peakResidentBytes": 799408128,
+     "peakFootprintBytes": 788006040,
+     "realSeconds": 0.41,
+     "peakResidentMiB": 762.375,
+     "peakResidentGiB": 0.7445068359375,
+     "peakFootprintMiB": 751.5011215209961,
+     "peakFootprintGiB": 0.7338878139853477
+    },
+    "sourceFiles": [
+     "air_embed_4.json",
+     "air_embed_4.err"
+    ]
+   },
+   {
+    "run": 5,
+    "secondsFromProcessStartToFirstVector": 0.402912974357605,
+    "containerLoadSeconds": 0.3528560400009155,
+    "dimension": 1024,
+    "first8": [
+     -0.03638136386871338,
+     -0.06737479567527771,
+     -0.01736966334283352,
+     0.04233374446630478,
+     0.034020934253931046,
+     0.01938372291624546,
+     -0.060960590839385986,
+     0.03738197684288025
+    ],
+    "thermalState": "nominal",
+    "gpuMemoryConfig": {
+     "cacheLimitMiB": 15564.79999923706,
+     "cacheLimitOverridden": false,
+     "cacheLimitRequestedMiB": null,
+     "memoryLimitMiB": 15564.79999923706
+    },
+    "memory": {
+     "footprintMiB": 751.3448715209961,
+     "gpuActiveMiB": 603.7842712402344,
+     "gpuCacheMiB": 13.05489730834961,
+     "gpuPeakMiB": 616.8158187866211,
+     "label": "after-first-vector",
+     "peakFootprintMiB": 751.3448715209961,
+     "peakResidentMiB": 762.25,
+     "residentMiB": 747.53125,
+     "sinceProcessStartSeconds": 0.40379297733306885,
+     "thermalState": "nominal"
+    },
+    "timeMinusL": {
+     "peakResidentBytes": 799277056,
+     "peakFootprintBytes": 787940504,
+     "realSeconds": 0.42,
+     "peakResidentMiB": 762.25,
+     "peakResidentGiB": 0.744384765625,
+     "peakFootprintMiB": 751.4386215209961,
+     "peakFootprintGiB": 0.7338267788290977
+    },
+    "sourceFiles": [
+     "air_embed_5.json",
+     "air_embed_5.err"
+    ]
+   },
+   {
+    "run": 6,
+    "secondsFromProcessStartToFirstVector": 0.41621196269989014,
+    "containerLoadSeconds": 0.35245001316070557,
+    "dimension": 1024,
+    "first8": [
+     -0.03638136386871338,
+     -0.06737479567527771,
+     -0.01736966334283352,
+     0.04233374446630478,
+     0.034020934253931046,
+     0.01938372291624546,
+     -0.060960590839385986,
+     0.03738197684288025
+    ],
+    "thermalState": "nominal",
+    "gpuMemoryConfig": {
+     "cacheLimitMiB": 15564.79999923706,
+     "cacheLimitOverridden": false,
+     "cacheLimitRequestedMiB": null,
+     "memoryLimitMiB": 15564.79999923706
+    },
+    "memory": {
+     "footprintMiB": 751.3448944091797,
+     "gpuActiveMiB": 603.7842712402344,
+     "gpuCacheMiB": 13.05489730834961,
+     "gpuPeakMiB": 616.8158187866211,
+     "label": "after-first-vector",
+     "peakFootprintMiB": 751.3448944091797,
+     "peakResidentMiB": 762.375,
+     "residentMiB": 747.515625,
+     "sinceProcessStartSeconds": 0.41717398166656494,
+     "thermalState": "nominal"
+    },
+    "timeMinusL": {
+     "peakResidentBytes": 799408128,
+     "peakFootprintBytes": 787956912,
+     "realSeconds": 0.43,
+     "peakResidentMiB": 762.375,
+     "peakResidentGiB": 0.7445068359375,
+     "peakFootprintMiB": 751.4542694091797,
+     "peakFootprintGiB": 0.733842059969902
+    },
+    "sourceFiles": [
+     "air_embed_6.json",
+     "air_embed_6.err"
+    ]
+   },
+   {
+    "run": 7,
+    "secondsFromProcessStartToFirstVector": 0.39545202255249023,
+    "containerLoadSeconds": 0.34463202953338623,
+    "dimension": 1024,
+    "first8": [
+     -0.03638136386871338,
+     -0.06737479567527771,
+     -0.01736966334283352,
+     0.04233374446630478,
+     0.034020934253931046,
+     0.01938372291624546,
+     -0.060960590839385986,
+     0.03738197684288025
+    ],
+    "thermalState": "nominal",
+    "gpuMemoryConfig": {
+     "cacheLimitMiB": 15564.79999923706,
+     "cacheLimitOverridden": false,
+     "cacheLimitRequestedMiB": null,
+     "memoryLimitMiB": 15564.79999923706
+    },
+    "memory": {
+     "footprintMiB": 751.2667465209961,
+     "gpuActiveMiB": 603.7842712402344,
+     "gpuCacheMiB": 13.05489730834961,
+     "gpuPeakMiB": 616.8158187866211,
+     "label": "after-first-vector",
+     "peakFootprintMiB": 751.2667465209961,
+     "peakResidentMiB": 762.296875,
+     "residentMiB": 747.453125,
+     "sinceProcessStartSeconds": 0.39635908603668213,
+     "thermalState": "nominal"
+    },
+    "timeMinusL": {
+     "peakResidentBytes": 799326208,
+     "peakFootprintBytes": 787825816,
+     "realSeconds": 0.41,
+     "peakResidentMiB": 762.296875,
+     "peakResidentGiB": 0.7444305419921875,
+     "peakFootprintMiB": 751.3292465209961,
+     "peakFootprintGiB": 0.7337199673056602
+    },
+    "sourceFiles": [
+     "air_embed_7.json",
+     "air_embed_7.err"
+    ]
+   },
+   {
+    "run": 8,
+    "secondsFromProcessStartToFirstVector": 0.3938990831375122,
+    "containerLoadSeconds": 0.34249699115753174,
+    "dimension": 1024,
+    "first8": [
+     -0.03638136386871338,
+     -0.06737479567527771,
+     -0.01736966334283352,
+     0.04233374446630478,
+     0.034020934253931046,
+     0.01938372291624546,
+     -0.060960590839385986,
+     0.03738197684288025
+    ],
+    "thermalState": "nominal",
+    "gpuMemoryConfig": {
+     "cacheLimitMiB": 15564.79999923706,
+     "cacheLimitOverridden": false,
+     "cacheLimitRequestedMiB": null,
+     "memoryLimitMiB": 15564.79999923706
+    },
+    "memory": {
+     "footprintMiB": 743.5792922973633,
+     "gpuActiveMiB": 603.7842712402344,
+     "gpuCacheMiB": 13.05489730834961,
+     "gpuPeakMiB": 616.8158187866211,
+     "label": "after-first-vector",
+     "peakFootprintMiB": 743.5792922973633,
+     "peakResidentMiB": 762.34375,
+     "residentMiB": 739.71875,
+     "sinceProcessStartSeconds": 0.39477014541625977,
+     "thermalState": "nominal"
+    },
+    "timeMinusL": {
+     "peakResidentBytes": 799375360,
+     "peakFootprintBytes": 779814088,
+     "realSeconds": 0.41,
+     "peakResidentMiB": 762.34375,
+     "peakResidentGiB": 0.744476318359375,
+     "peakFootprintMiB": 743.6886672973633,
+     "peakFootprintGiB": 0.7262584641575813
+    },
+    "sourceFiles": [
+     "air_embed_8.json",
+     "air_embed_8.err"
+    ]
+   },
+   {
+    "run": 9,
+    "secondsFromProcessStartToFirstVector": 0.3962090015411377,
+    "containerLoadSeconds": 0.3464829921722412,
+    "dimension": 1024,
+    "first8": [
+     -0.03638136386871338,
+     -0.06737479567527771,
+     -0.01736966334283352,
+     0.04233374446630478,
+     0.034020934253931046,
+     0.01938372291624546,
+     -0.060960590839385986,
+     0.03738197684288025
+    ],
+    "thermalState": "nominal",
+    "gpuMemoryConfig": {
+     "cacheLimitMiB": 15564.79999923706,
+     "cacheLimitOverridden": false,
+     "cacheLimitRequestedMiB": null,
+     "memoryLimitMiB": 15564.79999923706
+    },
+    "memory": {
+     "footprintMiB": 751.3761672973633,
+     "gpuActiveMiB": 603.7842712402344,
+     "gpuCacheMiB": 13.05489730834961,
+     "gpuPeakMiB": 616.8158187866211,
+     "label": "after-first-vector",
+     "peakFootprintMiB": 751.3761672973633,
+     "peakResidentMiB": 762.328125,
+     "residentMiB": 747.53125,
+     "sinceProcessStartSeconds": 0.39706504344940186,
+     "thermalState": "nominal"
+    },
+    "timeMinusL": {
+     "peakResidentBytes": 799358976,
+     "peakFootprintBytes": 787956936,
+     "realSeconds": 0.41,
+     "peakResidentMiB": 762.328125,
+     "peakResidentGiB": 0.7444610595703125,
+     "peakFootprintMiB": 751.4542922973633,
+     "peakFootprintGiB": 0.7338420823216438
+    },
+    "sourceFiles": [
+     "air_embed_9.json",
+     "air_embed_9.err"
+    ]
+   },
+   {
+    "run": 10,
+    "secondsFromProcessStartToFirstVector": 0.40341484546661377,
+    "containerLoadSeconds": 0.35176193714141846,
+    "dimension": 1024,
+    "first8": [
+     -0.03638136386871338,
+     -0.06737479567527771,
+     -0.01736966334283352,
+     0.04233374446630478,
+     0.034020934253931046,
+     0.01938372291624546,
+     -0.060960590839385986,
+     0.03738197684288025
+    ],
+    "thermalState": "nominal",
+    "gpuMemoryConfig": {
+     "cacheLimitMiB": 15564.79999923706,
+     "cacheLimitOverridden": false,
+     "cacheLimitRequestedMiB": null,
+     "memoryLimitMiB": 15564.79999923706
+    },
+    "memory": {
+     "footprintMiB": 751.5792694091797,
+     "gpuActiveMiB": 603.7842712402344,
+     "gpuCacheMiB": 13.05489730834961,
+     "gpuPeakMiB": 616.8158187866211,
+     "label": "after-first-vector",
+     "peakFootprintMiB": 751.5792694091797,
+     "peakResidentMiB": 762.421875,
+     "residentMiB": 747.75,
+     "sinceProcessStartSeconds": 0.4042809009552002,
+     "thermalState": "nominal"
+    },
+    "timeMinusL": {
+     "peakResidentBytes": 799457280,
+     "peakFootprintBytes": 788169904,
+     "realSeconds": 0.42,
+     "peakResidentMiB": 762.421875,
+     "peakResidentGiB": 0.7445526123046875,
+     "peakFootprintMiB": 751.6573944091797,
+     "peakFootprintGiB": 0.7340404242277145
+    },
+    "sourceFiles": [
+     "air_embed_10.json",
+     "air_embed_10.err"
+    ]
+   }
+  ],
+  "hotMeanSeconds": 0.4010373830795288,
+  "hotMinSeconds": 0.3938990831375122,
+  "hotMaxSeconds": 0.41621196269989014,
+  "baselineHotMeanSeconds": 0.3907884120941162,
+  "peakFootprintMiB": 751.6573944091797,
+  "peakResidentMiB": 762.5,
+  "baselineSingleEmbedPeakFootprintMiB": 888.4387130737305,
+  "first8IdenticalAcrossRuns": true
+ },
+ "memoryAndThroughputByCacheLimit": {
+  "runOrder": [
+   "--cache-limit-mib 256",
+   "--cache-limit-mib 0",
+   "默认（不给该选项）"
+  ],
+  "rows": [
+   {
+    "cacheLimitMiB": "默认（不限）",
+    "requestedMiB": null,
+    "peakFootprintBytes": 5918655760,
+    "peakFootprintMiB": 5644.469985961914,
+    "peakFootprintGiB": 5.512177720665932,
+    "peakResidentBytes": 800899072,
+    "peakResidentMiB": 763.796875,
+    "gpuPeakMiB": 1245.1204376220703,
+    "gpuCacheAtEndMiB": 4893.766502380371,
+    "batchSize": 16,
+    "tokensPerBatch": 2809,
+    "textsPerSecond": 16.226894660451258,
+    "tokensPerSecond": 2848.834193825474,
+    "secondsPerBatchMean": 0.986017370223999,
+    "secondsPerBatchAll": [
+     0.9831769466400146,
+     0.9873049259185791,
+     0.9846190214157104,
+     0.986609935760498,
+     0.9883760213851929
+    ],
+    "cacheRelease": {
+     "footprintAfterMiB": 750.5949859619141,
+     "footprintBeforeMiB": 5644.469985961914,
+     "gpuCacheAfterMiB": 0,
+     "gpuCacheBeforeMiB": 4893.766502380371
+    },
+    "timeMinusL": {
+     "peakResidentBytes": 800899072,
+     "peakFootprintBytes": 5918655760,
+     "realSeconds": 10.61,
+     "peakResidentMiB": 763.796875,
+     "peakResidentGiB": 0.7458953857421875,
+     "peakFootprintMiB": 5644.469985961914,
+     "peakFootprintGiB": 5.512177720665932
+    },
+    "sourceFiles": [
+     "air_bench_default.json",
+     "air_bench_default_stderr.txt",
+     "sysmem_bench_default_before.txt",
+     "sysmem_bench_default_after.txt"
+    ]
+   },
+   {
+    "cacheLimitMiB": "256 MiB",
+    "requestedMiB": 256,
+    "peakFootprintBytes": 1730626760,
+    "peakFootprintMiB": 1650.4542922973633,
+    "peakFootprintGiB": 1.6117717698216438,
+    "peakResidentBytes": 800980992,
+    "peakResidentMiB": 763.875,
+    "gpuPeakMiB": 1245.1194610595703,
+    "gpuCacheAtEndMiB": 253.6574363708496,
+    "batchSize": 16,
+    "tokensPerBatch": 2809,
+    "textsPerSecond": 16.3234593340378,
+    "tokensPerSecond": 2865.7873293320117,
+    "secondsPerBatchMean": 0.9801843881607055,
+    "secondsPerBatchAll": [
+     0.9762909412384033,
+     0.9774359464645386,
+     0.9800670146942139,
+     0.9830189943313599,
+     0.9841090440750122
+    ],
+    "cacheRelease": {
+     "footprintAfterMiB": 745.4699172973633,
+     "footprintBeforeMiB": 1000.3136672973633,
+     "gpuCacheAfterMiB": 0,
+     "gpuCacheBeforeMiB": 253.6574363708496
+    },
+    "timeMinusL": {
+     "peakResidentBytes": 800980992,
+     "peakFootprintBytes": 1730626760,
+     "realSeconds": 10.69,
+     "peakResidentMiB": 763.875,
+     "peakResidentGiB": 0.7459716796875,
+     "peakFootprintMiB": 1650.4542922973633,
+     "peakFootprintGiB": 1.6117717698216438
+    },
+    "sourceFiles": [
+     "air_bench_cache256.json",
+     "air_bench_cache256_stderr.txt",
+     "sysmem_bench_cache256_before.txt",
+     "sysmem_bench_cache256_after.txt"
+    ]
+   },
+   {
+    "cacheLimitMiB": "0（关掉）",
+    "requestedMiB": 0,
+    "peakFootprintBytes": 1467204808,
+    "peakFootprintMiB": 1399.2355422973633,
+    "peakFootprintGiB": 1.3664409592747688,
+    "peakResidentBytes": 800882688,
+    "peakResidentMiB": 763.78125,
+    "gpuPeakMiB": 1245.1194610595703,
+    "gpuCacheAtEndMiB": 0,
+    "batchSize": 16,
+    "tokensPerBatch": 2809,
+    "textsPerSecond": 15.895020129769607,
+    "tokensPerSecond": 2790.5694715326767,
+    "secondsPerBatchMean": 1.0066045761108398,
+    "secondsPerBatchAll": [
+     0.9905929565429688,
+     1.010206937789917,
+     1.0116870403289795,
+     1.0098999738693237,
+     1.0106359720230103
+    ],
+    "cacheRelease": {
+     "footprintAfterMiB": 745.8136672973633,
+     "footprintBeforeMiB": 745.7980422973633,
+     "gpuCacheAfterMiB": 0,
+     "gpuCacheBeforeMiB": 0
+    },
+    "timeMinusL": {
+     "peakResidentBytes": 800882688,
+     "peakFootprintBytes": 1467204808,
+     "realSeconds": 10.77,
+     "peakResidentMiB": 763.78125,
+     "peakResidentGiB": 0.745880126953125,
+     "peakFootprintMiB": 1399.2355422973633,
+     "peakFootprintGiB": 1.3664409592747688
+    },
+    "sourceFiles": [
+     "air_bench_cache0.json",
+     "air_bench_cache0_stderr.txt",
+     "sysmem_bench_cache0_before.txt",
+     "sysmem_bench_cache0_after.txt"
+    ]
+   }
+  ],
+  "baselineRows": [
+   {
+    "cacheLimitMiB": "默认（= memoryLimit，实测不限）",
+    "peakFootprintBytes": 6664668480,
+    "peakFootprintMiB": 6355.923156738281,
+    "peakFootprintGiB": 6.206956207752228,
+    "peakResidentBytes": 803782656,
+    "peakResidentMiB": 766.546875,
+    "gpuPeakMiB": 1443.3079299926758,
+    "gpuCacheAtEndMiB": 5479.796802520752,
+    "textsPerSecond": 70.21812246264597,
+    "tokensPerSecond": 12327.669124848282,
+    "secondsPerBatchMean": 0.2278614044189453,
+    "timeMinusL": {
+     "peakResidentBytes": 803782656,
+     "peakFootprintBytes": 6664668480,
+     "realSeconds": 3.15,
+     "peakResidentMiB": 766.546875,
+     "peakFootprintMiB": 6355.923156738281
+    }
+   },
+   {
+    "cacheLimitMiB": 1024,
+    "peakFootprintBytes": 2896086264,
+    "peakFootprintMiB": 2761.9230880737305,
+    "peakFootprintGiB": 2.6971905156970024,
+    "peakResidentBytes": 804093952,
+    "peakResidentMiB": 766.84375,
+    "gpuPeakMiB": 1443.3108596801758,
+    "gpuCacheAtEndMiB": 1029.7061729431152,
+    "textsPerSecond": 68.5001220284341,
+    "tokensPerSecond": 12026.052673616963,
+    "secondsPerBatchMean": 0.23357622623443602,
+    "timeMinusL": {
+     "peakResidentBytes": 804093952,
+     "peakFootprintBytes": 2896086264,
+     "realSeconds": 3.09,
+     "peakResidentMiB": 766.84375,
+     "peakFootprintMiB": 2761.9230880737305
+    }
+   },
+   {
+    "cacheLimitMiB": 256,
+    "peakFootprintBytes": 2089157856,
+    "peakFootprintMiB": 1992.3761901855469,
+    "peakFootprintGiB": 1.9456798732280731,
+    "peakResidentBytes": 804257792,
+    "peakResidentMiB": 767,
+    "gpuPeakMiB": 1443.3108596801758,
+    "gpuCacheAtEndMiB": 260.61325454711914,
+    "textsPerSecond": 68.24774135915679,
+    "tokensPerSecond": 11981.744092366966,
+    "secondsPerBatchMean": 0.23443999290466308,
+    "timeMinusL": {
+     "peakResidentBytes": 804257792,
+     "peakFootprintBytes": 2089157856,
+     "realSeconds": 3.13,
+     "peakResidentMiB": 767.0,
+     "peakFootprintMiB": 1992.3761901855469
+    }
+   },
+   {
+    "cacheLimitMiB": 0,
+    "peakFootprintBytes": 1928365280,
+    "peakFootprintMiB": 1839.0324401855469,
+    "peakFootprintGiB": 1.7959301173686981,
+    "peakResidentBytes": 805076992,
+    "peakResidentMiB": 767.78125,
+    "gpuPeakMiB": 1443.3069534301758,
+    "gpuCacheAtEndMiB": 0,
+    "textsPerSecond": 65.73104274744934,
+    "tokensPerSecond": 11539.906192349075,
+    "secondsPerBatchMean": 0.2434161901473999,
+    "timeMinusL": {
+     "peakResidentBytes": 805076992,
+     "peakFootprintBytes": 1928365280,
+     "realSeconds": 3.2,
+     "peakResidentMiB": 767.78125,
+     "peakFootprintMiB": 1839.0324401855469
+    }
+   }
+  ],
+  "swapUsage": {
+   "beforeAll": "=== before cache256 2026-09-07T02:16:55Z ===\nFile I/O:\nPageins: 2183337 \nPageouts: 6755 \n\nSystem-wide memory free percentage: 83%\nvm.swapusage: total = 0.00M  used = 0.00M  free = 0.00M  (encrypted)\nPages free:                                    54097.\nPages active:                                 347404.\nPages inactive:                               437526.\nPages speculative:                              2303.\nPages throttled:                                   0.\nPages wired down:                              98568.\nPages purgeable:                               11195.\n",
+   "afterAll": "=== after default 2026-09-07T02:17:43Z ===\nFile I/O:\nPageins: 2194842 \nPageouts: 6855 \n\nSystem-wide memory free percentage: 80%\nvm.swapusage: total = 0.00M  used = 0.00M  free = 0.00M  (encrypted)\nPages free:                                   362959.\nPages active:                                 224584.\nPages inactive:                               223240.\nPages speculative:                              3085.\nPages throttled:                                   0.\nPages wired down:                              99461.\nPages purgeable:                                1215.\n"
+  },
+  "batchSizeOption": null,
+  "batchSizeNote": "bench 没有批大小选项（main.swift 只解析 --id/--dir/--out/--crosscheck-out/--cache-limit-mib）。Bench.swift 里批大小是写死的：throughput 用 corpus.throughput 的全部 16 条一次成批（batchSize = texts.count = 16）；determinism 用 batchSize 8 与 1；semantics 用 10；mrl 用 16。所以批 8 / 批 4 的 GPU 峰值拐点本轮测不了，要么给 bench 加选项，要么 M1 再补。"
+ },
+ "thermal": {
+  "method": "连续 606 s（约 10 分钟）循环跑 bench --cache-limit-mib 256，共 46 轮；每轮记 ProcessInfo.thermalState（进程起/终）与吞吐，并采样 pmset -g therm 与 memory_pressure。powermetrics 需要 sudo，未用。",
+  "totalSeconds": 606,
+  "runs": 46,
+  "perRun": [
+   {
+    "run": 1,
+    "thermalStateAtStart": "nominal",
+    "thermalStateAtEnd": "nominal",
+    "textsPerSecond": 16.32336920432748,
+    "tokensPerSecond": 2865.7715059347433,
+    "secondsPerBatchMean": 0.9801898002624512,
+    "peakFootprintMiB": 1650.3761901855469,
+    "totalSeconds": 10.197456955909729
+   },
+   {
+    "run": 2,
+    "thermalStateAtStart": "nominal",
+    "thermalStateAtEnd": "nominal",
+    "textsPerSecond": 16.162673961821437,
+    "tokensPerSecond": 2837.5594474222758,
+    "secondsPerBatchMean": 0.9899352073669434,
+    "peakFootprintMiB": 1649.6105880737305,
+    "totalSeconds": 10.397049069404602
+   },
+   {
+    "run": 3,
+    "thermalStateAtStart": "nominal",
+    "thermalStateAtEnd": "nominal",
+    "textsPerSecond": 15.945345719290064,
+    "tokensPerSecond": 2799.4047578428617,
+    "secondsPerBatchMean": 1.0034276008605958,
+    "peakFootprintMiB": 1650.0167922973633,
+    "totalSeconds": 10.443993926048279
+   },
+   {
+    "run": 4,
+    "thermalStateAtStart": "nominal",
+    "thermalStateAtEnd": "nominal",
+    "textsPerSecond": 15.375986934657709,
+    "tokensPerSecond": 2699.4467062158437,
+    "secondsPerBatchMean": 1.040583610534668,
+    "peakFootprintMiB": 1643.9855880737305,
+    "totalSeconds": 10.780560970306396
+   },
+   {
+    "run": 5,
+    "thermalStateAtStart": "nominal",
+    "thermalStateAtEnd": "nominal",
+    "textsPerSecond": 15.700497104260881,
+    "tokensPerSecond": 2756.418522866801,
+    "secondsPerBatchMean": 1.0190760135650634,
+    "peakFootprintMiB": 1644.2980422973633,
+    "totalSeconds": 10.70116102695465
+   },
+   {
+    "run": 6,
+    "thermalStateAtStart": "nominal",
+    "thermalStateAtEnd": "nominal",
+    "textsPerSecond": 15.801117751988652,
+    "tokensPerSecond": 2774.083735333508,
+    "secondsPerBatchMean": 1.0125865936279297,
+    "peakFootprintMiB": 1644.0636444091797,
+    "totalSeconds": 10.726120114326477
+   },
+   {
+    "run": 7,
+    "thermalStateAtStart": "nominal",
+    "thermalStateAtEnd": "nominal",
+    "textsPerSecond": 15.745260229260593,
+    "tokensPerSecond": 2764.2772489995627,
+    "secondsPerBatchMean": 1.016178822517395,
+    "peakFootprintMiB": 1649.8449172973633,
+    "totalSeconds": 10.758157849311829
+   },
+   {
+    "run": 8,
+    "thermalStateAtStart": "nominal",
+    "thermalStateAtEnd": "nominal",
+    "textsPerSecond": 15.723301202212104,
+    "tokensPerSecond": 2760.4220673133623,
+    "secondsPerBatchMean": 1.0175980091094972,
+    "peakFootprintMiB": 1649.5167694091797,
+    "totalSeconds": 10.820879101753235
+   },
+   {
+    "run": 9,
+    "thermalStateAtStart": "nominal",
+    "thermalStateAtEnd": "nominal",
+    "textsPerSecond": 15.696846772651687,
+    "tokensPerSecond": 2755.777661523662,
+    "secondsPerBatchMean": 1.0193130016326903,
+    "peakFootprintMiB": 1649.8605422973633,
+    "totalSeconds": 10.89659595489502
+   },
+   {
+    "run": 10,
+    "thermalStateAtStart": "nominal",
+    "thermalStateAtEnd": "nominal",
+    "textsPerSecond": 15.284031813188301,
+    "tokensPerSecond": 2683.302835202871,
+    "secondsPerBatchMean": 1.04684419631958,
+    "peakFootprintMiB": 1643.7980194091797,
+    "totalSeconds": 10.912333130836487
+   },
+   {
+    "run": 11,
+    "thermalStateAtStart": "nominal",
+    "thermalStateAtEnd": "nominal",
+    "textsPerSecond": 15.09601982459707,
+    "tokensPerSecond": 2650.294980455823,
+    "secondsPerBatchMean": 1.0598820209503175,
+    "peakFootprintMiB": 1644.0948944091797,
+    "totalSeconds": 11.046196937561035
+   },
+   {
+    "run": 12,
+    "thermalStateAtStart": "nominal",
+    "thermalStateAtEnd": "fair",
+    "textsPerSecond": 14.210436989874845,
+    "tokensPerSecond": 2494.8198440349024,
+    "secondsPerBatchMean": 1.125933003425598,
+    "peakFootprintMiB": 1636.3917694091797,
+    "totalSeconds": 11.488184094429016
+   },
+   {
+    "run": 13,
+    "thermalStateAtStart": "fair",
+    "thermalStateAtEnd": "fair",
+    "textsPerSecond": 15.260887364103375,
+    "tokensPerSecond": 2679.2395378603987,
+    "secondsPerBatchMean": 1.0484318256378173,
+    "peakFootprintMiB": 1649.8136901855469,
+    "totalSeconds": 10.895497918128967
+   },
+   {
+    "run": 14,
+    "thermalStateAtStart": "fair",
+    "thermalStateAtEnd": "fair",
+    "textsPerSecond": 14.816880808551288,
+    "tokensPerSecond": 2601.2886369512858,
+    "secondsPerBatchMean": 1.079849410057068,
+    "peakFootprintMiB": 1649.2668151855469,
+    "totalSeconds": 11.142453074455261
+   },
+   {
+    "run": 15,
+    "thermalStateAtStart": "fair",
+    "thermalStateAtEnd": "fair",
+    "textsPerSecond": 14.73800550144733,
+    "tokensPerSecond": 2587.4410908478467,
+    "secondsPerBatchMean": 1.085628581047058,
+    "peakFootprintMiB": 1649.6418151855469,
+    "totalSeconds": 11.100213170051575
+   },
+   {
+    "run": 16,
+    "thermalStateAtStart": "fair",
+    "thermalStateAtEnd": "fair",
+    "textsPerSecond": 14.37531627944837,
+    "tokensPerSecond": 2523.766464310654,
+    "secondsPerBatchMean": 1.1130189895629883,
+    "peakFootprintMiB": 1649.5011672973633,
+    "totalSeconds": 11.255547046661377
+   },
+   {
+    "run": 17,
+    "thermalStateAtStart": "fair",
+    "thermalStateAtEnd": "fair",
+    "textsPerSecond": 14.199810522104407,
+    "tokensPerSecond": 2492.9542347869547,
+    "secondsPerBatchMean": 1.126775598526001,
+    "peakFootprintMiB": 1641.8136672973633,
+    "totalSeconds": 11.512256979942322
+   },
+   {
+    "run": 18,
+    "thermalStateAtStart": "fair",
+    "thermalStateAtEnd": "fair",
+    "textsPerSecond": 13.943243700506855,
+    "tokensPerSecond": 2447.9107221702347,
+    "secondsPerBatchMean": 1.1475091695785522,
+    "peakFootprintMiB": 1649.8292922973633,
+    "totalSeconds": 11.73906409740448
+   },
+   {
+    "run": 19,
+    "thermalStateAtStart": "fair",
+    "thermalStateAtEnd": "fair",
+    "textsPerSecond": 13.701846769067808,
+    "tokensPerSecond": 2405.5304733944668,
+    "secondsPerBatchMean": 1.1677258014678955,
+    "peakFootprintMiB": 1641.7355194091797,
+    "totalSeconds": 11.88649308681488
+   },
+   {
+    "run": 20,
+    "thermalStateAtStart": "fair",
+    "thermalStateAtEnd": "fair",
+    "textsPerSecond": 13.421959096792264,
+    "tokensPerSecond": 2356.392693930592,
+    "secondsPerBatchMean": 1.1920763492584228,
+    "peakFootprintMiB": 1649.9698944091797,
+    "totalSeconds": 12.072963953018188
+   },
+   {
+    "run": 21,
+    "thermalStateAtStart": "fair",
+    "thermalStateAtEnd": "fair",
+    "textsPerSecond": 13.396890754801108,
+    "tokensPerSecond": 2351.9916331397694,
+    "secondsPerBatchMean": 1.1943069696426392,
+    "peakFootprintMiB": 1649.6886444091797,
+    "totalSeconds": 12.168195009231567
+   },
+   {
+    "run": 22,
+    "thermalStateAtStart": "fair",
+    "thermalStateAtEnd": "fair",
+    "textsPerSecond": 12.883032467231171,
+    "tokensPerSecond": 2261.777387528273,
+    "secondsPerBatchMean": 1.241943621635437,
+    "peakFootprintMiB": 1649.5948944091797,
+    "totalSeconds": 12.395794034004211
+   },
+   {
+    "run": 23,
+    "thermalStateAtStart": "fair",
+    "thermalStateAtEnd": "fair",
+    "textsPerSecond": 12.590967858623046,
+    "tokensPerSecond": 2210.5017946795083,
+    "secondsPerBatchMean": 1.270752191543579,
+    "peakFootprintMiB": 1644.1886901855469,
+    "totalSeconds": 12.924533009529114
+   },
+   {
+    "run": 24,
+    "thermalStateAtStart": "fair",
+    "thermalStateAtEnd": "fair",
+    "textsPerSecond": 12.744622702740973,
+    "tokensPerSecond": 2237.477823249962,
+    "secondsPerBatchMean": 1.2554314374923705,
+    "peakFootprintMiB": 1644.0011901855469,
+    "totalSeconds": 12.777022123336792
+   },
+   {
+    "run": 25,
+    "thermalStateAtStart": "fair",
+    "thermalStateAtEnd": "fair",
+    "textsPerSecond": 12.525210702769348,
+    "tokensPerSecond": 2198.9573040049436,
+    "secondsPerBatchMean": 1.277423620223999,
+    "peakFootprintMiB": 1644.2199172973633,
+    "totalSeconds": 12.798224091529846
+   },
+   {
+    "run": 26,
+    "thermalStateAtStart": "fair",
+    "thermalStateAtEnd": "fair",
+    "textsPerSecond": 12.876716087473584,
+    "tokensPerSecond": 2260.668468107081,
+    "secondsPerBatchMean": 1.2425528287887573,
+    "peakFootprintMiB": 1643.8605194091797,
+    "totalSeconds": 12.651679039001465
+   },
+   {
+    "run": 27,
+    "thermalStateAtStart": "fair",
+    "thermalStateAtEnd": "fair",
+    "textsPerSecond": 12.940898834396924,
+    "tokensPerSecond": 2271.93655161381,
+    "secondsPerBatchMean": 1.2363901615142823,
+    "peakFootprintMiB": 1643.9855422973633,
+    "totalSeconds": 12.51250696182251
+   },
+   {
+    "run": 28,
+    "thermalStateAtStart": "fair",
+    "thermalStateAtEnd": "fair",
+    "textsPerSecond": 12.653014365383271,
+    "tokensPerSecond": 2221.3948345226004,
+    "secondsPerBatchMean": 1.264520812034607,
+    "peakFootprintMiB": 1635.6573944091797,
+    "totalSeconds": 12.69203495979309
+   },
+   {
+    "run": 29,
+    "thermalStateAtStart": "fair",
+    "thermalStateAtEnd": "fair",
+    "textsPerSecond": 12.771824364668534,
+    "tokensPerSecond": 2242.2534150221195,
+    "secondsPerBatchMean": 1.2527575969696045,
+    "peakFootprintMiB": 1644.4074172973633,
+    "totalSeconds": 13.156111121177673
+   },
+   {
+    "run": 30,
+    "thermalStateAtStart": "fair",
+    "thermalStateAtEnd": "fair",
+    "textsPerSecond": 12.47144611197805,
+    "tokensPerSecond": 2189.5182580341466,
+    "secondsPerBatchMean": 1.282930612564087,
+    "peakFootprintMiB": 1644.1105422973633,
+    "totalSeconds": 12.820154905319214
+   },
+   {
+    "run": 31,
+    "thermalStateAtStart": "fair",
+    "thermalStateAtEnd": "fair",
+    "textsPerSecond": 9.718506253481673,
+    "tokensPerSecond": 1706.2052541268763,
+    "secondsPerBatchMean": 1.6463435411453247,
+    "peakFootprintMiB": 1636.3292922973633,
+    "totalSeconds": 15.00511610507965
+   },
+   {
+    "run": 32,
+    "thermalStateAtStart": "fair",
+    "thermalStateAtEnd": "fair",
+    "textsPerSecond": 12.231912530083157,
+    "tokensPerSecond": 2147.4651435627243,
+    "secondsPerBatchMean": 1.3080538272857667,
+    "peakFootprintMiB": 1649.5480194091797,
+    "totalSeconds": 13.19003689289093
+   },
+   {
+    "run": 33,
+    "thermalStateAtStart": "fair",
+    "thermalStateAtEnd": "fair",
+    "textsPerSecond": 12.057412004017122,
+    "tokensPerSecond": 2116.829394955256,
+    "secondsPerBatchMean": 1.3269845962524414,
+    "peakFootprintMiB": 1641.5011444091797,
+    "totalSeconds": 13.353514909744263
+   },
+   {
+    "run": 34,
+    "thermalStateAtStart": "fair",
+    "thermalStateAtEnd": "fair",
+    "textsPerSecond": 12.28863325763302,
+    "tokensPerSecond": 2157.4231762931972,
+    "secondsPerBatchMean": 1.3020162343978883,
+    "peakFootprintMiB": 1649.9230422973633,
+    "totalSeconds": 13.13310992717743
+   },
+   {
+    "run": 35,
+    "thermalStateAtStart": "fair",
+    "thermalStateAtEnd": "fair",
+    "textsPerSecond": 10.909253469635365,
+    "tokensPerSecond": 1915.2558122628586,
+    "secondsPerBatchMean": 1.466644811630249,
+    "peakFootprintMiB": 1649.6417694091797,
+    "totalSeconds": 14.526492953300476
+   },
+   {
+    "run": 36,
+    "thermalStateAtStart": "fair",
+    "thermalStateAtEnd": "fair",
+    "textsPerSecond": 8.338565558052322,
+    "tokensPerSecond": 1463.9394157855609,
+    "secondsPerBatchMean": 1.9187952518463134,
+    "peakFootprintMiB": 1646.4230422973633,
+    "totalSeconds": 20.575425148010254
+   },
+   {
+    "run": 37,
+    "thermalStateAtStart": "fair",
+    "thermalStateAtEnd": "fair",
+    "textsPerSecond": 9.281744695474716,
+    "tokensPerSecond": 1629.5263030992799,
+    "secondsPerBatchMean": 1.7238138437271118,
+    "peakFootprintMiB": 1657.0793380737305,
+    "totalSeconds": 20.263036966323853
+   },
+   {
+    "run": 38,
+    "thermalStateAtStart": "fair",
+    "thermalStateAtEnd": "fair",
+    "textsPerSecond": 11.478091397290832,
+    "tokensPerSecond": 2015.1224209368718,
+    "secondsPerBatchMean": 1.3939599752426148,
+    "peakFootprintMiB": 1644.2199172973633,
+    "totalSeconds": 14.627907872200012
+   },
+   {
+    "run": 39,
+    "thermalStateAtStart": "fair",
+    "thermalStateAtEnd": "fair",
+    "textsPerSecond": 9.426845534314179,
+    "tokensPerSecond": 1655.000569118033,
+    "secondsPerBatchMean": 1.6972803831100465,
+    "peakFootprintMiB": 1641.8761672973633,
+    "totalSeconds": 15.642189979553223
+   },
+   {
+    "run": 40,
+    "thermalStateAtStart": "fair",
+    "thermalStateAtEnd": "fair",
+    "textsPerSecond": 9.251669409357692,
+    "tokensPerSecond": 1624.2462106803598,
+    "secondsPerBatchMean": 1.729417610168457,
+    "peakFootprintMiB": 1662.0480422973633,
+    "totalSeconds": 17.70782208442688
+   },
+   {
+    "run": 41,
+    "thermalStateAtStart": "fair",
+    "thermalStateAtEnd": "fair",
+    "textsPerSecond": 7.77675426341899,
+    "tokensPerSecond": 1365.3064203714964,
+    "secondsPerBatchMean": 2.057413601875305,
+    "peakFootprintMiB": 1621.1418380737305,
+    "totalSeconds": 18.864871978759766
+   },
+   {
+    "run": 42,
+    "thermalStateAtStart": "fair",
+    "thermalStateAtEnd": "fair",
+    "textsPerSecond": 11.76687750090927,
+    "tokensPerSecond": 2065.8224312533835,
+    "secondsPerBatchMean": 1.3597490072250367,
+    "peakFootprintMiB": 1643.9386901855469,
+    "totalSeconds": 15.12197494506836
+   },
+   {
+    "run": 43,
+    "thermalStateAtStart": "fair",
+    "thermalStateAtEnd": "fair",
+    "textsPerSecond": 10.763429919710928,
+    "tokensPerSecond": 1889.6546652792497,
+    "secondsPerBatchMean": 1.4865149974822998,
+    "peakFootprintMiB": 1644.1105422973633,
+    "totalSeconds": 15.106235980987549
+   },
+   {
+    "run": 44,
+    "thermalStateAtStart": "fair",
+    "thermalStateAtEnd": "fair",
+    "textsPerSecond": 11.639815920939492,
+    "tokensPerSecond": 2043.5151826199394,
+    "secondsPerBatchMean": 1.3745921850204468,
+    "peakFootprintMiB": 1641.7355422973633,
+    "totalSeconds": 14.691063046455383
+   },
+   {
+    "run": 45,
+    "thermalStateAtStart": "fair",
+    "thermalStateAtEnd": "fair",
+    "textsPerSecond": 10.116916204405268,
+    "tokensPerSecond": 1776.1511011358998,
+    "secondsPerBatchMean": 1.5815095901489258,
+    "peakFootprintMiB": 1636.3917694091797,
+    "totalSeconds": 16.479705095291138
+   },
+   {
+    "run": 46,
+    "thermalStateAtStart": "fair",
+    "thermalStateAtEnd": "fair",
+    "textsPerSecond": 8.467120966749365,
+    "tokensPerSecond": 1486.5089247249352,
+    "secondsPerBatchMean": 1.8896623849868774,
+    "peakFootprintMiB": 1643.6262130737305,
+    "totalSeconds": 16.97810208797455
+   }
+  ],
+  "firstFairRun": 12,
+  "firstFairAtMinutes": 2.0,
+  "statesObserved": [
+   "fair",
+   "nominal"
+  ],
+  "seriousOrCritical": false,
+  "pmsetThermNote": "全程 pmset -g therm 始终是 No thermal warning level has been recorded（该接口未记录任何降频事件）。",
+  "throughputFirst5Mean": 15.901574584871515,
+  "throughputLast5Mean": 10.550832102542865,
+  "throughputMin": 7.77675426341899,
+  "recoveryAfter5MinIdle": {
+   "textsPerSecond": 15.576490544044427,
+   "tokensPerSecond": 2734.6476211388,
+   "thermalStateAtStart": "nominal",
+   "peakFootprintMiB": 1655.5168151855469
+  },
+  "log": "~/Library/Caches/brosis-build/e9/results/air/thermal_10min.log"
+ },
+ "vectorConsistency": {
+  "sameMachineSameBatch": {
+   "identicalSameBatchSize": 8,
+   "maxAbsDiffSameBatchSize": 0,
+   "identicalAcrossBatchSize": 0,
+   "maxAbsDiffAcrossBatchSize": 0.0004041716456413269
+  },
+  "acrossCacheLimits": "三档缓冲池的 --crosscheck-out 向量（20 条 × 1024 维）两两逐位相同，最大绝对差 0",
+  "crossMachineFirst8": {
+   "maxFirst8": [
+    -0.03638136386871338,
+    -0.06737479567527771,
+    -0.01736966334283352,
+    0.04233374446630478,
+    0.034020934253931046,
+    0.01938372291624546,
+    -0.060960590839385986,
+    0.03738197684288025
+   ],
+   "airFirst8": [
+    -0.03638136386871338,
+    -0.06737479567527771,
+    -0.01736966334283352,
+    0.04233374446630478,
+    0.034020934253931046,
+    0.01938372291624546,
+    -0.060960590839385986,
+    0.03738197684288025
+   ],
+   "bitIdentical": true,
+   "maxAbsDiff": 0.0,
+   "note": "家里机的结果 JSON 里只有 embed 向量的前 8 维，没有整份向量文件，所以只能比前 8 维。"
+  },
+  "crossMachineCosines": {
+   "groups": {
+    "zh_synonym": {
+     "maxAbsDiff": 0.0,
+     "bitIdentical": true,
+     "maxCosineMean": 0.8678223805254011,
+     "airCosineMean": 0.8678223805254011
+    },
+    "en_synonym": {
+     "maxAbsDiff": 0.0,
+     "bitIdentical": true,
+     "maxCosineMean": 0.8435486444958054,
+     "airCosineMean": 0.8435486444958054
+    },
+    "cross_lingual": {
+     "maxAbsDiff": 0.0,
+     "bitIdentical": true,
+     "maxCosineMean": 0.8148478818463565,
+     "airCosineMean": 0.8148478818463565
+    },
+    "unrelated": {
+     "maxAbsDiff": 0.0,
+     "bitIdentical": true,
+     "maxCosineMean": 0.23601705926902036,
+     "airCosineMean": 0.23601705926902036
+    }
+   },
+   "maxAbsDiffAll40Pairs": 0.0,
+   "note": "40 对余弦是 1024 维整向量的内积，跨机器逐位相同，等于间接证明整向量一致。"
+  },
+  "crossMachineMRL": {
+   "baseline": {
+    "256": {
+     "queriesWithPerfectTop10": 11,
+     "recallAt10Mean": 0.9024999999999999,
+     "recallAt10Min": 0.8,
+     "top1AgreementRate": 0.55
+    },
+    "512": {
+     "queriesWithPerfectTop10": 18,
+     "recallAt10Mean": 0.9249999999999998,
+     "recallAt10Min": 0.6,
+     "top1AgreementRate": 0.675
+    }
+   },
+   "air": {
+    "256": {
+     "queriesWithPerfectTop10": 11,
+     "recallAt10Mean": 0.9024999999999999,
+     "recallAt10Min": 0.8,
+     "top1AgreementRate": 0.55
+    },
+    "512": {
+     "queriesWithPerfectTop10": 18,
+     "recallAt10Mean": 0.9249999999999998,
+     "recallAt10Min": 0.6,
+     "top1AgreementRate": 0.675
+    }
+   },
+   "identical": true
+  },
+  "crossMachineDeterminism": {
+   "baseline": {
+    "dimension": 1024,
+    "identicalAcrossBatchSize": 0,
+    "identicalSameBatchSize": 8,
+    "maxAbsDiffAcrossBatchSize": 0.0004041716456413269,
+    "maxAbsDiffSameBatchSize": 0,
+    "textCount": 8
+   },
+   "air": {
+    "dimension": 1024,
+    "identicalAcrossBatchSize": 0,
+    "identicalSameBatchSize": 8,
+    "maxAbsDiffAcrossBatchSize": 0.0004041716456413269,
+    "maxAbsDiffSameBatchSize": 0,
+    "textCount": 8
+   },
+   "identical": true
+  },
+  "pendingFullVectorFile": "本机导出的整向量在 ~/Library/Caches/brosis-build/e9/results/air/air_vec_cache256.json（20 条 × 1024 维）；家里机那份 crosscheck 向量文件不在本机，整向量逐位对照待补。"
+ },
+ "disk": {
+  "appFindBytes": 45213881,
+  "appDuBytes": 45228032,
+  "modelFindBytes": 649088992,
+  "modelDuBytes": 661905408,
+  "sumFindBytes": 694302873,
+  "sumFindGiB": 0.6466199392452836,
+  "detail": "=== app: find -type f 求和 ===\n6 个文件，45213881 字节 = 43.1193 MiB\n=== app: du -sk ===\n44168 KiB = 43.1328 MiB\n=== 模型: find -type f 求和 ===\n16 个文件，649088992 字节 = 619.0195 MiB = 0.6045 GiB\n=== 模型: du -sk ===\n646392 KiB = 631.2422 MiB\n=== 模型目录明细 ===\n633152041 ~/Library/Application Support/brosis-m0/models/Qwen3-Embedding-0.6B-8bit/model.safetensors\n11423705 ~/Library/Application Support/brosis-m0/models/Qwen3-Embedding-0.6B-8bit/tokenizer.json\n2776833 ~/Library/Application Support/brosis-m0/models/Qwen3-Embedding-0.6B-8bit/vocab.json\n1671853 ~/Library/Application Support/brosis-m0/models/Qwen3-Embedding-0.6B-8bit/merges.txt\n49731 ~/Library/Application Support/brosis-m0/models/Qwen3-Embedding-0.6B-8bit/model.safetensors.index.json\n5404 ~/Library/Application Support/brosis-m0/models/Qwen3-Embedding-0.6B-8bit/tokenizer_config.json\n4116 ~/Library/Application Support/brosis-m0/models/Qwen3-Embedding-0.6B-8bit/chat_template.jinja\n1570 ~/Library/Application Support/brosis-m0/models/Qwen3-Embedding-0.6B-8bit/.gitattributes\n857 ~/Library/Application Support/brosis-m0/models/Qwen3-Embedding-0.6B-8bit/config.json\n707 ~/Library/Application Support/brosis-m0/models/Qwen3-Embedding-0.6B-8bit/added_tokens.json\n613 ~/Library/Application Support/brosis-m0/models/Qwen3-Embedding-0.6B-8bit/special_tokens_map.json\n493 ~/Library/Application Support/brosis-m0/models/Qwen3-Embedding-0.6B-8bit/README.md\n388 ~/Library/Application Support/brosis-m0/models/Qwen3-Embedding-0.6B-8bit/installed.json\n349 ~/Library/Application Support/brosis-m0/models/Qwen3-Embedding-0.6B-8bit/modules.json\n215 ~/Library/Application Support/brosis-m0/models/Qwen3-Embedding-0.6B-8bit/config_sentence_transformers.json\n117 ~/Library/Application Support/brosis-m0/models/Qwen3-Embedding-0.6B-8bit/generation_config.json\n=== app + 模型 合计（find 口径） ===\napp 45213881 + 模型 649088992 = 694302873 字节 = 662.14 MiB = 0.6466 GiB\n=== 可用磁盘 ===\nFilesystem     1024-blocks      Used Available Capacity iused     ifree %iused  Mounted on\n/dev/disk3s1s1   482797652  12341812  69922408    16%  458732 699224080    0%   /\n/dev/disk3s5     482797652 390115448  69922408    85% 2600665 699224080    0%   /System/Volumes/Data\n=== 与 D7 的 10 GB 原文配额一起算 ===\n可用 66.68 GiB\nD7 原文配额 10 GB(10^9) = 9.313 GiB\napp+模型 0.6465 GiB + 10 GB 配额后仍余 56.72 GiB\n=== 顺带：镜像续传测试留下的第二份模型（可删） ===\n646392\t~/Library/Caches/brosis-build/e9/models-mirror\n"
+ },
+ "notDone": {
+  "coldStart": "需要 sudo purge / 重启，本机无 sudo（硬约束）",
+  "energy": "需要 sudo powermetrics，未做",
+  "signing": "钥匙串没有 Developer ID Application (<TEAMID>)，本轮 SKIP_SIGN=1",
+  "notarizationAndGatekeeper": "清单第 6 项：需要 Developer ID 证书 + notarytool 凭据，未做；MDM 拦截也未验证",
+  "batch8And4": "bench 没有批大小选项，见 memoryAndThroughputByCacheLimit.batchSizeNote",
+  "crossMachineFullVectorDiff": "家里机没导出整向量文件，只能比前 8 维与 40 对余弦",
+  "generate": "D19 未批准下载生成模型，未跑 generate"
+ },
+ "proxy": "=== env proxy ===\nHTTP_PROXY=http://127.0.0.1:<port>\nHTTPS_PROXY=http://127.0.0.1:<port>\nNO_PROXY=localhost,127.0.0.1,::1,.local\n=== scutil --proxy ===\n<dictionary> {\n  ExceptionsList : <array> {\n    0 : 192.168.0.0/16\n    1 : captive.apple.com\n    2 : 10.8.8.89.dns\n    3 : localhost\n    4 : 10.0.0.0/8\n    5 : *.local\n    6 : 172.16.0.0/12\n    7 : 198.18.0.0/15\n    8 : 10.8.8.87.dns\n  }\n  ExcludeSimpleHostnames : 1\n  FTPPassive : 1\n  HTTPEnable : 1\n  HTTPPort : <port>\n  HTTPProxy : 127.0.0.1\n  HTTPSEnable : 1\n  HTTPSPort : <port>\n  HTTPSProxy : 127.0.0.1\n  ProxyAutoConfigEnable : 0\n  ProxyAutoDiscoveryEnable : 0\n  SOCKSEnable : 0\n}\n"
+}

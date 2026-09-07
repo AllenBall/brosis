@@ -1,0 +1,15 @@
+{
+  "originHash" : "47cbfc1829280f8f48c7cb9a50940ed5f8614beb6cb3a570bb4f4f4d1963cdce",
+  "pins" : [
+    {
+      "identity" : "swift-sqlcipher",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/skiptools/swift-sqlcipher.git",
+      "state" : {
+        "revision" : "cf5c89ad63146db3a4258a1e26da4d2b3fa4a087",
+        "version" : "1.9.0"
+      }
+    }
+  ],
+  "version" : 3
+}
