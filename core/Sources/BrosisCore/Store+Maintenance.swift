@@ -7,8 +7,8 @@ extension Store {
     /// 顺序：
     /// 1. FTS 对账——孤儿 FTS 行删掉，缺失的 FTS 行按「折叠后再 bigram」补写
     ///    （必须与写入侧同一个 `TextPipeline.bigramForIndex`，否则补出来的行对不上）；
-    /// 2. `capture_stats` 与 `mcp_audit` 按各自的保留天数滚动清理
-    ///    （遥测与调用审计都不是证据，不进删除审计）；
+    /// 2. `capture_stats`、`mcp_audit` 与 `capture_audit` 按各自的保留天数滚动清理
+    ///    （遥测、调用审计、采样审计都不是证据，不进删除审计）；
     /// 3. `wal_checkpoint(TRUNCATE)`：先把 WAL 落回主库，再量体积才有意义；
     /// 4. `incremental_vacuum`：回收 `auto_vacuum = INCREMENTAL` 攒下的空闲页；
     /// 5. 再 checkpoint 一次，把 vacuum 产生的 WAL 也截掉。
@@ -64,6 +64,13 @@ extension Store {
                 let cutoff = nowMS - Int64(options.mcpAuditRetentionDays) * 86_400_000
                 auditPruned = try conn.run("DELETE FROM mcp_audit WHERE ts < ?;", [.int(cutoff)])
             }
+            var captureAuditPruned = 0
+            if options.captureAuditRetentionDays > 0 {
+                let nowMS = now ?? Int64(Date().timeIntervalSince1970 * 1000)
+                let cutoff = nowMS - Int64(options.captureAuditRetentionDays) * 86_400_000
+                captureAuditPruned = try conn.run("DELETE FROM capture_audit WHERE ts < ?;",
+                                                  [.int(cutoff)])
+            }
 
             // 3–5) 物理回收
             try conn.exec("PRAGMA wal_checkpoint(TRUNCATE);")
@@ -82,6 +89,7 @@ extension Store {
                 freelistBefore: freeBefore, freelistAfter: freeAfter,
                 captureStatsPruned: pruned,
                 mcpAuditPruned: auditPruned,
+                captureAuditPruned: captureAuditPruned,
                 elapsedMS: Date().timeIntervalSince(t0) * 1000)
         }
     }

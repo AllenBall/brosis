@@ -625,14 +625,17 @@ final class MCPServiceTests: XCTestCase {
         try migrating.store.withLock { conn in
             try conn.exec("DROP TABLE mcp_audit;")
             try conn.run("UPDATE meta SET value = '1' WHERE key = 'schema_version';")
-            try conn.run("DELETE FROM migrations WHERE version = 2;")
+            try conn.run("DELETE FROM migrations WHERE version >= 2;")
         }
         try migrating.reopen()
         XCTAssertEqual(try migrating.store.mcpAuditCount(), 0, "迁移后 mcp_audit 必须存在")
         let versions = try migrating.store.withLock { conn in
             try conn.intColumn("SELECT version FROM migrations ORDER BY version;")
         }
-        XCTAssertEqual(versions, [1, 2], "migrations 表要留下两条审计")
+        // 这个夹具的库是按当前 schema 建的，这里只把 v2 之后的审计痕迹抹掉、把 mcp_audit 删掉；
+        // 重开时 migrateIfNeeded 依次跑 v2（补 mcp_audit）与 v3（capture_audit 与 occurrences
+        // 两列已经在，按"先查再做"跳过建表 / 加列），两版各留一条审计行，所以是 [1, 2, 3]。
+        XCTAssertEqual(versions, [1, 2, 3], "migrations 表要留下每一版的审计")
         let note = try migrating.store.withLock { conn in
             try conn.scalarText("SELECT note FROM migrations WHERE version = 2;")
         }

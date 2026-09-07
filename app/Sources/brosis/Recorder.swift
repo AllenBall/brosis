@@ -155,7 +155,8 @@ final class Recorder: @unchecked Sendable {
                            dirtyRects: Int? = nil,
                            dirtyAreaRatio: Double? = nil,
                            gated: Bool = false,
-                           axChars: Int? = nil) {
+                           axChars: Int? = nil,
+                           ocrRegions: Int? = nil) {
         let handle: Store? = lock.withLock { store }
         guard let handle else {
             lock.withLock { counters.droppedCaptureStats += 1 }
@@ -174,10 +175,26 @@ final class Recorder: @unchecked Sendable {
                                          dirtyRects: dirtyRects,
                                          dirtyAreaRatio: dirtyAreaRatio,
                                          gated: gated,
-                                         axChars: axChars)
+                                         axChars: axChars,
+                                         ocrRegions: ocrRegions)
             lock.withLock { counters.captureStats += 1 }
         } catch {
             noteError(error)
+        }
+    }
+
+    /// 采样审计 → core 的 `capture_audit`（计划 3.3，schema v3）。
+    /// 与遥测同样的语义：库没开就丢弃并计数，写失败只计数不抛。
+    func recordCaptureAudit(_ row: CaptureAuditRow) {
+        let handle: Store? = lock.withLock { store }
+        guard let handle else {
+            lock.withLock { counters.droppedCaptureStats += 1 }
+            return
+        }
+        if handle.appendCaptureAudit(row) {
+            lock.withLock { counters.captureStats += 1 }
+        } else {
+            lock.withLock { counters.errors += 1; lastErrorText = "capture_audit 写入失败" }
         }
     }
 

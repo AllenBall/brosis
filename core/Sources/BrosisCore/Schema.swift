@@ -11,7 +11,10 @@ public enum Schema {
     /// - v1：3.2 全部表 + 3.12 `app_policies` + `meta` / `migrations` / `capture_stats`。
     /// - v2（M1 R2 / T5）：`mcp_audit`（3.6「审计：每次调用记录客户端、工具、参数摘要、返回条数」
     ///   + 2.2 硬约束 4）。老库开库时由 `Store.migrateIfNeeded` 就地补建，不用重建库。
-    public static let version = 2
+    /// - v3（M1 R2 / T8）：`capture_audit`（3.3「采样审计：AX 非空的观察每 N 次取一次全窗口 OCR
+    ///   对照，计算覆盖率写入审计表」）+ `occurrences` 两个可空列 `confidence` / `note`
+    ///   （视口 OCR 的片段置信度与低置信 token 计数，D24）。两处都是纯新增，老库 ALTER 就地迁移。
+    public static let version = 3
 
     /// 页大小（D23：16384，比 4096 省约 10%）。加密库用 `cipher_page_size`。
     public static let pageSize = 16384
@@ -131,6 +134,8 @@ public enum Schema {
       text_version_id INTEGER NOT NULL,
       region          TEXT,                -- JSON：{"x":..,"y":..,"w":..,"h":..} 或 AX 路径
       ord             INTEGER NOT NULL,    -- 观察内的有序片段序号，重建原文用
+      confidence      REAL,                -- v3：0–1，OCR 片段才有；AX / 适配器读值为 NULL
+      note            TEXT,                -- v3：区域备注（形状，不含正文），如低置信 token 计数
       PRIMARY KEY (device_id, id),
       UNIQUE (device_id, observation_id, ord),
       FOREIGN KEY (device_id, observation_id)  REFERENCES observations(device_id, id)
@@ -278,6 +283,46 @@ public enum Schema {
     CREATE INDEX idx_mcp_audit_client ON mcp_audit(client_id, ts);
     """
 
+    // MARK: - v3 迁移：采样审计（3.3）+ occurrences 的置信度列（D24）
+
+    /// 采样审计（3.3「AX 非空的观察每 N 次取一次全窗口 OCR 对照，计算覆盖率写入审计表」）。
+    ///
+    /// 每行 = 一次对照：同一时刻同一个窗口，AX 读到的正文 vs 全窗口 OCR 读到的正文，
+    /// 覆盖率 = **AX 文本的 token 有多少比例能在 OCR 文本里找到**（去空白与标点后比较，
+    /// 口径见 `CaptureCoverage.coverage(axText:ocrText:)`）。
+    ///
+    /// **不存正文**：只有两边的字符数、token 数、命中数与比值。它和 `capture_stats` / `mcp_audit`
+    /// 一样是本机运行质量的度量，**不是证据**：不参与 D17 同步、不进删除级联，
+    /// 由 `maintenance()` 按 `captureAuditRetentionDays` 滚动清理。
+    ///
+    /// `observation_id` 只是**弱引用**（没有外键）：审计行比观察活得久是允许的——
+    /// 观察被配额过期物理删掉之后，这条"当时覆盖率是多少"的度量仍然有意义。
+    static let createCaptureAudit = """
+    CREATE TABLE capture_audit (
+      id             INTEGER PRIMARY KEY,
+      ts             INTEGER NOT NULL,           -- Unix 毫秒
+      observation_id INTEGER,                    -- 弱引用 observations.id（同 device），可为空
+      app            TEXT    NOT NULL,           -- bundle id
+      ax_chars       INTEGER NOT NULL,           -- AX / 适配器读到的字符数
+      ocr_chars      INTEGER NOT NULL,           -- 全窗口 OCR 读到的字符数
+      ax_tokens      INTEGER NOT NULL,           -- AX 文本切出的 token 数（去空白与标点）
+      hit_tokens     INTEGER NOT NULL,           -- 其中能在 OCR 文本里找到的 token 数
+      coverage       REAL    NOT NULL,           -- hit_tokens / ax_tokens，ax_tokens = 0 时为 0
+      method         TEXT    NOT NULL,           -- 被对照的那条观察的 capture_method
+      region         TEXT,                       -- 被 OCR 的区域名（规则里的 region 名）
+      elapsed_ms     REAL    NOT NULL DEFAULT 0  -- 这次对照 OCR 的耗时
+    );
+    CREATE INDEX idx_capture_audit_ts  ON capture_audit(ts);
+    CREATE INDEX idx_capture_audit_app ON capture_audit(app, ts);
+    """
+
+    /// v2 → v3 给 `occurrences` 补的两列。SQLite 的 `ALTER TABLE ADD COLUMN` 只改表头、
+    /// 不重写数据页，老行读回来是 NULL。
+    static let alterOccurrencesV3: [(column: String, sql: String)] = [
+        ("confidence", "ALTER TABLE occurrences ADD COLUMN confidence REAL;"),
+        ("note", "ALTER TABLE occurrences ADD COLUMN note TEXT;"),
+    ]
+
     // MARK: - FTS（D22）
 
     /// contentless（`content=''`，不重复存正文）+ `contentless_delete=1`（需要 SQLite ≥ 3.43）
@@ -305,8 +350,8 @@ public enum Schema {
 
     /// 3.2 里必须存在的表（含 3.12 的 app_policies 与本包自加的三张），`Store.open` 用它自检。
     public static let expectedTables = [
-        "apps", "app_policies", "capture_stats", "deletions", "files", "grants", "jobs",
-        "ledgers", "mcp_audit", "meta", "migrations", "observations", "occurrences", "sessions",
-        "text_fts", "text_versions", "urls", "windows",
+        "apps", "app_policies", "capture_audit", "capture_stats", "deletions", "files", "grants",
+        "jobs", "ledgers", "mcp_audit", "meta", "migrations", "observations", "occurrences",
+        "sessions", "text_fts", "text_versions", "urls", "windows",
     ]
 }

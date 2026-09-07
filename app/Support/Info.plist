@@ -49,5 +49,30 @@
 	<string>brosis 需要辅助功能权限，用于读取当前焦点窗口的标题、文件路径、网址和可见正文，作为文字记录的主要来源，避免频繁截图。</string>
 	<key>NSAppleEventsUsageDescription</key>
 	<string>brosis 需要向浏览器发送 Apple 事件，用于在辅助功能读不到网址时获取当前标签页的地址与标题。不会控制这些应用做其他操作。</string>
+	<!-- ============================ Sparkle 2 签名更新（计划 4.2） ============================
+	     口径见 Sources/brosis/Updater.swift 顶部：默认不联网、fail-closed、懒启动。 -->
+	<!-- appcast 的地址。GitHub Release 的 latest/download/<资产名> 是一个稳定跳转，
+	     每次发版把 appcast.xml 作为资产传到新 tag 上就行，不用改 app。 -->
+	<key>SUFeedURL</key>
+	<string>https://github.com/AllenBall/brosis/releases/latest/download/appcast.xml</string>
+	<!-- Ed25519 公钥（base64，32 字节）。**仓库里是占位符**：真公钥由用户用 Sparkle 的
+	     generate_keys 生成（私钥留在他自己的钥匙串，永不进仓库），公钥放在
+	     ~/Library/Application Support/brosis-dev/sparkle_public_ed_key.txt，
+	     build_app.sh 组装 bundle 时替换这里。没替换时 Sparkle 拒绝启动（fail-closed）。 -->
+	<key>SUPublicEDKey</key>
+	<string>__SUPublicEDKey__</string>
+	<!-- 默认不自动检查更新：不联网、也不弹"要不要自动检查更新"的许可框。
+	     更新检查只能由用户从菜单「检查更新…」显式发起。 -->
+	<key>SUEnableAutomaticChecks</key>
+	<false/>
+	<!-- 即使将来把上面那条打开，也不允许后台静默下载 / 安装。 -->
+	<key>SUAutomaticallyUpdate</key>
+	<false/>
+	<!-- 只有 SUEnableAutomaticChecks 被显式打开时才有意义：24 小时一次。 -->
+	<key>SUScheduledCheckInterval</key>
+	<integer>86400</integer>
+	<!-- 不给 Sparkle 的更新说明页放开 JavaScript。 -->
+	<key>SUEnableJavaScriptInReleaseNotes</key>
+	<false/>
 </dict>
 </plist>

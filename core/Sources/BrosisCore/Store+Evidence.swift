@@ -113,7 +113,8 @@ extension Store {
     func occurrenceRows(observationID: Int64, includeText: Bool,
                         conn: SQLiteConnection) throws -> [EvidenceOccurrence] {
         let st = try conn.prepare("""
-            SELECT oc.text_version_id, oc.ord, oc.region, tv.text, tv.byte_len
+            SELECT oc.text_version_id, oc.ord, oc.region, tv.text, tv.byte_len,
+                   oc.confidence, oc.note
               FROM occurrences oc
               JOIN text_versions tv ON tv.device_id = oc.device_id AND tv.id = oc.text_version_id
              WHERE oc.device_id = ? AND oc.observation_id = ? ORDER BY oc.ord;
@@ -125,7 +126,8 @@ extension Store {
             out.append(EvidenceOccurrence(textVersionID: st.int(0) ?? 0,
                                           ord: Int(st.int(1) ?? 0), region: st.text(2),
                                           text: includeText ? st.text(3) : nil,
-                                          byteLen: Int(st.int(4) ?? 0)))
+                                          byteLen: Int(st.int(4) ?? 0),
+                                          confidence: st.double(5), note: st.text(6)))
         }
         return out
     }

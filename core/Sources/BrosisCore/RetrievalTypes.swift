@@ -193,6 +193,10 @@ public struct EvidenceOccurrence: Sendable, Codable {
     /// grant 字段级别是 `summary` 时为 nil。
     public var text: String?
     public var byteLen: Int
+    /// schema v3：这段文本的来源置信度（0–1）。AX / 适配器读值为 nil，OCR 片段才有。
+    public var confidence: Double?
+    /// schema v3：区域备注（形状，不含正文），如低置信 token 计数与 OCR 区域像素矩形。
+    public var note: String?
 }
 
 /// 出现上下文：同一条证据前后各 N 条观察的摘要（不含原文）。

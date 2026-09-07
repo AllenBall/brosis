@@ -47,6 +47,8 @@ core/
 │   │   ├── Store+Delete.swift    四个删除入口 + 用户删除引擎 + 配额过期
 │   │   ├── Store+Maintenance.swift  FTS 对账、checkpoint、incremental_vacuum
 │   │   ├── Store+Stats.swift     dbstat 分项字节
+│   │   ├── Store+AppInventory.swift T9：3.12 应用采集清单的数据层（按应用的观察数与完整性
+│   │   │                         分布、app_policies 全表、应用名、按应用的全库计数）
 │   │   ├── Store+Query.swift     T2 留的最小 FTS 通道与三个证据探针（对照用）
 │   │   ├── Store+Search.swift    T3：三通道 search（精确字段两步式 / FTS / 1–2 字扫描）
 │   │   ├── Store+Evidence.swift  T3：getEvidence / getItem / getContext + grants
@@ -71,7 +73,7 @@ core/
 │   └── brosis-mcp/main.swift     T5：stdio 上的 MCP + admin 子命令（只链接 BrosisIPC）
 └── Tests/
     ├── mcp_client.py             T5：只用标准库的 MCP 客户端（端到端测试与手跑都用它）
-    └── BrosisCoreTests/          113 个用例（T2 的 39 + T3 的 32 + T5 的 42）
+    └── BrosisCoreTests/          132 个用例（T2 的 39 + T3 的 32 + T5 的 42 + T8 的 13 + T9 的 6）
 ```
 
 **项目目录里没有任何构建产物**：SQLCipher 的 9.30 MiB amalgamation 与 sqlite-vec 都在
@@ -169,6 +171,13 @@ let report = try store.expire()                   // 或 expire(toBytes:batchSiz
 
 // 夜间维护
 let maintenance = try store.maintenance()         // FTS 对账 + checkpoint(TRUNCATE) + incremental_vacuum
+
+// 3.12 应用采集清单的数据层（T9；采集端那一页"应用"就是这四个查询）
+let since = Int64(Date().addingTimeInterval(-7 * 86400).timeIntervalSince1970 * 1000)
+let perApp = try store.appObservationStats(since: since)  // 每个应用：观察数 + 完整性四态 + 最近出现
+let policies = try store.appPolicies()            // app_policies 全表（bundle_id / mode / source / updated_at）
+let names = try store.appNames()                  // apps 表的 bundle_id → name
+let live = try store.appObservationCount(bundleID: "com.electron.lark")  // 某应用全库未删除的观察数
 
 // 统计与自检
 let stats = try store.stats()                     // 分项字节
@@ -663,6 +672,34 @@ brosis.app 里的 MCPIPCService   ← 产品路径；LockController 持有 Store
 补建 `mcp_audit`、把 `meta.schema_version` 改成 2、往 `migrations` 表写一行，
 **不动任何已有表**，用户不用重建库。库比本版本更新则直接报 `schemaVersion` 错误，不硬开。
 
+### 采样审计（`capture_audit`，schema v3）
+
+计划 3.3 最后一条：「AX 非空的观察每 N 次取一次全窗口 OCR 对照，计算覆盖率写入审计表。
+M0 用它校准回退阈值，M1 保留低频版本。」采集端的实现在 `app/`（`CaptureCoordinator`），
+core 这边负责**口径**与**表**。
+
+**覆盖率口径不是"字符数之比"**（`CaptureCoverage.coverage(axText:ocrText:)`）：
+
+> **AX 文本切出的 token 里，有多少比例能在 OCR 文本里找到。**
+
+三步，两边完全对称：① NFKC 折叠（与索引侧同一个 `TextPipeline.foldForIndex`）；
+② 去掉全部空白与标点符号，只留字母 / 数字 / 汉字；③ 汉字连续段按**字符 bigram** 切
+（与 D22 的 FTS 预处理同一个切法），非汉字段整段成词。命中判定是**子串**，
+且 AX 侧的 token **先去重**。
+
+为什么这样定：AX 与 OCR 的空白、换行、标点几乎从不一致——AX 把一段正文拆成几十个节点用 `\n` 拼，
+OCR 按视觉行分行，而 accurate 模型会把半角括号 / 冒号 / 逗号认成全角（E8 实测）。
+用字符数比会算出一堆假的"覆盖不足"；用子串而不是集合相等，是因为 OCR 侧会多出 AX 读不到的东西
+（图片里的字、被 AX 漏掉的行），多出来的不该扣分。`axTokens == 0` 时覆盖率定义为 **0**（不是 NaN、不是 1）。
+
+**写与读**：`appendCaptureAudit(_:)`（写失败只返回 false，不抛——审计不能把采集搞挂）、
+`captureAuditTail(limit:app:)`、`captureAuditCount()`、`captureCoverageByApp(since:)`。
+`observation_id` 是弱引用：观察被配额过期物理删掉之后，"当时覆盖率是多少"这条度量仍然留着。
+
+**v2 → v3 迁移**：一个事务里建 `capture_audit`、给 `occurrences` 加两个可空列、改 `meta.schema_version`、
+写一行 `migrations`。建表与加列都**先查再做**（`sqlite_schema` / `pragma_table_info`），
+所以迁移可以被中断后重跑，也容得下"这张表 / 这一列已经在了"的库。
+
 ### 3.5 的三种状态
 
 | 相位 | MCP 看到 | 审计 |
@@ -727,7 +764,7 @@ socket 路径解析顺序：`--socket` > `BROSIS_IPC_SOCKET` > `--dir` > `BROSIS
 | `files` | ✔ | `path` UNIQUE + NOCASE |
 | `observations` | ✔ | 主键 `(device_id, id)`（D17）；`trigger` / `capture_method` / `completeness` / `source_state` 都有 CHECK；`deleted_at` 是用户删除墓碑 |
 | `text_versions` | ✔ | `vrow INTEGER PRIMARY KEY` 是本机私有代理 rowid（D23，不参与同步）；`sha256` 是**原文 UTF-8 字节**的 **32 字节 BLOB**（D23，不折叠）；`text` 存原文、`byte_len` 按原文；`UNIQUE(device_id, sha256)` 实现哈希复用（**逐字节相同才复用**，全角与半角是两个版本）；`trg_text_versions_immutable` 让任何 UPDATE 直接 ABORT |
-| `occurrences` | ✔ | 主键带 `device_id`；`observation_id` 外键 `ON DELETE CASCADE`（配额过期用），`text_version_id` 外键 `ON DELETE RESTRICT`（共享版本的硬保证） |
+| `occurrences` | ✔ | 主键带 `device_id`；`observation_id` 外键 `ON DELETE CASCADE`（配额过期用），`text_version_id` 外键 `ON DELETE RESTRICT`（共享版本的硬保证）；**schema v3（T8）** 加了两个可空列 `confidence`（0–1，OCR 片段才有，AX / 适配器读值是 NULL）与 `note`（区域备注，只放**形状**：低置信 token 计数、OCR 区域像素矩形），对应 `TextFragment` 的两个新字段 |
 | `text_fts` | ✔ | **contentless**（`content=''`、`contentless_delete=1`）+ `unicode61 remove_diacritics 2`（D22）。**没有触发器**——写进去的是 Swift 侧 **NFKC 折叠后再 bigram 化**的文本（`TextPipeline.bigramForIndex`，折叠只到这张表为止），SQL 触发器算不出来；增删显式做，`maintenance()` 夜间对账 |
 | `sessions` | ✔ | 三类时间分列（3.7）+ `stale` |
 | `ledgers` | ✔ | 台账与叙述分开标注；`evidence` 按 D23 用区间表示，`markDerivedStale` 同时认数组与区间两种形状 |
@@ -739,6 +776,7 @@ socket 路径解析顺序：`--socket` > `BROSIS_IPC_SOCKET` > `--dir` > `BROSIS
 | 本包自加 `meta` | — | `schema_version` / `device_id` / `created_at` / `fts_scheme` / 五个单调计数器 / `has_compat_text`（库里写进过「NFKC 折叠会变样」的正文吗，扫描通道靠它决定要不要展开查询串）/ `sessions_watermark_ts` / `sessions_max_duration_ms`。本机配置，不同步 |
 | 本包自加 `migrations` | — | 每次 schema 变更一行 |
 | 本包自加 `mcp_audit` | — | **schema v2（T5）**。3.6 的调用审计：ts / client_id / op / tool / 参数摘要（**只有形状，不含正文与查询串**）/ decision / 返回条数 / peer / 耗时 / note。不参与 D17 同步、不进删除级联，`maintenance()` 按 `mcpAuditRetentionDays`（默认 90 天）滚动清理。老库开库时就地迁移，不用重建 |
+| 本包自加 `capture_audit` | — | **schema v3（T8）**。3.3 的采样审计：AX 非空的观察每 N 次（默认 50）取一次全窗口 OCR 对照，记 ts / observation_id（**弱引用，没有外键**）/ app / ax_chars / ocr_chars / ax_tokens / hit_tokens / coverage / method / region / elapsed_ms。**不存正文**；不参与 D17 同步、不进删除级联，`maintenance()` 按 `captureAuditRetentionDays`（默认 90 天）滚动清理。老库开库时就地迁移，不用重建 |
 | 本包自加 `capture_stats` | — | **不是 3.2 的表、不参与 D17 同步、不进删除级联**。承接 M0 app 骨架 `frame_stats` 的遥测（帧门控率、dHash 汉明距离、脏区面积比、按需截图触发原因、AX 字符数）。它是本机运行质量的度量，不是证据；`maintenance()` 按 `captureStatsRetentionDays`（默认 30 天）滚动清理 |
 
 **单调计数器**：`observations` / `text_versions` / `occurrences` / `deletions` 的 id 与 `text_versions.vrow`
@@ -891,8 +929,9 @@ $BIN mcp-audit --dir $W/db --key-file $W/db.key --limit 20
 
 ## 测试
 
-`swift test` 下 **113 个用例**，十个套件（T2 的 39 + T3 的 32 + T5 的 42：
-`IPCProtocolTests` 14 + `MCPServiceTests` 17 + `MCPEndToEndTests` 11）：
+`swift test` 下 **132 个用例**，十二个套件（T2 的 39 + T3 的 32 + T5 的 42 + T8 的 13 + T9 的 6：
+`IPCProtocolTests` 14 + `MCPServiceTests` 17 + `MCPEndToEndTests` 11 + `CaptureAuditTests` 13 +
+`AppInventoryTests` 6）：
 
 | 套件 | 覆盖 |
 |---|---|
@@ -905,6 +944,8 @@ $BIN mcp-audit --dir $W/db --key-file $W/db.key --limit 20
 | `IPCProtocolTests`（T5，14 个） | `JSONValue` 往返（> 2^53 的整数、全角、正文里的换行必须被转义成 `\n`）；请求 / 响应往返；六种坏输入都不被当成合法请求；换行分隔框架跨 read 边界与超长行；socket 路径超 104 字节报错；限流的滑动窗口、按客户端隔离、客户端数上限；六个工具的 schema 与 `readOnlyHint`；**真 socket 往返**（0600 权限、uid、同连接连发）、坏 JSON 与错协议版本都到不了处理器、**限流时处理器返回的结果被丢弃**、**对端发完请求就挂断时服务端不死**（必须看到 `ipc_write_error`，否则这条用例算没验到） |
 | `MCPServiceTests`（T5，17 个） | 没有 grant 时**六个工具全拒且不带任何数据**；`fields` 控制原文（summary 不回 `text` / 逐片段正文，evidence 回）；summary 时 `get_context` 片段截到 ≤ 100 token 且 `text` 重拼；应用白名单对 search / get_evidence / get_item / 台账 / 时间线各自的效果（含「桶的 dwell 按留下的应用重算」、**`get_evidence` 的 `before` / `after` 里不能出现白名单外的 bundle id 与窗口标题**、以及 `apps = ["*"]` 下它们确实在的反向对照）；时间窗是硬下界（`appliedStart` 被抬高、窗口外的日期与证据被拒、`hours` 被封顶）；**删除后 search / get_evidence / get_context / get_day_ledger 都不再返回内容**（3.8）；审计只记形状不记查询串且同一条查询摘要可复现；`maintenance` 滚动清理审计；未知工具与七种坏参数；时间参数三种写法；**`MCPGate` 的 locked / paused 与审计补写**；传输层拒绝也进审计；admin 生命周期（含"签名没过的对端不能改授权"）；**v1 → v2 schema 迁移**；**被 grant 丢掉的相邻观察不占 `neighbors` 的名额**（白名单外的邻居密集时 `before` / `after` 仍各拿满，附「不加白名单时紧邻的都在白名单外」的反向对照）；**时间窗起点落在某天中间时 `get_day_ledger` 标 `coversBeforeWindowStart`**（同一天 `get_timeline` 只回窗口之后的观察，两个数字的差就是这个标记要提醒的事；整天在窗口里的那天标 false） |
 | `MCPEndToEndTests`（T5，11 个） | **四个真进程**（XCTest → python3 客户端 → `brosis-mcp` → `brosis-store serve`）：initialize / tools/list / 六个工具各一次真实调用；没有 grant 全拒且提示怎么授权；**闭环「记录 → 找回 → 展开原文 → 删除后四个入口都消失」**；summary 与 evidence 两档的差别（长正文尾部标记在不在）；白名单与时间窗（**含真链路上 `get_evidence` 的出现上下文不漏白名单外应用**）；locked / paused 拒绝且审计补写；限流；admin 与审计形状；服务端不在时的错误提示；**连接层的抗打击**：客户端中途挂断时 `serve` 不死、`serve` 收到 SIGTERM 走完收尾（退出码 0、socket 文件删掉）、**服务端在会话中途整个重启之后 `brosis-mcp` 还活着且下一次调用自己重连成功** |
+| `CaptureAuditTests`（T8，13 个） | **schema v3**：覆盖率口径七条（完全一致 = 1；**全角 / 半角与空白差异不扣分**；**NFKC 折叠这一步单独有用例**——全角字母数字 `ＯＣＲ １００` 对上半角 `OCR 100`，标点那条测不出折叠，因为全角标点不折叠也会被当分隔符丢掉；OCR 多出的内容不扣分；只读到一半时介于 0 和 1 之间；AX 全空时 = 0 而不是 NaN；重复 token 只计一票）；`capture_audit` 写入 / 倒序读回 / 按应用过滤 / 按应用聚合；**观察被配额过期删掉之后审计行还在**（弱引用）；`maintenance()` 按保留天数滚动清理；`occurrences.confidence` / `note` 往返（AX 片段是 nil、OCR 片段有值）与**老写法 `TextFragment(text:region:)` 的向后兼容**；**v2 → v3 就地迁移**（把库改回 v2 的形状再重开，老数据一字不差、`migrations` 留三条审计、新表可写） |
+| `AppInventoryTests`（T9，6 个） | 3.12 应用采集清单的数据层：按应用的观察数与完整性四态分布（**四态之和 == 总数**、窗口外的观察不算、**墓碑行不算**、`since = 0` 就是全库）；**只算本机**（直接写一行 `device_id = 'another-device'` 的观察，它不进本机统计）；**`EXPLAIN QUERY PLAN` 必须走 `idx_obs_live` 部分索引**（这三个查询存在的理由就是不让采集端扫全表）；`app_policies` 全表往返与 UPSERT 不加行；`appNames()`；**降档删数据的闭环**（`deleteByApp(reason: .policy)` 之后统计行消失、`appObservationCount` 归零、策略行原样保留） |
 | `SessionLedgerTests`（T3，12 个） | 三个会话常量的**边界**（299 s vs 300 s、90 s 封顶、15 s vs 25 s 打断）与可配置性；三类时间分列；双屏焦点归属 vs 区间并集；增量构建（只扫新观察、结果与全量一致、延长最后一个会话、**两块屏边界不对齐 + 一次打断时幂等且与全量重建逐字段相等**、**同一块屏上同毫秒的两条观察也不能被分进两个会话**）；删除标 stale → 重算清掉且证据里不再有被删的观察；日台账形状与确定性；跨日边界裁剪 |
 
 测试数据落在 `~/Library/Caches/brosis-build/m1-core-tests/`，每个用例一个临时目录，用完删掉；

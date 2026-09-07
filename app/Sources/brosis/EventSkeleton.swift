@@ -33,6 +33,9 @@ final class EventSkeleton {
 
     private let recorder: Recorder
     private let policy: CapturePolicyStore
+    /// 适配器 / 视口 OCR 的协调者（M1 R2 / T8）。事件骨架只往里推上下文，
+    /// 真正跑 OCR 的是 `CaptureController.analyze` 那一侧——两边不用互相认识。
+    private let coordinator: CaptureCoordinator
     private let onFocusChanged: @MainActor (UInt32?) -> Void
     /// 每写一条应用级观察记录 / 系统唤醒 / 切换回来时调用，参数是 trigger 名；
     /// AppDelegate 用它触发一次按需截图。
@@ -72,10 +75,12 @@ final class EventSkeleton {
 
     init(recorder: Recorder,
          policy: CapturePolicyStore = .shared,
+         coordinator: CaptureCoordinator = .shared,
          onFocusChanged: @escaping @MainActor (UInt32?) -> Void,
          onContentChanged: @escaping @MainActor (String) -> Void = { _ in }) {
         self.recorder = recorder
         self.policy = policy
+        self.coordinator = coordinator
         self.onFocusChanged = onFocusChanged
         self.onContentChanged = onContentChanged
     }
@@ -327,8 +332,13 @@ final class EventSkeleton {
         let pid = app.processIdentifier
 
         var info = AX.WindowInfo(title: nil, url: nil, document: nil, frame: nil, timedOut: false)
+        var windowElement: AXUIElement?
         if permissions.accessibility && sourceState != .locked {
-            info = AX.windowInfo(pid: pid, bundleID: app.bundleIdentifier)
+            // 一次调用同时拿到窗口元素与定位信息：适配规则要在同一个窗口上跑，
+            // 各读各的就会多发一次 kAXFocusedWindow（访达 22% 的超时就发生在那一次）。
+            let read = AX.focusedWindowInfo(pid: pid, bundleID: app.bundleIdentifier)
+            windowElement = read.element
+            info = read.info
             if info.timedOut && sourceState == .ok { sourceState = .timeout }
         }
 
@@ -351,19 +361,40 @@ final class EventSkeleton {
         var fragments: [TextFragment] = []
         var completeness: Completeness
         var axChars = 0
-        if shouldReadText {
+        var captureMethod: CaptureMethod = .ax
+        var visibleRange: String?
+        var adapterScan: AdapterScan?
+        let rule = AdapterRegistry.rule(for: app.bundleIdentifier)
+        if shouldReadText, let windowElement {
             // 任何一次真正的遍历都重置节流时钟。
             lastElementScanAt = Date().timeIntervalSince1970
-            let scan = AX.textScan(pid: pid, bundleID: app.bundleIdentifier)
+            // —— M1 R2 / T8：正文读取走适配规则，不再是"全窗口四个角色 BFS" ——
+            // 三个输入决定这次要不要顺带排 OCR（计划 3.3 的三类触发条件）：
+            // 规则本身、上一次同区域读到的文本（AX 值有没有变）、帧门控与覆盖检查的结论。
+            let scan = AdapterEngine.scan(
+                rule: rule,
+                window: LiveAXNode(windowElement),
+                windowFrame: info.frame,
+                previousRegionTexts: coordinator.previousRegionTexts(bundleID: app.bundleIdentifier),
+                frameChanged: coordinator.consumeFrameChanged(bundleID: app.bundleIdentifier),
+                coverageFailed: coordinator.consumeCoverageFailed(bundleID: app.bundleIdentifier))
+            adapterScan = scan
             axChars = scan.totalChars
-            for summary in scan.summaries where !summary.text.isEmpty {
+            for fragment in scan.fragments where !fragment.text.isEmpty {
                 // —— 入库前脱敏（2.2 硬约束 2）：库里从一开始就没有这些明文 ——
-                let redacted = Redactor.redact(summary.text)
+                let redacted = Redactor.redact(fragment.text)
                 noteRedaction(redacted)
-                fragments.append(TextFragment(text: redacted.text, region: summary.role))
+                fragments.append(TextFragment(text: redacted.text, region: fragment.region))
             }
-            completeness = fragments.isEmpty ? .unavailable : .partial
-            if scan.truncated { noteBFSLimitHit(bundleID: app.bundleIdentifier, scan: scan) }
+            completeness = scan.completeness
+            captureMethod = scan.captureMethod
+            visibleRange = scan.visibleRange
+            if scan.truncated || scan.regions.contains(where: { $0.truncated }) {
+                noteAdapterLimitHit(bundleID: app.bundleIdentifier, scan: scan)
+            }
+        } else if shouldReadText {
+            // 读不到焦点窗口（AX 超时 / 应用没有窗口）：不是"策略排除"，是"读不到"。
+            completeness = .unavailable
         } else if privateBrowsing {
             // 私密浏览：事件照记（不然台账凭空少一段），正文、标题、URL、文件路径一个都不存。
             completeness = .excluded
@@ -401,8 +432,9 @@ final class EventSkeleton {
             url: storedURL,
             filePath: storedPath,
             trigger: trigger.coreTrigger,
-            captureMethod: .ax,
+            captureMethod: captureMethod,
             completeness: completeness,
+            visibleRange: visibleRange,
             sourceState: sourceState,
             texts: fragments))
 
@@ -410,6 +442,30 @@ final class EventSkeleton {
             recorder.recordCaptureStat(status: privateBrowsing ? "private_browsing" : "ax",
                                        trigger: trigger.rawValue,
                                        axChars: axChars)
+        }
+
+        // —— 把这次扫描的结果交给协调者：下一帧的视口 OCR 与采样审计要用 ——
+        // **没有扫描的三支（AX 超时 / 读不到焦点窗口、私密浏览、「只记事件」档）必须把上下文清掉**：
+        // 截图那条通路不知道这一轮没读正文，照样会调 `handleFrame`，留着上下文就等于
+        // 拿上一个应用的 OCR 请求去认新应用（含私密浏览窗口）的画面。
+        if let adapterScan {
+            coordinator.noteScan(CaptureCoordinator.Context(
+                bundleID: app.bundleIdentifier ?? "(unknown)",
+                appName: app.localizedName ?? app.bundleIdentifier ?? "(unknown)",
+                ruleID: adapterScan.ruleID,
+                displayID: displayID,
+                windowFrame: info.frame,
+                windowTitle: storedTitle,
+                observationID: observationID,
+                axText: fragments.map(\.text).joined(separator: "\n"),
+                regionTexts: adapterScan.regionTexts,
+                ocrRequests: adapterScan.ocrRequests,
+                chatLayout: rule.chatLayout,
+                completeness: completeness,
+                captureMethod: captureMethod,
+                at: Date().timeIntervalSince1970))
+        } else {
+            coordinator.clearContext()
         }
 
         onFocusChanged(displayID)
@@ -492,6 +548,16 @@ final class EventSkeleton {
         bfsLimitHits[key] = count
         guard count == 1 || count % 50 == 0 else { return }
         recorder.logEvent(kind: "ax_bfs_limit_hit",
+                          detail: "bundle=\(key) \(scan.detail) count=\(count)")
+    }
+
+    /// 适配规则版的同一件事（限额 / frame 探测预算 / 区域字符上限）。频次规则相同。
+    private func noteAdapterLimitHit(bundleID: String?, scan: AdapterScan) {
+        let key = bundleID ?? "(unknown)"
+        let count = (bfsLimitHits[key] ?? 0) + 1
+        bfsLimitHits[key] = count
+        guard count == 1 || count % 50 == 0 else { return }
+        recorder.logEvent(kind: "adapter_limit_hit",
                           detail: "bundle=\(key) \(scan.detail) count=\(count)")
     }
 }

@@ -262,8 +262,12 @@ enum AX {
 
     /// 窗口矩形（AX 坐标：原点左上，y 向下，跨屏全局）。
     static func frame(_ element: AXUIElement) -> CGRect? {
+        // 同 `AXNodeSource.visibleCharacterRange`：属性值是被采集的应用给的，
+        // **先验 CFTypeID 再强转**，不规范的 AX 实现不该让采集进程崩掉。
         guard let positionValue = copyAttribute(element, kAXPositionAttribute as String),
-              let sizeValue = copyAttribute(element, kAXSizeAttribute as String) else { return nil }
+              let sizeValue = copyAttribute(element, kAXSizeAttribute as String),
+              CFGetTypeID(positionValue) == AXValueGetTypeID(),
+              CFGetTypeID(sizeValue) == AXValueGetTypeID() else { return nil }
         var origin = CGPoint.zero
         var size = CGSize.zero
         guard AXValueGetValue(positionValue as! AXValue, .cgPoint, &origin),
@@ -284,9 +288,19 @@ enum AX {
     /// 读窗口标题、kAXDocument、kAXURL。任一调用失败都记为超时候选，由调用方决定 source_state。
     /// `bundleID` 只用来查 BFS 限额表（AXWebArea 搜索也吃这份限额）。
     static func windowInfo(pid: pid_t, bundleID: String? = nil) -> WindowInfo {
+        focusedWindowInfo(pid: pid, bundleID: bundleID).info
+    }
+
+    /// 与 `windowInfo` 同一次读取，**顺便把焦点窗口元素本身带出来**。
+    ///
+    /// 存在的理由很实在：M1 R2 起适配规则要在同一个窗口上再跑一次子树遍历
+    /// （`AdapterEngine`），如果各读各的就会多发一次 `kAXFocusedWindow`——
+    /// 而 M0 实测访达 22% 的超时正好发生在这一次调用上（m0_closeout 2.2）。
+    static func focusedWindowInfo(pid: pid_t, bundleID: String? = nil)
+        -> (element: AXUIElement?, info: WindowInfo) {
         let limits = bfsLimits(bundleID: bundleID)
         guard let window = focusedWindow(pid: pid) else {
-            return WindowInfo(title: nil, url: nil, document: nil, frame: nil, timedOut: true)
+            return (nil, WindowInfo(title: nil, url: nil, document: nil, frame: nil, timedOut: true))
         }
         let title = string(window, kAXTitleAttribute as String)
         let document = string(window, kAXDocumentAttribute as String)
@@ -295,8 +309,8 @@ enum AX {
             // Safari / Chromium 的 URL 挂在 AXWebArea 上，不在窗口上。
             url = firstWebAreaURL(in: window, limits: limits)
         }
-        return WindowInfo(title: title, url: url, document: document,
-                          frame: frame(window), timedOut: false)
+        return (window, WindowInfo(title: title, url: url, document: document,
+                                   frame: frame(window), timedOut: false))
     }
 
     private static func firstWebAreaURL(in window: AXUIElement, limits: BFSLimits) -> String? {

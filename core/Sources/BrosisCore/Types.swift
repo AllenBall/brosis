@@ -84,13 +84,32 @@ public struct URLRef: Sendable, Hashable {
 }
 
 /// 一次观察里的一段正文。`ord` 由数组下标决定（观察内的有序片段序号，重建原文用）。
+///
+/// **M1 R2 / T8 新增两个可选字段**（schema v3 给 `occurrences` 加的两列，都可空，老库就地迁移）：
+/// - `confidence`：这段文本的来源置信度，0–1。AX 读到的正文恒为 nil（AX 值不是"识别"出来的，
+///   没有置信度这个概念）；视口 OCR 写 Vision 的候选置信度（按字符数加权的均值）。
+/// - `note`：区域备注，只放**形状**，不放正文。目前写两类东西：命中低置信 token 的条数
+///   （短哈希 / 十六进制 / 内存地址，计划 D24「标记低置信不作证据」），以及 OCR 区域的像素矩形。
+///
+/// 向后兼容：两个字段都有默认值 nil，老调用点 `TextFragment(text:region:)` 一字不改照样编译；
+/// 老库（schema v2）迁到 v3 后这两列是 NULL，读回来就是 nil。
 public struct TextFragment: Sendable {
     public var text: String
-    /// JSON：`{"x":..,"y":..,"w":..,"h":..}` 或 AX 路径。
+    /// JSON：`{"x":..,"y":..,"w":..,"h":..}` 或 AX 路径；
+    /// T8 起采集端统一写带来源前缀的区域名（`ax:AXWebArea` / `adapter:feishu.message_list` /
+    /// `ocr:wechat.chat_panel`），前缀即 `capture_method` 的逐片段版本。
     public var region: String?
-    public init(text: String, region: String? = nil) {
+    /// 0–1。nil = 该来源没有置信度概念（AX / 适配器读值）。
+    public var confidence: Double?
+    /// 区域备注（形状，不含正文）。
+    public var note: String?
+
+    public init(text: String, region: String? = nil,
+                confidence: Double? = nil, note: String? = nil) {
         self.text = text
         self.region = region
+        self.confidence = confidence
+        self.note = note
     }
 }
 
@@ -258,6 +277,8 @@ public struct MaintenanceReport: Sendable, Codable {
     public var captureStatsPruned: Int
     /// 按 `StoreOptions.mcpAuditRetentionDays` 滚动清掉的 MCP 审计行数（3.6）。
     public var mcpAuditPruned: Int
+    /// 按 `StoreOptions.captureAuditRetentionDays` 滚动清掉的采样审计行数（3.3）。
+    public var captureAuditPruned: Int = 0
     public var elapsedMS: Double
 }
 

@@ -17,6 +17,10 @@ if arguments.contains("--dump-vectors") {
     exit(VectorDump.run())
 }
 
+if arguments.contains("--dump-ocr") {
+    exit(OCRDump.run())
+}
+
 let application = NSApplication.shared
 let appDelegate = AppDelegate()
 application.delegate = appDelegate

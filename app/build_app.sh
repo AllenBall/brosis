@@ -8,6 +8,14 @@
 #   TIMESTAMP=none ./build_app.sh  # 离线时跳过时间戳服务
 #
 # 产物一律落在 ~/Library/Caches/brosis-build/app/，绝不写进 iCloud 项目目录。
+#
+# 从 M1 R2b（T10 分发管线）起还做三件事：
+#   - 把 SwiftPM 编出来的 Sparkle.framework 放进 Contents/Frameworks/，
+#     给主程序补 @executable_path/../Frameworks 这条 rpath；
+#   - 把 Info.plist 里的 SUPublicEDKey 占位符换成真公钥（没有就留占位符并告警：
+#     fail-closed，Sparkle 会拒绝启动而不是不验签就装）；
+#   - 逐个签 Sparkle 的内嵌代码（XPC、Updater.app、Autoupdate、框架本身），
+#     不用 --deep，然后逐个 Mach-O 核对 Team ID。
 set -euo pipefail
 
 APP_SRC="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -28,6 +36,10 @@ TEAM_ID="${TEAM_ID:-$(printf '%s' "$IDENTITY" | sed -n 's/.*(\([A-Z0-9]*\))$/\1/
 APP_NAME="brosis"
 APP_BUNDLE="$SCRATCH/$APP_NAME.app"
 TIMESTAMP="${TIMESTAMP:-yes}"
+# Sparkle 的 Ed25519 **公钥**（base64）。仓库里 Info.plist 放的是占位符，这里替换。
+# 私钥永远只在用户自己的钥匙串里，不经过这个脚本，也不进仓库。
+SPARKLE_PUBKEY_FILE="${SPARKLE_PUBKEY_FILE:-$HOME/Library/Application Support/brosis-dev/sparkle_public_ed_key.txt}"
+SPARKLE_PUBKEY_PLACEHOLDER="__SUPublicEDKey__"
 
 step() { printf '\n==> %s\n' "$1"; }
 fail() { printf 'ERROR: %s\n' "$1" >&2; exit 1; }
@@ -75,6 +87,24 @@ cp "$BIN" "$APP_BUNDLE/Contents/MacOS/$APP_NAME"
 cp "$MCP_BIN" "$APP_BUNDLE/Contents/MacOS/brosis-mcp"
 cp "$APP_SRC/Support/Info.plist" "$APP_BUNDLE/Contents/Info.plist"
 
+# ---- Sparkle.framework：SwiftPM 把 binaryTarget 解出来的框架拷到 bin 目录，
+# 这里再放进 Contents/Frameworks/。主程序链出来只带一条 `@loader_path` 的 rpath
+# （裸二进制跑得通，因为框架就在它旁边），装进 bundle 后 @loader_path 是
+# Contents/MacOS，找不到框架，所以补一条 @executable_path/../Frameworks。
+# 不用 Package.swift 的 .unsafeFlags：带 unsafeFlags 的清单不能被别的包按版本引用。
+SPARKLE_SRC="$BIN_DIR/Sparkle.framework"
+[ -d "$SPARKLE_SRC" ] || fail "找不到 $SPARKLE_SRC（SwiftPM 没有解出 Sparkle 的 binaryTarget？）"
+mkdir -p "$APP_BUNDLE/Contents/Frameworks"
+# 用 ditto 而不是 cp -R：框架是版本化 bundle，符号链接与扩展属性都要原样保留。
+ditto "$SPARKLE_SRC" "$APP_BUNDLE/Contents/Frameworks/Sparkle.framework"
+SPARKLE_FW="$APP_BUNDLE/Contents/Frameworks/Sparkle.framework"
+SPARKLE_VER="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' \
+                "$SPARKLE_FW/Resources/Info.plist" 2>/dev/null || echo '?')"
+install_name_tool -add_rpath "@executable_path/../Frameworks" "$APP_BUNDLE/Contents/MacOS/$APP_NAME"
+otool -l "$APP_BUNDLE/Contents/MacOS/$APP_NAME" | grep -A2 LC_RPATH | grep -q 'Frameworks' \
+  || fail "rpath @executable_path/../Frameworks 没加上"
+echo "Sparkle.framework $SPARKLE_VER 已放进 Contents/Frameworks/，rpath 已补"
+
 # 版本号单一来源：Sources/brosis/BuildInfo.swift 的 `static let version`。
 # Info.plist 里放的是 __VERSION__ 占位符，这里替换成同一串：
 #   CFBundleShortVersionString = CFBundleVersion = BuildInfo.version
@@ -91,6 +121,34 @@ for key in CFBundleShortVersionString CFBundleVersion; do
   [ "$got" = "$VERSION" ] || fail "Info.plist 的 $key = $got，应为 $VERSION"
 done
 echo "版本号：$VERSION（来自 BuildInfo.swift，已写进 CFBundleShortVersionString / CFBundleVersion）"
+
+# ---- Sparkle 更新公钥。占位符 -> 真公钥；没有公钥文件就**保留占位符并告警**。
+# 保留占位符不是"退化成不验签"：占位符不是合法 base64，Updater.swift 的
+# UpdaterConfig.issues 会当场拦下，Sparkle 的 startUpdater 也会失败，
+# 也就是这份构建根本装不上任何"更新"（fail-closed）。
+SPARKLE_PUBKEY=""
+if [ -n "${BROSIS_SPARKLE_PUBKEY:-}" ]; then
+  SPARKLE_PUBKEY="$BROSIS_SPARKLE_PUBKEY"
+  SPARKLE_PUBKEY_SRC="环境变量 BROSIS_SPARKLE_PUBKEY"
+elif [ -f "$SPARKLE_PUBKEY_FILE" ]; then
+  SPARKLE_PUBKEY="$(tr -d ' \t\r\n' < "$SPARKLE_PUBKEY_FILE")"
+  SPARKLE_PUBKEY_SRC="$SPARKLE_PUBKEY_FILE"
+fi
+if [ -n "$SPARKLE_PUBKEY" ]; then
+  # 32 字节 base64 = 44 个字符（末尾一个 '='）。长度不对就直接失败，
+  # 免得签出一个"看着像 key"的东西。
+  n="$(printf '%s' "$SPARKLE_PUBKEY" | base64 -d 2>/dev/null | wc -c | tr -d ' ')"
+  [ "$n" = "32" ] || fail "Sparkle 公钥不是 32 字节（解出 ${n:-0} 字节，来源 $SPARKLE_PUBKEY_SRC）"
+  /usr/libexec/PlistBuddy -c "Set :SUPublicEDKey $SPARKLE_PUBKEY" "$APP_BUNDLE/Contents/Info.plist"
+  echo "Sparkle 更新公钥：已写入（来源 $SPARKLE_PUBKEY_SRC）"
+else
+  got="$(/usr/libexec/PlistBuddy -c 'Print :SUPublicEDKey' "$APP_BUNDLE/Contents/Info.plist")"
+  [ "$got" = "$SPARKLE_PUBKEY_PLACEHOLDER" ] \
+    || fail "Info.plist 的 SUPublicEDKey 既不是占位符也没被替换：$got"
+  printf '注意：没有 Sparkle 更新公钥（%s 不存在），SUPublicEDKey 保持占位符。\n' "$SPARKLE_PUBKEY_FILE"
+  printf '      这份构建的「检查更新…」会明确报错并拒绝更新（fail-closed）。\n'
+  printf '      生成密钥对（私钥进你自己的钥匙串，公钥写到上面那个文件）见 dist/RELEASE.md。\n'
+fi
 cp "$APP_SRC/Support/com.brosis.agent.plist" \
    "$APP_BUNDLE/Contents/Library/LaunchAgents/com.brosis.agent.plist"
 # Resources 里目前只有采集排除清单；没有文件时也保证目录存在
@@ -104,12 +162,24 @@ plutil -lint "$APP_BUNDLE/Contents/Info.plist" > /dev/null
 plutil -lint "$APP_BUNDLE/Contents/Library/LaunchAgents/com.brosis.agent.plist" > /dev/null
 for key in CFBundleIdentifier CFBundleExecutable LSUIElement \
            NSScreenCaptureUsageDescription NSAccessibilityUsageDescription \
-           NSAppleEventsUsageDescription CFBundleShortVersionString CFBundleVersion; do
+           NSAppleEventsUsageDescription CFBundleShortVersionString CFBundleVersion \
+           SUFeedURL SUPublicEDKey SUEnableAutomaticChecks SUAutomaticallyUpdate; do
   /usr/libexec/PlistBuddy -c "Print :$key" "$APP_BUNDLE/Contents/Info.plist" > /dev/null \
     || fail "Info.plist 缺少 $key"
 done
-echo "Info.plist 八个必备键齐全"
-find "$APP_BUNDLE" -type f | sed "s|$APP_BUNDLE|  brosis.app|"
+# 「默认不联网」这条要在构建期就锁死：两个自动开关必须是 false，源必须是 https。
+for key in SUEnableAutomaticChecks SUAutomaticallyUpdate; do
+  got="$(/usr/libexec/PlistBuddy -c "Print :$key" "$APP_BUNDLE/Contents/Info.plist")"
+  [ "$got" = "false" ] || fail "Info.plist 的 $key = $got，必须为 false（默认不自动联网）"
+done
+case "$(/usr/libexec/PlistBuddy -c 'Print :SUFeedURL' "$APP_BUNDLE/Contents/Info.plist")" in
+  https://*) ;;
+  *) fail "SUFeedURL 必须是 https" ;;
+esac
+echo "Info.plist 十二个必备键齐全（含四个 Sparkle 键；两个自动开关都是 false，源是 https）"
+find "$APP_BUNDLE" -type f -not -path "*/Sparkle.framework/*" | sed "s|$APP_BUNDLE|  brosis.app|"
+printf '  brosis.app/Contents/Frameworks/Sparkle.framework（%s 个文件，%s）\n' \
+  "$(find "$SPARKLE_FW" -type f | wc -l | tr -d ' ')" "$(du -sh "$SPARKLE_FW" | cut -f1)"
 
 # ---------------------------------------------------------------- 3. 签名
 if [ "${SKIP_SIGN:-0}" = "1" ]; then
@@ -156,6 +226,54 @@ else
   MCP_SIGN_ARGS+=(--timestamp)
 fi
 codesign "${MCP_SIGN_ARGS[@]}" "$APP_BUNDLE/Contents/MacOS/brosis-mcp"
+
+# ---- Sparkle：由内向外逐个签，**不用 --deep**。
+# Sparkle 官方要求：XPC 服务 → Updater.app → Autoupdate → 框架本身，
+# 每一件都要 hardened runtime + 安全时间戳（公证要求所有内嵌代码都带时间戳）。
+# 顺序不能反：codesign 会把已签好的内嵌代码封进外层的 CodeResources，
+# 先签外层再动内层的话，外层封印立刻作废。
+# 这里不给它们任何 entitlements：brosis 不沙盒（entitlements 里 app-sandbox=false），
+# 两个 XPC 只在沙盒应用里才会被用到，留着是为了将来真沙盒化时不用改脚本，
+# 签好之后 --verify --deep --strict 也能把它们一起验掉。
+SPARKLE_SIGN_ARGS=(--force --sign "$IDENTITY" --options runtime --generate-entitlement-der)
+if [ "$TIMESTAMP" = "none" ]; then
+  SPARKLE_SIGN_ARGS+=(--timestamp=none)
+else
+  SPARKLE_SIGN_ARGS+=(--timestamp)
+fi
+SPARKLE_VERSIONS="$SPARKLE_FW/Versions/$(readlink "$SPARKLE_FW/Versions/Current")"
+[ -d "$SPARKLE_VERSIONS" ] || fail "Sparkle.framework/Versions/Current 解不出来"
+step "3a. 逐个签 Sparkle 的内嵌代码"
+sparkle_signed=0
+# 内嵌 bundle（.xpc / .app）：按路径深度从深到浅，保证子的先签。
+while IFS= read -r item; do
+  [ -n "$item" ] || continue
+  codesign "${SPARKLE_SIGN_ARGS[@]}" "$item"
+  echo "  签：${item#$APP_BUNDLE/Contents/Frameworks/}"
+  sparkle_signed=$((sparkle_signed + 1))
+done < <(find "$SPARKLE_VERSIONS" \( -name '*.xpc' -o -name '*.app' \) -type d \
+         | awk '{ print gsub(/\//,"/") "\t" $0 }' | sort -rn | cut -f2-)
+# 裸 Mach-O（Autoupdate）：不在任何内嵌 bundle 里、不是框架主 dylib 的可执行文件。
+while IFS= read -r item; do
+  [ -n "$item" ] || continue
+  # 注意要拿**框架内部**的相对路径去匹配：绝对路径里有 "brosis.app/"，
+  # 直接 case "$item" in *.app/* 会把所有文件都排掉（第一版就踩了这个坑）。
+  rel="${item#"$SPARKLE_VERSIONS/"}"
+  case "$rel" in *.xpc/*|*.app/*) continue ;; esac
+  if [ "$rel" = "Sparkle" ]; then continue; fi
+  file "$item" | grep -q 'Mach-O' || continue
+  codesign "${SPARKLE_SIGN_ARGS[@]}" "$item"
+  echo "  签：${item#$APP_BUNDLE/Contents/Frameworks/}"
+  sparkle_signed=$((sparkle_signed + 1))
+done < <(find "$SPARKLE_VERSIONS" -type f -perm +111)
+# 最后签框架本身（对版本化框架要签 .framework，codesign 自己走 Versions/Current）。
+codesign "${SPARKLE_SIGN_ARGS[@]}" "$SPARKLE_FW"
+sparkle_signed=$((sparkle_signed + 1))
+echo "  签：Sparkle.framework"
+[ "$sparkle_signed" -ge 5 ] \
+  || fail "Sparkle 内嵌代码只签了 $sparkle_signed 件（预期 ≥ 5：2 个 XPC + Updater.app + Autoupdate + 框架）"
+echo "Sparkle 内嵌代码共签 $sparkle_signed 件"
+
 codesign "${SIGN_ARGS[@]}" "$APP_BUNDLE"
 
 # ---------------------------------------------------------------- 4. 验证
@@ -167,6 +285,27 @@ APP_TEAM="$(codesign -dv "$APP_BUNDLE" 2>&1 | sed -n 's/^TeamIdentifier=//p')"
 [ -n "$MCP_TEAM" ] && [ "$MCP_TEAM" = "$APP_TEAM" ] \
   || fail "brosis-mcp 与 brosis.app 的 Team ID 不一致（$MCP_TEAM vs $APP_TEAM）：IPC 对端校验会拒"
 echo "brosis-mcp 与主程序同一个 Team ID，IPC 对端校验能过"
+
+# Sparkle 里每一个 Mach-O 都必须是**我们**签的（同一个 Team ID）：
+# 只要漏一个，hardened runtime 的库校验会在加载时拒绝，公证也会退回。
+# --deep --strict 会验封印，但不会告诉你"这是谁签的"，所以这里再逐个问一次。
+step "4a. 核对 Sparkle 每个 Mach-O 的 Team ID"
+sparkle_checked=0
+while IFS= read -r macho; do
+  [ -n "$macho" ] || continue
+  file "$macho" | grep -q 'Mach-O' || continue
+  t="$(codesign -dv "$macho" 2>&1 | sed -n 's/^TeamIdentifier=//p')"
+  [ "$t" = "$APP_TEAM" ] \
+    || fail "$(basename "$macho") 的 Team ID 是 ${t:-<none>}，应为 $APP_TEAM（漏签或签错身份）"
+  sparkle_checked=$((sparkle_checked + 1))
+done < <(find "$SPARKLE_FW/Versions" -type f -perm +111)
+[ "$sparkle_checked" -ge 5 ] || fail "Sparkle 里只找到 $sparkle_checked 个 Mach-O（预期 ≥ 5）"
+echo "Sparkle 的 $sparkle_checked 个 Mach-O 全部由同一个 Team ID 签名"
+
+# 主程序真的能加载框架：从 bundle 里跑一次 --version。
+# dyld 找不到 Sparkle.framework 的话这一步会直接非零退出。
+step "4b. 从 bundle 里跑 --version（验 dyld 能按 rpath 找到 Sparkle.framework）"
+"$APP_BUNDLE/Contents/MacOS/$APP_NAME" --version
 
 step "5. codesign -dv --verbose=4"
 codesign -dv --verbose=4 "$APP_BUNDLE"

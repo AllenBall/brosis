@@ -66,11 +66,13 @@ extension Store {
             counters.occurrence += 1
             try conn.run("""
                 INSERT INTO occurrences
-                  (device_id, id, observation_id, text_version_id, region, ord)
-                VALUES (?,?,?,?,?,?);
+                  (device_id, id, observation_id, text_version_id, region, ord, confidence, note)
+                VALUES (?,?,?,?,?,?,?,?);
                 """, [
                     .text(deviceID), .int(occID), .int(obsID), .int(tvID),
                     .optionalText(fragment.region), .int(Int64(ord)),
+                    fragment.confidence.map { SQLValue.double($0) } ?? .null,
+                    .optionalText(fragment.note),
                 ])
         }
         try persistCounters()

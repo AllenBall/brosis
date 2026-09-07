@@ -26,8 +26,18 @@ final class CapturePolicyStore: @unchecked Sendable {
 
     static let shared = CapturePolicyStore()
 
-    /// 3.12「新应用：首次出现时按全局默认处理（建议"事件 + 内容"）」。
-    static let globalDefault: CapturePolicyMode = .eventsAndContent
+    /// 3.12「新应用：首次出现时按全局默认处理（建议"事件 + 内容"）」的**出厂值**。
+    /// 用户可以在应用清单窗口顶部改，改完存 UserDefaults 的 `policy.globalDefault`
+    /// （见实例属性 `globalDefault`）；这个 static 只是"没设过时用哪个"。
+    static let builtinGlobalDefault: CapturePolicyMode = .eventsAndContent
+
+    /// 全局默认档的存放键。**存 UserDefaults 而不是库里**，理由同 `pausedTodayKey`：
+    /// 库还没开（`locked`）的时候也要能读到它，否则锁定期间冒出来的新应用会按出厂值判定，
+    /// 与用户设的全局默认不一致。
+    static let globalDefaultKey = "policy.globalDefault"
+
+    /// 已经在菜单栏提示过的新应用（3.12「菜单栏提示一次」的那个"一次"）。
+    static let newAppNoticedKey = "policy.newAppNoticed"
 
     /// 一次解析的结果。
     struct Resolution: Sendable, Equatable {
@@ -77,7 +87,7 @@ final class CapturePolicyStore: @unchecked Sendable {
                        temporaryPausedUntil: Date?,
                        denylisted: Bool,
                        now: Date = Date(),
-                       globalDefault: CapturePolicyMode = CapturePolicyStore.globalDefault)
+                       globalDefault: CapturePolicyMode = CapturePolicyStore.builtinGlobalDefault)
         -> Resolution {
         if let until = temporaryPausedUntil, until > now {
             return Resolution(mode: .none, source: .user, temporaryUntil: until, firstSeen: false)
@@ -101,6 +111,9 @@ final class CapturePolicyStore: @unchecked Sendable {
     static let pausedTodayKey = "policy.pausedToday"
 
     private let lock = NSLock()
+    /// 3.12「新应用首次出现时菜单栏提示一次」：本次进程里还没被用户看掉的提示，按出现顺序。
+    /// 只在 `resolve` 真的往 `app_policies` 插了一行、且这个 bundle id 从没提示过时才进来。
+    private var pendingNewApps: [String] = []
     /// 串行化 `app_policies` 的「读 → 不存在才插入」与用户改档的写，
     /// 保证两者不会交错（本进程是这张表唯一的写者）。**取它的时候不持有 `lock`**。
     private let dbLock = NSLock()
@@ -141,7 +154,7 @@ final class CapturePolicyStore: @unchecked Sendable {
     func resolve(bundleID: String?) -> Resolution {
         guard let bundleID, !bundleID.isEmpty else {
             // 拿不到 bundle id 的进程（少数无 bundle 的可执行文件）不落库，按全局默认处理。
-            return Resolution(mode: Self.globalDefault, source: .default,
+            return Resolution(mode: globalDefault, source: .default,
                               temporaryUntil: nil, firstSeen: false, provisional: true)
         }
         if let until = temporaryPause(bundleID: bundleID) {
@@ -149,40 +162,47 @@ final class CapturePolicyStore: @unchecked Sendable {
                               firstSeen: false, provisional: false)
         }
         let denylisted = BuiltinDenylist.shared.contains(bundleID)
+        let fallback = globalDefault
         if let cached = (lock.withLock { cache[bundleID] }) {
-            return Self.decide(stored: cached, temporaryPausedUntil: nil, denylisted: denylisted)
+            return Self.decide(stored: cached, temporaryPausedUntil: nil, denylisted: denylisted,
+                               globalDefault: fallback)
         }
 
         // 缓存 miss：查库。库没开就只给临时判定。
         guard let recorder = recorderHandle(), recorder.isOpen else {
-            return Self.provisional(denylisted: denylisted)
+            return Self.provisional(denylisted: denylisted, globalDefault: fallback)
         }
         // 「读 → 不存在才插入」放在同一把 dbLock 下，不与 setMode 的写交错。
         let outcome: (resolution: Resolution, inserted: Bool)? = dbLock.withLock {
             recorder.withStore { store -> (resolution: Resolution, inserted: Bool) in
                 let stored = try store.appPolicy(bundleID: bundleID)
                 let resolution = Self.decide(stored: stored, temporaryPausedUntil: nil,
-                                             denylisted: denylisted)
+                                             denylisted: denylisted, globalDefault: fallback)
                 guard resolution.firstSeen else { return (resolution, false) }
                 try store.setAppPolicy(bundleID: bundleID, mode: resolution.mode,
                                        source: resolution.source)
                 return (resolution, true)
             }
         }
-        guard let outcome else { return Self.provisional(denylisted: denylisted) }
+        guard let outcome else {
+            return Self.provisional(denylisted: denylisted, globalDefault: fallback)
+        }
         lock.withLock { cache[bundleID] = (outcome.resolution.mode, outcome.resolution.source) }
         if outcome.inserted {
             recorder.logEvent(
                 kind: "app_policy_new_app",
                 detail: "bundle=\(bundleID) mode=\(outcome.resolution.mode.rawValue) "
                       + "source=\(outcome.resolution.source.rawValue)")
+            noteNewApp(bundleID: bundleID)
         }
         return outcome.resolution
     }
 
     /// 库没开 / 读不到时的临时判定：内置清单还是要认（它不依赖库），其余按全局默认。
-    private static func provisional(denylisted: Bool) -> Resolution {
-        var resolution = decide(stored: nil, temporaryPausedUntil: nil, denylisted: denylisted)
+    private static func provisional(denylisted: Bool,
+                                    globalDefault: CapturePolicyMode) -> Resolution {
+        var resolution = decide(stored: nil, temporaryPausedUntil: nil, denylisted: denylisted,
+                                globalDefault: globalDefault)
         resolution.firstSeen = false
         resolution.provisional = true
         return resolution
@@ -191,11 +211,11 @@ final class CapturePolicyStore: @unchecked Sendable {
     /// 只读判定，不落库、不写事件——菜单刷新这种一秒几次的地方用它。
     /// 库没开时缓存是空的，返回的是"内置清单 → 全局默认"的临时值（菜单会标注"库未打开"）。
     func mode(for bundleID: String?) -> CapturePolicyMode {
-        guard let bundleID, !bundleID.isEmpty else { return Self.globalDefault }
+        guard let bundleID, !bundleID.isEmpty else { return globalDefault }
         if let until = temporaryPause(bundleID: bundleID), until > Date() { return .none }
         if let cached = (lock.withLock { cache[bundleID] }) { return cached.mode }
         if BuiltinDenylist.shared.contains(bundleID) { return .none }
-        return Self.globalDefault
+        return globalDefault
     }
 
     /// 用户显式改档（应用清单窗口与菜单快捷项都走这里）。**这是唯一会覆盖库里已有行的路径**。
@@ -206,6 +226,48 @@ final class CapturePolicyStore: @unchecked Sendable {
         recorderHandle()?.logEvent(kind: "app_policy_changed",
                                    detail: "bundle=\(bundleID) mode=\(mode.rawValue) "
                                          + "source=\(source.rawValue)")
+    }
+
+    // MARK: - 全局默认档（3.12 清单窗口顶部那一格）
+
+    /// 新应用首次出现时按哪一档处理。没设过就是出厂值「事件 + 内容」。
+    ///
+    /// **改它不会动任何已有的 `app_policies` 行**：那些行是"已经定过的应用"，
+    /// 其中还包括用户显式设过的档；全局默认只对"以后才第一次出现的应用"生效。
+    var globalDefault: CapturePolicyMode {
+        defaults.string(forKey: Self.globalDefaultKey)
+            .flatMap(CapturePolicyMode.init(rawValue:)) ?? Self.builtinGlobalDefault
+    }
+
+    func setGlobalDefault(_ mode: CapturePolicyMode) {
+        defaults.set(mode.rawValue, forKey: Self.globalDefaultKey)
+        recorderHandle()?.logEvent(kind: "app_policy_global_default",
+                                   detail: "mode=\(mode.rawValue)")
+    }
+
+    // MARK: - 新应用提示（3.12「菜单栏提示一次，可一键改档」）
+
+    /// `resolve` 真的插了一行 `app_policies` 时调用。**每个 bundle id 只提示一次**：
+    /// 提示过的写进 UserDefaults 的 `policy.newAppNoticed`，重启 app 也不会再提示同一个。
+    private func noteNewApp(bundleID: String) {
+        var noticed = Set(defaults.stringArray(forKey: Self.newAppNoticedKey) ?? [])
+        guard !noticed.contains(bundleID) else { return }
+        noticed.insert(bundleID)
+        defaults.set(Array(noticed).sorted(), forKey: Self.newAppNoticedKey)
+        lock.withLock {
+            guard !pendingNewApps.contains(bundleID) else { return }
+            pendingNewApps.append(bundleID)
+            // 提示是给人看的，不是队列：只留最近 5 条，免得离开一天回来菜单里挂着几十行。
+            if pendingNewApps.count > 5 { pendingNewApps.removeFirst(pendingNewApps.count - 5) }
+        }
+    }
+
+    /// 菜单刷新时读：还没被看掉的新应用提示（最早的在前）。
+    func pendingNewAppNotices() -> [String] { lock.withLock { pendingNewApps } }
+
+    /// 用户点了提示行（或点了"知道了"）之后把它划掉。
+    func clearNewAppNotice(bundleID: String) {
+        lock.withLock { pendingNewApps.removeAll { $0 == bundleID } }
     }
 
     // MARK: - 菜单快捷项：暂停采集当前应用
@@ -245,6 +307,23 @@ final class CapturePolicyStore: @unchecked Sendable {
             return nil
         }
         return until
+    }
+
+    /// 当前仍然有效的全部临时暂停（应用清单窗口那一列要用）。顺手把过期的条目清掉。
+    func temporaryPauses(now: Date = Date()) -> [String: Date] {
+        let table = pausedTodayTable()
+        var live: [String: Date] = [:]
+        var expired: [String] = []
+        for (bundleID, epoch) in table {
+            let until = Date(timeIntervalSince1970: epoch)
+            if until > now { live[bundleID] = until } else { expired.append(bundleID) }
+        }
+        if !expired.isEmpty {
+            var pruned = table
+            for bundleID in expired { pruned.removeValue(forKey: bundleID) }
+            defaults.set(pruned, forKey: Self.pausedTodayKey)
+        }
+        return live
     }
 
     private func pausedTodayTable() -> [String: Double] {

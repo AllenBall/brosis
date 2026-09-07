@@ -569,7 +569,7 @@ final class MCPEndToEndTests: XCTestCase {
         XCTAssertTrue(listed.out.contains("无法技术上验证"), "strict_local 的口径要如实写出来")
 
         let status = try admin(["status"])
-        XCTAssertTrue(status.out.contains("\"schemaVersion\" : 2"), status.out)
+        XCTAssertTrue(status.out.contains("\"schemaVersion\" : \(Schema.version)"), status.out)
 
         _ = try runMCP(client: "claude-code",
                        calls: [("search", ["q": "知识图谱", "limit": 2])], label: "audit")

@@ -373,6 +373,191 @@ enum SelfCheck {
                 && denylist.contains("com.tigerbrokers.TigerTrade"),
               "钥匙串访问 / 密码管理器 / 验证器 / 券商 各抽一条")
 
+        // ------------------------------------------ 3b. 3.12 应用采集清单（视图模型 + 改档状态机）
+        // 窗口本身一行都不跑（自检不许创建 NSApplication），跑的是它背后的全部判定：
+        // 数据源合并、分组、排序、过滤、改档状态机，外加一次真库端到端。
+        let listRows = PolicyListVectors.build()
+        let listIDs = listRows.map(\.bundleID)
+        check("清单数据源三处合并（app_policies ∪ 最近 7 天观察 ∪ 运行中的 GUI 应用）",
+              Set(listIDs) == Set([PolicyListVectors.bundleSafari, PolicyListVectors.bundleWeChat,
+                                   PolicyListVectors.bundleTerminal,
+                                   PolicyListVectors.bundle1Password,
+                                   PolicyListVectors.bundleBothDenylistAndAdapter,
+                                   PolicyListVectors.bundleFreshApp]),
+              "\(listRows.count) 行：策略表 5 + 观察 3 + 运行中 2，去重后 6")
+
+        let byID = Dictionary(uniqueKeysWithValues: listRows.map { ($0.bundleID, $0) })
+        let groupsOK = byID[PolicyListVectors.bundleSafari]?.group == .adapter
+            && byID[PolicyListVectors.bundleWeChat]?.group == .adapter
+            && byID[PolicyListVectors.bundleTerminal]?.group == .generic
+            && byID[PolicyListVectors.bundle1Password]?.group == .denylisted
+            && byID[PolicyListVectors.bundleFreshApp]?.group == .generic
+        check("分组判定（内置清单 > 有适配器 > 通用）", groupsOK,
+              "Safari/微信=有适配器（\(byID[PolicyListVectors.bundleSafari]?.adapterID ?? "?")"
+              + " / \(byID[PolicyListVectors.bundleWeChat]?.adapterID ?? "?")），"
+              + "终端与全新应用=通用，1Password=默认不采集")
+
+        // **分组顺序这条规则只有这一行测得出来**：`com.tencent.WeChat` 既在（合成的）内置清单里、
+        // 又命中微信的适配规则。两者不重叠的行换个判定顺序结果一样，抓不到把顺序写反的改动。
+        let both = byID[PolicyListVectors.bundleBothDenylistAndAdapter]
+        check("既在内置清单又有适配器时归「默认不采集」（顺序不能反）",
+              both?.group == .denylisted && both?.adapterID == nil
+                && PolicyListVectors.adapterID(PolicyListVectors.bundleBothDenylistAndAdapter)
+                    == "wechat",
+              "\(PolicyListVectors.bundleBothDenylistAndAdapter) 命中适配规则 wechat，"
+              + "但仍归 \(both?.group.title ?? "?")；"
+              + "适配器列显示 \(both?.adapterID ?? "(空)")")
+
+        // 没有策略行、也不在内置清单里的"全新应用"按全局默认显示；
+        // 内置清单里的按 builtin_denylist；用户设过的保持 user。
+        let fresh = byID[PolicyListVectors.bundleFreshApp]
+        let defaultsOK = fresh?.mode == .eventsAndContent && fresh?.source == .default
+            && fresh?.observations == 0 && fresh?.running == true
+            && byID[PolicyListVectors.bundleWeChat]?.source == .user
+            && byID[PolicyListVectors.bundle1Password]?.source == .builtinDenylist
+        check("没有策略行的应用按全局默认显示，且与采集端同一个 decide()", defaultsOK,
+              "全新应用 \(fresh?.mode.rawValue ?? "?")/\(fresh?.source.rawValue ?? "?")，"
+              + "运行中=\(fresh?.running == true)，最近 7 天观察 \(fresh?.observations ?? -1)")
+
+        let lowDefault = PolicyListVectors.build(globalDefault: .none)
+        check("改全局默认只影响没有策略行的应用",
+              lowDefault.first { $0.bundleID == PolicyListVectors.bundleFreshApp }?.mode
+                    == CapturePolicyMode.none
+                && lowDefault.first { $0.bundleID == PolicyListVectors.bundleSafari }?.mode
+                    == .eventsAndContent,
+              "全新应用跟着变，Safari（库里有 default 行）不动")
+
+        check("排序：先分组，组内按最近 7 天观察数倒序、再按最近出现倒序、最后按 bundle id",
+              listIDs == [PolicyListVectors.bundleSafari, PolicyListVectors.bundleWeChat,
+                          PolicyListVectors.bundleTerminal, PolicyListVectors.bundleFreshApp,
+                          PolicyListVectors.bundle1Password,
+                          PolicyListVectors.bundleBothDenylistAndAdapter],
+              listIDs.joined(separator: " → "))
+
+        let filteredByName = PolicyListVectors.build(query: "微信").map(\.bundleID)
+        let filteredByBundle = PolicyListVectors.build(query: "APPLE.TERM").map(\.bundleID)
+        let filteredMiss = PolicyListVectors.build(query: "不存在的应用")
+        check("搜索框过滤：应用名 / bundle id，不区分大小写",
+              filteredByName == [PolicyListVectors.bundleWeChat]
+                && filteredByBundle == [PolicyListVectors.bundleTerminal]
+                && filteredMiss.isEmpty,
+              "「微信」命中中文名；「APPLE.TERM」命中 bundle id；无命中返回空表")
+
+        let pausedUntil = Date().addingTimeInterval(3600)
+        let pausedRow = PolicyListVectors
+            .build(temporaryPauses: [PolicyListVectors.bundleSafari: pausedUntil])
+            .first { $0.bundleID == PolicyListVectors.bundleSafari }
+        check("今日临时暂停不改存下来的那一档，只改生效档",
+              pausedRow?.mode == .eventsAndContent && pausedRow?.effectiveMode == CapturePolicyMode.none
+                && pausedRow?.temporaryUntil == pausedUntil,
+              "弹出菜单显示「\(pausedRow?.mode.label ?? "?")」，这一刻生效的是"
+              + "「\(pausedRow?.effectiveMode.label ?? "?")」")
+
+        var changeFailures: [String] = []
+        for item in PolicyListVectors.changeCases {
+            let got = PolicyModeChange.plan(current: item.current, next: item.next,
+                                            storeOpen: item.storeOpen,
+                                            existingObservations: item.existing)
+            if got != item.expected {
+                changeFailures.append("\(item.name)：期望 \(item.expected)，实得 \(got)")
+            }
+        }
+        check("改档状态机 \(PolicyListVectors.changeCases.count) 条（锁定挡下 / 只有降档问删数据 /"
+              + " 没数据不弹框）", changeFailures.isEmpty,
+              changeFailures.isEmpty
+                ? "档位高低：不采集 0 < 只记事件 1 < 事件 + 内容 2"
+                : changeFailures.joined(separator: "；"))
+
+        // 端到端：真加密库 + 真查询，把"降档 → 删数据 → 统计归零"跑一遍。
+        do {
+            let uiWorkspace = workspace.appendingPathComponent("policy-ui", isDirectory: true)
+            let uiStore = try Store.open(directory: uiWorkspace,
+                                         keyProvider: try InMemoryKeyProvider.random(),
+                                         options: StoreOptions())
+            defer { uiStore.close() }
+            let nowMS = Recorder.milliseconds()
+            let dayMS: Int64 = 86_400_000
+            let states: [Completeness] = [.complete, .complete, .partial, .unavailable, .excluded]
+            for (index, completeness) in states.enumerated() {
+                try uiStore.record(ObservationInput(
+                    ts: nowMS - Int64(index) * dayMS, displayID: 1,
+                    app: AppRef(bundleID: "com.brosis.policy-ui", name: "清单自检"),
+                    windowTitle: "窗口 \(index)",
+                    trigger: ObservationTrigger.selfCheck.coreTrigger,
+                    captureMethod: .ax, completeness: completeness, sourceState: .ok,
+                    texts: [TextFragment(text: "第 \(index) 条", region: "AXStaticText")]))
+            }
+            // 窗口外那一条（30 天前）不该被最近 7 天的统计数进来。
+            try uiStore.record(ObservationInput(
+                ts: nowMS - 30 * dayMS, displayID: 1,
+                app: AppRef(bundleID: "com.brosis.policy-ui", name: "清单自检"),
+                windowTitle: "很久以前",
+                trigger: ObservationTrigger.selfCheck.coreTrigger,
+                captureMethod: .ax, completeness: .complete, sourceState: .ok))
+            try uiStore.setAppPolicy(bundleID: "com.brosis.policy-ui",
+                                     mode: .eventsAndContent, source: .user)
+
+            let since = nowMS - Int64(PolicyList.statsWindowDays) * dayMS
+            let stat = try uiStore.appObservationStats(since: since)
+                .first { $0.bundleID == "com.brosis.policy-ui" }
+            check("最近 \(PolicyList.statsWindowDays) 天的观察数与完整性分布（一条聚合 SQL，不扫全表）",
+                  stat?.observations == 5 && stat?.complete == 2 && stat?.partial == 1
+                    && stat?.unavailable == 1 && stat?.excluded == 1
+                    && stat?.lastSeenMS == nowMS,
+                  "窗口内 \(stat?.observations ?? -1) 条 = 完整 \(stat?.complete ?? -1) / "
+                  + "部分 \(stat?.partial ?? -1) / 不可用 \(stat?.unavailable ?? -1) / "
+                  + "排除 \(stat?.excluded ?? -1)；30 天前那条没被数进来"
+                  + "（全库 \(try uiStore.appObservationCount(bundleID: "com.brosis.policy-ui")) 条）")
+            let plan = try uiStore.appObservationStatsPlan().joined(separator: " | ")
+            check("清单统计走 idx_obs_live 部分索引", plan.contains("idx_obs_live"), plan)
+
+            // 3.12 最后一条：降档 → 询问 → 选"删" → 走 3.8 的按应用删除并级联。
+            let existing = try uiStore.appObservationCount(bundleID: "com.brosis.policy-ui")
+            let decided = PolicyModeChange.plan(current: .eventsAndContent, next: .none,
+                                                storeOpen: true, existingObservations: existing)
+            let summary = try uiStore.deleteByApp(bundleID: "com.brosis.policy-ui", reason: .policy)
+            let afterStats = try uiStore.appObservationStats(since: 0)
+                .first { $0.bundleID == "com.brosis.policy-ui" }
+            let policyRow = try uiStore.appPolicy(bundleID: "com.brosis.policy-ui")
+            check("降档删数据端到端（deleteByApp reason=policy → 统计归零、策略行还在）",
+                  decided == .applyThenAskDelete(existing: 6)
+                    && summary.observationsAffected == 6 && summary.reason == .policy
+                    && afterStats == nil && policyRow?.mode == .eventsAndContent,
+                  "全库 \(existing) 条 → 删 \(summary.observationsAffected) 条观察 / "
+                  + "\(summary.textVersionsDeleted) 个文本版本 / \(summary.ftsRowsDeleted) 行索引，"
+                  + "释放 \(summary.bytesFreed) 字节；清单里这个应用的统计行消失，策略行保留")
+
+            // 全局默认档存在 UserDefaults，走一次真的往返（用独立 suite，不碰用户的设置）。
+            let suite = "com.brosis.selfcheck.ui-\(ProcessInfo.processInfo.processIdentifier)"
+            let uiDefaults = UserDefaults(suiteName: suite) ?? .standard
+            defer { uiDefaults.removePersistentDomain(forName: suite) }
+            let uiPolicy = CapturePolicyStore(defaults: uiDefaults)
+            let before = uiPolicy.globalDefault
+            uiPolicy.setGlobalDefault(.eventsOnly)
+            let after = uiPolicy.globalDefault
+            check("全局默认档往返（出厂值 → 用户设的值）",
+                  before == CapturePolicyStore.builtinGlobalDefault && after == .eventsOnly,
+                  "出厂 \(before.rawValue) → 设成 \(after.rawValue)（存 UserDefaults 的 "
+                  + "\(CapturePolicyStore.globalDefaultKey)，库没开也读得到）")
+
+            // 新应用提示：每个 bundle id 只提示一次，点掉之后不再出现。
+            let uiRecorder = Recorder()
+            uiRecorder.attach(uiStore)
+            uiPolicy.attach(recorder: uiRecorder)
+            _ = uiPolicy.resolve(bundleID: "com.brosis.brand-new")
+            let firstNotice = uiPolicy.pendingNewAppNotices()
+            uiPolicy.invalidateCache()
+            _ = uiPolicy.resolve(bundleID: "com.brosis.brand-new")   // 第二次遇见，已有策略行
+            let stillOne = uiPolicy.pendingNewAppNotices()
+            uiPolicy.clearNewAppNotice(bundleID: "com.brosis.brand-new")
+            check("新应用菜单提示只出一次，点掉后不再出现",
+                  firstNotice == ["com.brosis.brand-new"] && stillOne == firstNotice
+                    && uiPolicy.pendingNewAppNotices().isEmpty,
+                  "第一次落库时进提示队列，再遇见不重复提示，clear 之后为空")
+        } catch {
+            check("3.12 应用清单端到端", false, "\(error)")
+        }
+
         // ---------------------------------------------------------------- 4. 3.5 锁定状态机
         var lockFailures: [String] = []
         for item in LockPolicy.transitionCases {
@@ -658,6 +843,389 @@ enum SelfCheck {
             check("本地 IPC / MCP 自检", false, "\(error)")
         }
 
+        // ------------------------------------------------- 12. 适配器与视口 OCR（3.3 / D24）
+        // 全部走合成 AX 树与合成布局：不启动应用、不发 AX 消息、不截屏、不要任何权限。
+        // Vision 是本地推理，对自绘图像直接跑也不触发 TCC。
+
+        // 12.1 规则路由：四个应用各自命中自己的规则，别的应用落到兜底规则。
+        var routingOK = true
+        for rule in AdapterRegistry.all {
+            for bundleID in rule.bundleIDs where AdapterRegistry.rule(for: bundleID).id != rule.id {
+                routingOK = false
+            }
+        }
+        let fallbackRule = AdapterRegistry.rule(for: "com.apple.finder")
+        check("适配规则路由：\(AdapterRegistry.all.count) 条首批规则 + 兜底",
+              routingOK && fallbackRule.id == AdapterRegistry.generic.id
+                && fallbackRule.limits.maxNodes == AX.bfsLimits(bundleID: "com.apple.finder").maxNodes,
+              AdapterRegistry.all.map(\.id).joined(separator: " / ")
+                + "；未知应用 → \(fallbackRule.id)（\(fallbackRule.limits.label)）")
+
+        // 12.2 五条规则用例（合成树）：片段数、完整性、必含 / 必不含、OCR 请求区域。
+        for item in AdapterVectors.ruleCases {
+            let scan = AdapterEngine.scan(rule: item.rule, window: item.tree(),
+                                          windowFrame: AdapterVectors.window)
+            let text = scan.fragments.map(\.text).joined(separator: "\n")
+            let missing = item.mustContain.filter { !text.contains($0) }
+            let leaked = item.mustNotContain.filter { text.contains($0) }
+            let ocrNames = scan.ocrRequests.map(\.regionName).sorted()
+            let ok = scan.fragments.count == item.expectedFragments
+                && scan.completeness == item.expectedCompleteness
+                && missing.isEmpty && leaked.isEmpty
+                && ocrNames == item.expectedOCRRegions.sorted()
+            check("适配规则 · \(item.name)", ok,
+                  ok ? "片段 \(scan.fragments.count)、\(scan.completeness.rawValue)、"
+                     + "OCR 区域 [\(ocrNames.joined(separator: ","))]"
+                     : "片段 \(scan.fragments.count)（期望 \(item.expectedFragments)）"
+                     + "、\(scan.completeness.rawValue)（期望 \(item.expectedCompleteness.rawValue)）"
+                     + "、缺 \(missing)、泄漏 \(leaked)、OCR \(ocrNames)")
+        }
+
+        // 12.3 视口相交（含回滚区）
+        var viewportFailures: [String] = []
+        for item in AdapterVectors.viewportCases {
+            let got = Viewport.isVisible(item.frame, in: item.viewport)
+            let scrollback = Viewport.isScrollback(item.frame, in: item.viewport)
+            if got != item.expected || scrollback != item.scrollback {
+                viewportFailures.append("\(item.name)→\(String(describing: got))/\(scrollback)")
+            }
+        }
+        check("视口相交判定 \(AdapterVectors.viewportCases.count) 条（含回滚区）",
+              viewportFailures.isEmpty,
+              viewportFailures.isEmpty ? "全部一致" : viewportFailures.joined(separator: " "))
+
+        // 12.4 AXVisibleCharacterRange 裁剪
+        var rangeFailures: [String] = []
+        for item in AdapterVectors.visibleRangeCases {
+            let node = SyntheticAXNode(role: "AXTextArea", value: item.value,
+                                       visibleCharacterRange: item.range)
+            let got = node.viewportText()
+            if got?.text != item.expectedText || got?.clipped != item.expectedClipped {
+                rangeFailures.append(item.name)
+            }
+        }
+        check("AXVisibleCharacterRange 裁剪 \(AdapterVectors.visibleRangeCases.count) 条",
+              rangeFailures.isEmpty,
+              rangeFailures.isEmpty ? "全部一致" : rangeFailures.joined(separator: " "))
+
+        // 12.5 completeness 四态：三态由适配器判，excluded 由 3.12 与私密浏览先行判。
+        var completenessFailures: [String] = []
+        for item in AdapterVectors.completenessCases {
+            let scan = AdapterEngine.scan(rule: item.rule, window: item.tree(),
+                                          windowFrame: item.windowFrame)
+            if scan.completeness != item.expected {
+                completenessFailures.append("\(item.name)→\(scan.completeness.rawValue)")
+            }
+        }
+        let excludedByMode = AdapterVectors.excludedByPolicy(mode: .eventsOnly, privateBrowsing: false)
+        let excludedByPrivate = AdapterVectors.excludedByPolicy(mode: .eventsAndContent,
+                                                                privateBrowsing: true)
+        let notExcluded = AdapterVectors.excludedByPolicy(mode: .eventsAndContent,
+                                                          privateBrowsing: false)
+        check("completeness 四态各有用例（complete / partial / unavailable / excluded）",
+              completenessFailures.isEmpty && excludedByMode == .excluded
+                && excludedByPrivate == .excluded && notExcluded == nil,
+              completenessFailures.isEmpty
+                ? "适配器判三态 + 「只记事件」与私密浏览判 excluded"
+                : completenessFailures.joined(separator: " "))
+
+        // 12.6 OCR 触发条件三类 + 反例
+        var ocrTriggerFailures: [String] = []
+        for item in AdapterVectors.triggerCases {
+            let got = OCRTriggerGate.reason(ruleDeclaresOCR: item.ruleDeclaresOCR,
+                                            ocrFallback: item.ocrFallback,
+                                            axEmpty: item.axEmpty,
+                                            axChanged: item.axChanged,
+                                            frameChanged: item.frameChanged,
+                                            coverageFailed: item.coverageFailed)
+            if got != item.expected {
+                ocrTriggerFailures.append("\(item.name)→\(got?.rawValue ?? "(不触发)")")
+            }
+        }
+        check("OCR 触发条件 \(AdapterVectors.triggerCases.count) 条（三类 + 反例）",
+              ocrTriggerFailures.isEmpty,
+              ocrTriggerFailures.isEmpty
+                ? OCRTriggerReason.allCases.map(\.rawValue).joined(separator: " / ")
+                : ocrTriggerFailures.joined(separator: " "))
+
+        // 12.7 频率限制：同一窗口区域最少间隔
+        let gate = OCRTriggerGate()
+        let base = 1_000_000.0
+        let first = gate.allow(key: "com.tencent.xinWeChat|chat_panel",
+                               reason: .ruleDeclared, now: base)
+        let tooSoon = gate.allow(key: "com.tencent.xinWeChat|chat_panel",
+                                 reason: .ruleDeclared, now: base + gate.minInterval / 2)
+        let otherRegion = gate.allow(key: "com.tencent.xinWeChat|conversation_title",
+                                     reason: .ruleDeclared, now: base + gate.minInterval / 2)
+        let later = gate.allow(key: "com.tencent.xinWeChat|chat_panel",
+                               reason: .ruleDeclared, now: base + gate.minInterval + 0.01)
+        check("OCR 频率限制：同一窗口区域最少间隔 \(gate.minInterval) s",
+              first.isAllowed && !tooSoon.isAllowed && otherRegion.isAllowed && later.isAllowed
+                && gate.rateLimitedTotal == 1,
+              "首次放行、\(gate.minInterval / 2) s 后同区域被限、别的区域不受影响、"
+                + "超过间隔后放行（来源 \(gate.minIntervalSource)）")
+
+        // 12.8 阅读顺序（按 boundingBox 行聚类）
+        var orderFailures: [String] = []
+        for item in AdapterVectors.readingOrderCases {
+            let got = ReadingOrder.text(item.items)
+            if got != item.expected {
+                orderFailures.append("\(item.name)→\(got.replacingOccurrences(of: "\n", with: "⏎"))")
+            }
+        }
+        check("阅读顺序重建 \(AdapterVectors.readingOrderCases.count) 条", orderFailures.isEmpty,
+              orderFailures.isEmpty ? "行聚类 + 行内按 x 排序"
+                                    : orderFailures.joined(separator: " "))
+
+        // 12.9 低置信 token（D24）
+        let lowConfidencePositives = AdapterVectors.lowConfidencePositives
+            .filter { !ReadingOrder.lowConfidenceTokens(in: $0).isEmpty }
+        let lowConfidenceNegatives = AdapterVectors.lowConfidenceNegatives
+            .filter { ReadingOrder.lowConfidenceTokens(in: $0).isEmpty }
+        check("低置信 token 标记（D24）：正例 \(AdapterVectors.lowConfidencePositives.count) 条 /"
+              + " 反例 \(AdapterVectors.lowConfidenceNegatives.count) 条",
+              lowConfidencePositives.count == AdapterVectors.lowConfidencePositives.count
+                && lowConfidenceNegatives.count == AdapterVectors.lowConfidenceNegatives.count,
+              "短哈希 / 十六进制 / 内存地址标记低置信，不作证据")
+
+        // 12.10 气泡归属（合成布局 JSON）
+        let layouts = AdapterVectors.bubbleLayouts()
+        var bubbleFailures: [String] = []
+        for layout in layouts {
+            let bubbles = BubbleAttribution.attribute(items: layout.items,
+                                                      layout: ChatLayout(),
+                                                      group: layout.group,
+                                                      regionHeightPoints: layout.regionHeightPoints)
+            let got = bubbles.map(\.line)
+            if got != layout.expected { bubbleFailures.append("\(layout.name)→\(got)") }
+        }
+        check("气泡归属：\(layouts.count) 份合成布局（单聊左右 / 群聊昵称 / 语音标签）",
+              layouts.count == 2 && bubbleFailures.isEmpty,
+              bubbleFailures.isEmpty ? "单聊左 = 对方、右 = 自己；群聊取上方昵称；语音记 [语音]"
+                                     : bubbleFailures.joined(separator: " "))
+
+        // 12.11 裁剪坐标：AX 坐标 → 显示器局部 → 像素（含 2x 缩放与跨屏落空）
+        var cropDetail = "构图失败"
+        var cropOK = false
+        if let canvas = OCRSelfTest.makeContext(width: 800, height: 600,
+                                                background: (1, 1, 1))?.makeImage() {
+            // 显示器：原点 (100, 50)、400×300 点；图像 800×600 像素 → scale = 2。
+            let bounds = CGRect(x: 100, y: 50, width: 400, height: 300)
+            let cropped = ViewportOCR.crop(canvas,
+                                           axRect: CGRect(x: 150, y: 100, width: 200, height: 100),
+                                           displayBounds: bounds)
+            let offScreen = ViewportOCR.crop(canvas,
+                                             axRect: CGRect(x: 2_000, y: 2_000,
+                                                            width: 100, height: 100),
+                                             displayBounds: bounds)
+            cropOK = cropped?.pixelRect == CGRect(x: 100, y: 100, width: 400, height: 200)
+                && cropped?.image.width == 400 && cropped?.image.height == 200
+                && offScreen == nil
+            let pixelLabel: String
+            if let rect = cropped?.pixelRect {
+                pixelLabel = "\(Int(rect.origin.x)),\(Int(rect.origin.y)),"
+                           + "\(Int(rect.width)),\(Int(rect.height))"
+            } else {
+                pixelLabel = "nil"
+            }
+            let offScreenLabel = offScreen == nil ? "不裁（nil）" : "竟然裁了"
+            cropDetail = "AX(150,100,200,100) @ 显示器(100,50,400,300)、2x → 像素 "
+                       + pixelLabel + "；另一块屏上的矩形 → " + offScreenLabel
+        }
+        check("视口 OCR 裁剪：AX 坐标 → 显示器局部 → 像素（含跨屏落空）", cropOK, cropDetail)
+
+        // 12.12 OCR 冒烟 + 自绘图像基准（Vision 本地推理，不触发任何授权）
+        let outcomes = OCRSelfTest.run()
+        let asserted = outcomes.filter(OCRSelfTest.isAsserted)
+        let failedOutcomes = asserted.filter { !OCRSelfTest.passes($0) }
+        check("视口 OCR 冒烟：\(outcomes.count) 组自绘图像（\(OCRSelfTest.samples.count) 样张 × 2x/1x）",
+              outcomes.count == OCRSelfTest.samples.count * 2 && failedOutcomes.isEmpty,
+              failedOutcomes.isEmpty
+                ? "断言 \(asserted.count) 组：无标点标识符严格召回 ≥ \(OCRSelfTest.recallFloor)、"
+                + "带标点标识符按检索侧折叠口径召回 ≥ \(OCRSelfTest.recallFloor)、"
+                + "中文行 CER ≤ \(OCRSelfTest.chineseCERCeiling)"
+                : failedOutcomes.map {
+                    "\($0.sampleID)@\($0.scaleLabel) 严格 \(String(format: "%.2f", $0.identifierRecall))"
+                    + " 折叠 \(String(format: "%.2f", $0.foldedIdentifierRecall))"
+                    + " CER \(String(format: "%.3f", $0.chineseCER))"
+                    + " 缺 \($0.missingIdentifiers) / \($0.foldedMissingIdentifiers)"
+                  }.joined(separator: "；"))
+        for outcome in outcomes {
+            print("      \(outcome.sampleID)@\(outcome.scaleLabel) "
+                  + "\(outcome.pixelWidth)×\(outcome.pixelHeight)："
+                  + "无标点标识符严格召回 \(String(format: "%.3f", outcome.identifierRecall))、"
+                  + "带标点标识符 折叠 \(String(format: "%.3f", outcome.foldedIdentifierRecall))"
+                  + " / 严格 \(String(format: "%.3f", outcome.punctuatedStrictRecall))、"
+                  + "CER \(String(format: "%.4f", outcome.cer))、"
+                  + "中文行 CER \(String(format: "%.4f", outcome.chineseCER))、"
+                  + "置信度 \(String(format: "%.3f", outcome.meanConfidence))、"
+                  + "\(Int(outcome.elapsedMS)) ms、真值 \(outcome.truthChars) 字符 → "
+                  + "\(outcome.ocrChars) 字符"
+                  + (OCRSelfTest.isAsserted(outcome) ? "" : "（1x 代码小字按 D24 只报数不断言）"))
+        }
+
+        // 12.13 采样审计的覆盖率口径（core 的 CaptureCoverage，这里只做一次冒烟）
+        let coverageSame = CaptureCoverage.coverage(axText: "适配器与视口 OCR",
+                                                    ocrText: "适配器与视口 OCR 还有别的东西")
+        let coverageHalf = CaptureCoverage.coverage(axText: "视口内的正文 视口外的正文 abcdef",
+                                                    ocrText: "视口内的正文")
+        check("采样审计覆盖率口径（AX token 在 OCR 文本里的命中比例）",
+              coverageSame.coverage == 1.0 && coverageHalf.coverage > 0.2
+                && coverageHalf.coverage < 0.8,
+              "全命中 \(String(format: "%.3f", coverageSame.coverage))、"
+                + "只读到一半 \(String(format: "%.3f", coverageHalf.coverage))"
+                + "（阈值 \(CaptureCoordinator.coverageThresholdDefault)）")
+
+
+        // 12.14 端到端：合成上下文 → 协调者 → 自绘"屏幕" → OCR 观察 + capture_audit
+        // 走的是产品路径本身（`CaptureCoordinator.handleFrame`），只把"显示器有多大"喂进来。
+        do {
+            let ocrRoot = workspace.appendingPathComponent("ocr-e2e", isDirectory: true)
+            var options = StoreOptions()
+            options.deviceID = "selfcheck-ocr"
+            let ocrStore = try Store.open(directory: ocrRoot,
+                                          keyProvider: try InMemoryKeyProvider.random(),
+                                          options: options)
+            defer { ocrStore.close() }
+            let ocrRecorder = Recorder()
+            ocrRecorder.attach(ocrStore)
+
+            let suite = "com.brosis.selfcheck.ocr-\(ProcessInfo.processInfo.processIdentifier)"
+            let ocrDefaults = UserDefaults(suiteName: suite) ?? .standard
+            defer { ocrDefaults.removePersistentDomain(forName: suite) }
+            let coordinator = CaptureCoordinator(defaults: ocrDefaults)
+
+            // 自绘一张 864×560 的"屏幕"（深色聊天面板样张的 1x），显示器就当成 864×560 点。
+            guard let sample = OCRSelfTest.samples.first(where: { $0.id == "dark_ui" }),
+                  let base = OCRSelfTest.render(sample),
+                  let screen = OCRSelfTest.downscale(base, factor: 0.5,
+                                                     background: sample.background) else {
+                check("视口 OCR 端到端：自绘屏幕", false, "构图失败")
+                throw CaptureController.CaptureError.noDisplay
+            }
+            let bounds = CGRect(x: 0, y: 0, width: Double(screen.width), height: Double(screen.height))
+
+            // ① AX 全空的应用（微信形态）：规则声明 OCR → 写一条 capture_method = ocr 的观察。
+            let wechatContext = CaptureCoordinator.Context(
+                bundleID: "com.brosis.selfcheck.wechat", appName: "自检微信",
+                ruleID: AdapterRegistry.wechat.id, displayID: 1, windowFrame: bounds,
+                windowTitle: "自检会话", observationID: nil, axText: "",
+                regionTexts: [:],
+                ocrRequests: [OCRRequest(regionName: "chat_panel", kind: .messageList,
+                                         rect: bounds, reason: .ruleDeclared)],
+                chatLayout: ChatLayout(), completeness: .unavailable, captureMethod: .ocr,
+                at: Date().timeIntervalSince1970)
+            coordinator.noteScan(wechatContext)
+            let ranOCR = coordinator.handleFrame(screen, displayID: 1, recorder: ocrRecorder,
+                                                 gated: true, trigger: "self_check",
+                                                 bundleID: "com.brosis.selfcheck.wechat",
+                                                 displayBoundsOverride: bounds)
+            let ocrIDs = try ocrStore.search(q: "适配器", limit: 5).hits.map(\.evidenceID)
+            let ocrEvidence = try ocrStore.getEvidence(ids: ocrIDs, grant: nil, neighbors: 0)
+            let ocrItem = ocrEvidence.items.first
+            let ocrOccurrence = ocrItem?.occurrences.first
+            check("视口 OCR 端到端：AX 全空 → capture_method = ocr 的观察入库",
+                  ranOCR == 1 && ocrItem?.captureMethod == CaptureMethod.ocr.rawValue
+                    && ocrOccurrence?.region == "ocr:wechat.chat_panel"
+                    && (ocrOccurrence?.confidence ?? 0) > 0
+                    && (ocrOccurrence?.note?.contains("lowconf=") ?? false)
+                    && (ocrItem?.text?.contains("适配器") ?? false),
+                  "区域 \(ocrOccurrence?.region ?? "nil")、"
+                    + "置信度 \(String(format: "%.2f", ocrOccurrence?.confidence ?? 0))、"
+                    + "note \(ocrOccurrence?.note ?? "nil")")
+
+            // ①' **陈旧上下文**（R2 复核发现的缺陷，这里是它的复现）：上下文只在 AX 扫描时更新，
+            // 而私密浏览 / AX 超时 / 读不到焦点窗口这三支**不扫描**，截图那条通路却照常出图。
+            // 不核身份的话，上一个应用（这里是微信）排的 OCR 请求就会落到**另一个应用的画面**上，
+            // 把无痕窗口的正文以微信的身份、`capture_method = ocr` 入库。
+            // 这里换一张完全不同的自绘"屏幕"当作那个新应用：期望一个区域都不跑、一个字都不入库。
+            guard let otherSample = OCRSelfTest.samples.first(where: { $0.id == "body_mixed" }),
+                  let otherBase = OCRSelfTest.render(otherSample),
+                  let otherScreen = OCRSelfTest.downscale(otherBase, factor: 0.5,
+                                                          background: otherSample.background) else {
+                check("视口 OCR 端到端：另一个应用的自绘屏幕", false, "构图失败")
+                throw CaptureController.CaptureError.noDisplay
+            }
+            // 先把限流时钟清掉：要考的是"身份对不上"，不能让 5 s 限流替它挡住。
+            coordinator.trigger.reset()
+            let ranStale = coordinator.handleFrame(otherScreen, displayID: 1, recorder: ocrRecorder,
+                                                   gated: true, trigger: "self_check",
+                                                   bundleID: "com.brosis.selfcheck.private",
+                                                   displayBoundsOverride: bounds)
+            let leakedHits = try ocrStore.search(q: "采集守护进程", limit: 5).hits.count
+            // 阳性对照：同一张图、同一时刻，只把前台应用换回上下文里的那个 → 照样会认、会入库。
+            // （上一次调用发现身份对不上时已经把这份陈旧上下文丢掉了，所以这里要重新排一次。）
+            coordinator.noteScan(wechatContext)
+            coordinator.trigger.reset()
+            let ranSameApp = coordinator.handleFrame(otherScreen, displayID: 1,
+                                                     recorder: ocrRecorder,
+                                                     gated: true, trigger: "self_check",
+                                                     bundleID: "com.brosis.selfcheck.wechat",
+                                                     displayBoundsOverride: bounds)
+            let sameAppHits = try ocrStore.search(q: "采集守护进程", limit: 5).hits.count
+            check("陈旧上下文：前台已换应用时不跑上一个应用的 OCR 请求（私密浏览 / AX 超时）",
+                  ranStale == 0 && leakedHits == 0
+                    && coordinator.currentStats.ocrStaleContext == 1
+                    && ranSameApp == 1 && sameAppHits > 0,
+                  "换应用后 跑 \(ranStale) 个区域 / 命中 \(leakedHits) 条（上下文过期计数 "
+                    + "\(coordinator.currentStats.ocrStaleContext)）；"
+                    + "阳性对照（同一张图换回原应用）跑 \(ranSameApp) 个区域 / 命中 "
+                    + "\(sameAppHits) 条")
+
+            // ①'' **OCR 侧的新鲜度判定**：同一区域再认一次同一张图，文本逐字节没变 →
+            // OCR 照跑（拦不住，得认了才知道变没变），但**不写第二条观察**。
+            let beforeRepeat = try ocrStore.count(table: "observations")
+            coordinator.trigger.reset()
+            let ranRepeat = coordinator.handleFrame(otherScreen, displayID: 1,
+                                                    recorder: ocrRecorder,
+                                                    gated: true, trigger: "self_check",
+                                                    bundleID: "com.brosis.selfcheck.wechat",
+                                                    displayBoundsOverride: bounds)
+            let afterRepeat = try ocrStore.count(table: "observations")
+            check("OCR 新鲜度：同一区域正文逐字节未变时不再写第二条观察",
+                  ranRepeat == 1 && afterRepeat == beforeRepeat
+                    && coordinator.currentStats.ocrUnchanged == 1,
+                  "重复识别 \(ranRepeat) 个区域、观察 \(beforeRepeat) → \(afterRepeat) 条"
+                    + "（未变化计数 \(coordinator.currentStats.ocrUnchanged)）")
+
+            let ocrStats = coordinator.currentStats
+
+            // ② AX 非空的应用：轮到采样审计 → 全窗口 OCR 对照 → 写 capture_audit。
+            // reset() 会清掉上面那一段的统计，所以先把它存下来再清。
+            coordinator.reset()
+            coordinator.noteScan(CaptureCoordinator.Context(
+                bundleID: "com.brosis.selfcheck.audit", appName: "自检审计",
+                ruleID: AdapterRegistry.generic.id, displayID: 1, windowFrame: bounds,
+                windowTitle: "自检窗口", observationID: 42,
+                axText: "李四：确认了，飞书和微信都在里面",
+                regionTexts: ["window": "李四：确认了，飞书和微信都在里面"],
+                ocrRequests: [], chatLayout: nil, completeness: .partial, captureMethod: .ax,
+                at: Date().timeIntervalSince1970))
+            coordinator.forceAuditDue()
+            _ = coordinator.handleFrame(screen, displayID: 1, recorder: ocrRecorder,
+                                        gated: true, trigger: "self_check",
+                                        bundleID: "com.brosis.selfcheck.audit",
+                                        displayBoundsOverride: bounds)
+            let auditRows = try ocrStore.captureAuditTail(limit: 5)
+            let auditRow = auditRows.first
+            check("采样审计端到端：全窗口 OCR 对照 → capture_audit 一行",
+                  auditRows.count == 1 && auditRow?.observationID == 42
+                    && auditRow?.app == "com.brosis.selfcheck.audit"
+                    // method 照抄被审计那条观察的 capture_method（兜底规则 = ax），
+                    // 不再靠 completeness 猜（R2 复核：excluded 的观察根本不会走到这里）。
+                    && auditRow?.method == .ax
+                    && (auditRow?.coverage ?? 0) >= 0.8 && (auditRow?.axTokens ?? 0) > 0,
+                  "method \(auditRow?.method.rawValue ?? "nil")、"
+                    + "覆盖率 \(String(format: "%.3f", auditRow?.coverage ?? 0))"
+                    + "（token \(auditRow?.hitTokens ?? 0)/\(auditRow?.axTokens ?? 0)，"
+                    + "AX \(auditRow?.axChars ?? 0) 字符 vs OCR \(auditRow?.ocrChars ?? 0) 字符，"
+                    + "\(Int(auditRow?.elapsedMS ?? 0)) ms）")
+            print("      协调者统计（区域 OCR）：\(ocrStats.summary)")
+            print("      协调者统计（采样审计）：\(coordinator.currentStats.summary)")
+        } catch {
+            check("视口 OCR / 采样审计端到端", false, "\(error)")
+        }
+
         // ---------------------------------------------------------------- 参数快照
         print("加密库自检工作目录：\(workspace.path)（跑完删除）")
         print("MCP：\(MCPTool.allCases.count) 个工具 "
@@ -866,6 +1434,103 @@ enum VectorDump {
         }
         print("\nResources/exclusions.txt 读到 \(BuiltinDenylist.shared.fromResource) 条，"
               + "代码内 \(BuiltinDenylist.shared.fromCode) 条，取并集后 \(BuiltinDenylist.shared.count) 条。")
+
+        print("\n## 8. 适配规则（3.3；首批 \(AdapterRegistry.all.count) 条 + 兜底）")
+        for rule in AdapterRegistry.all + [AdapterRegistry.generic] {
+            print("\n### \(rule.name)（id `\(rule.id)`）")
+            print("- bundle id：\(rule.bundleIDs.isEmpty ? "（兜底，匹配不到别的规则时用）" : rule.bundleIDs.joined(separator: "、"))")
+            print("- Electron：\(rule.electron ? "是（读树前先设 AXManualAccessibility）" : "否")"
+                  + "；BFS 限额 \(rule.limits.label)；frame 探测上限 \(rule.maxFrameProbes)")
+            print("- 区域：")
+            for region in rule.regions { print("  - \(region.label)，字符上限 \(region.maxChars)") }
+            if let layout = rule.chatLayout {
+                print("- 气泡归属：自己侧阈值 \(layout.selfSideThreshold)、"
+                      + "昵称间隔 \(layout.nicknameGap) pt、标签 \(layout.selfLabel) / \(layout.peerLabel)")
+            }
+            print("- 说明与局限：\(rule.notes)")
+        }
+
+        print("\n## 9. OCR 触发条件（3.3：只有三类）")
+        print("| # | 用例 | 规则声明 | 允许回退 | AX 空 | AX 变了 | 帧变化 | 覆盖失败 | 期望 | 实得 | 判定 |")
+        print("|---|---|---|---|---|---|---|---|---|---|---|")
+        for (index, item) in AdapterVectors.triggerCases.enumerated() {
+            let got = OCRTriggerGate.reason(ruleDeclaresOCR: item.ruleDeclaresOCR,
+                                            ocrFallback: item.ocrFallback,
+                                            axEmpty: item.axEmpty, axChanged: item.axChanged,
+                                            frameChanged: item.frameChanged,
+                                            coverageFailed: item.coverageFailed)
+            print("| \(index + 1) | \(item.name) | \(item.ruleDeclaresOCR) | \(item.ocrFallback) "
+                  + "| \(item.axEmpty) | \(item.axChanged) | \(item.frameChanged) "
+                  + "| \(item.coverageFailed) | \(item.expected?.rawValue ?? "(不触发)") "
+                  + "| \(got?.rawValue ?? "(不触发)") | \(got == item.expected ? "PASS" : "FAIL") |")
+        }
+        let gate = OCRTriggerGate()
+        print("\n频率限制：同一「bundle id + 区域名」最少间隔 **\(gate.minInterval) s**"
+              + "（来源 \(gate.minIntervalSource)，UserDefaults 键 `\(OCRTriggerGate.minIntervalKey)`，"
+              + "下限 \(OCRTriggerGate.minIntervalMinimum) s）。")
+
+        print("\n## 10. 完整性四态的判定来源")
+        print("| 状态 | 谁判的 | 条件 |")
+        print("|---|---|---|")
+        print("| complete | AdapterEngine | 规则声明的必需区域全部读到，且没有视口外内容 / 限额命中 / 字符范围裁剪 / 待办 OCR |")
+        print("| partial | AdapterEngine | 读到了一些，但上面任意一条成立 |")
+        print("| unavailable | AdapterEngine | 一个字都没读到（含读不到焦点窗口） |")
+        print("| excluded | EventSkeleton | 3.12 的「不采集」/「只记事件」档，或私密浏览命中——**读都不读** |")
+        for item in AdapterVectors.completenessCases {
+            let scan = AdapterEngine.scan(rule: item.rule, window: item.tree(),
+                                          windowFrame: item.windowFrame)
+            print("- \(item.name)：实得 `\(scan.completeness.rawValue)`"
+                  + "（\(item.why)）\(scan.completeness == item.expected ? "PASS" : "FAIL")")
+        }
+
+        print("\n## 11. 视口 OCR 自绘样张基准（Vision accurate，zh-Hans + en-US，纠错关）")
+        print("| 样张 | 尺寸 | 像素 | 无标点标识符严格召回 | 带标点 折叠 / 严格 | CER | 中文行 CER | 置信度 | 耗时 ms |")
+        print("|---|---|---|---:|---:|---:|---:|---:|---:|")
+        for outcome in OCRSelfTest.run() {
+            print("| \(outcome.sampleName) | \(outcome.scaleLabel) "
+                  + "| \(outcome.pixelWidth)×\(outcome.pixelHeight) "
+                  + "| \(String(format: "%.3f", outcome.identifierRecall)) "
+                  + "| \(String(format: "%.3f", outcome.foldedIdentifierRecall)) / "
+                  + "\(String(format: "%.3f", outcome.punctuatedStrictRecall)) "
+                  + "| \(String(format: "%.4f", outcome.cer)) "
+                  + "| \(String(format: "%.4f", outcome.chineseCER)) "
+                  + "| \(String(format: "%.3f", outcome.meanConfidence)) "
+                  + "| \(Int(outcome.elapsedMS)) |")
+        }
+        print("\n判定线：无标点标识符严格召回 ≥ \(OCRSelfTest.recallFloor)、"
+              + "带标点标识符按检索侧折叠口径召回 ≥ \(OCRSelfTest.recallFloor)、"
+              + "中文行 CER ≤ \(OCRSelfTest.chineseCERCeiling)；"
+              + "1x 的代码小字按 D24 只报数不断言。")
+
+        print("\n## 12. 3.12 应用采集清单：合成数据源合并 → 分组 / 排序 / 每行显示什么")
+        // 「最近出现」那一列是相对时间（"N 天前"），随跑的日子变，不放进转储表，
+        // 免得同一份代码今天和明天转出来的表不一样。它的判定在 `lastSeenLabel`。
+        print("| # | 分组 | 应用 | bundle id | 采集模式 | 来源 | 最近 7 天 | 完整性分布 | 状态 |")
+        print("|---|---|---|---|---|---|---:|---|---|")
+        for (index, row) in PolicyListVectors.build().enumerated() {
+            print("| \(index + 1) | \(row.adapterID.map { "有适配器 · \($0)" } ?? row.group.title) "
+                  + "| \(row.name) | `\(row.bundleID)` | \(row.mode.label) | \(row.source.rawValue) "
+                  + "| \(row.observations) | \(row.completenessLabel) | \(row.statusLabel()) |")
+        }
+        print("\n数据源：`app_policies` 全表 ∪ 最近 \(PolicyList.statsWindowDays) 天的观察聚合 "
+              + "∪ NSWorkspace 当前运行的 GUI 应用。分组顺序：内置清单 > 有适配器 > 通用；"
+              + "组内按最近 7 天观察数倒序、再按最近出现倒序、再按 bundle id。")
+
+        print("\n## 13. 3.12 改档流程的状态机（\(PolicyListVectors.changeCases.count) 条）")
+        print("| # | 用例 | 原档 | 新档 | 库开着 | 全库观察数 | 期望 | 实得 | 判定 |")
+        print("|---|---|---|---|---|---:|---|---|---|")
+        for (index, item) in PolicyListVectors.changeCases.enumerated() {
+            let got = PolicyModeChange.plan(current: item.current, next: item.next,
+                                            storeOpen: item.storeOpen,
+                                            existingObservations: item.existing)
+            print("| \(index + 1) | \(item.name) | \(item.current.label) | \(item.next.label) "
+                  + "| \(item.storeOpen) | \(item.existing) | \(item.expected) | \(got) "
+                  + "| \(got == item.expected ? "PASS" : "FAIL") |")
+        }
+        print("\n档位高低：不采集 \(CapturePolicyMode.none.rank) < "
+              + "只记事件 \(CapturePolicyMode.eventsOnly.rank) < "
+              + "事件 + 内容 \(CapturePolicyMode.eventsAndContent.rank)；"
+              + "只有 rank 变小才问删数据，删走 Store.deleteByApp(reason: .policy)，默认不删。")
         return 0
     }
 

@@ -115,6 +115,9 @@ final class CaptureController: NSObject, @unchecked Sendable {
 
     private let recorder: Recorder
     private let policy: CapturePolicyStore
+    /// 适配器 / 视口 OCR 的协调者（M1 R2 / T8）。截图侧只负责把「门控结论 + 这张图」
+    /// 交出去，认不认字、认哪块由规则决定。
+    private let coordinator: CaptureCoordinator
     private let hasher = DHasher()
     private let onEvent: @Sendable (CaptureEvent) -> Void
     private let queue = DispatchQueue(label: "com.brosis.app.capture", qos: .utility)
@@ -133,13 +136,17 @@ final class CaptureController: NSObject, @unchecked Sendable {
     /// 前台应用与它的采集档位。由 `AppDelegate` 在焦点变化时推进来——
     /// 截图跑在 utility 队列上，不能在那里去问 `NSWorkspace.frontmostApplication`。
     private var frontmostBundleID: String?
-    private var frontmostMode: CapturePolicyMode = CapturePolicyStore.globalDefault
+    /// 初值只是"还没收到第一次 `setFrontmostApp` 之前的假设"，用出厂默认档；
+    /// 真正的档位一律由 `AppDelegate` 推进来（3.12 的全局默认可被用户改，见 `CapturePolicyStore`）。
+    private var frontmostMode: CapturePolicyMode = CapturePolicyStore.builtinGlobalDefault
 
     init(recorder: Recorder,
          policy: CapturePolicyStore = .shared,
+         coordinator: CaptureCoordinator = .shared,
          onEvent: @escaping @Sendable (CaptureEvent) -> Void) {
         self.recorder = recorder
         self.policy = policy
+        self.coordinator = coordinator
         self.onEvent = onEvent
         super.init()
     }
@@ -213,7 +220,11 @@ final class CaptureController: NSObject, @unchecked Sendable {
         recorder.logEvent(kind: "capture_armed",
                        detail: "mode=on_demand display=\(display) periodic=\(Self.periodicInterval)s "
                              + "periodic_source=\(Self.periodicIntervalSource) "
-                             + "min_interval=\(Self.minimumInterval)s debounce=\(Self.debounceInterval)s")
+                             + "min_interval=\(Self.minimumInterval)s debounce=\(Self.debounceInterval)s "
+                             + "ocr_min_interval=\(coordinator.trigger.minInterval)s"
+                             + "(\(coordinator.trigger.minIntervalSource)) "
+                             + "audit_every=\(coordinator.auditEvery)"
+                             + "(\(coordinator.auditEverySource))")
         onEvent(.started(displayID: display))
         requestCapture(reason: "armed")
     }
@@ -231,7 +242,8 @@ final class CaptureController: NSObject, @unchecked Sendable {
         stopPeriodicTimer()
         guard wasArmed else { return }
         let stats = currentStats
-        recorder.logEvent(kind: "capture_disarmed", detail: "\(reason)；\(stats.summary)")
+        recorder.logEvent(kind: "capture_disarmed",
+                          detail: "\(reason)；\(stats.summary)；\(coordinator.currentStats.summary)")
     }
 
     private func startPeriodicTimer() {
@@ -452,6 +464,18 @@ final class CaptureController: NSObject, @unchecked Sendable {
             return (hamming, cells, ratio, gated, stats.captures)
         }
 
+        // —— M1 R2 / T8：这一刻是视口 OCR 唯一的挂点 ——
+        // 门控结果先送给协调者（第二类触发条件"帧变化超阈值但 AX 值未变"要用它），
+        // 再把这张图交出去跑待办的区域 OCR 与采样审计。绝大多数帧这里什么都不做：
+        // 没有待办请求、也没轮到审计时 `handleFrame` 直接返回 0。
+        // `bundleID` 一路带进 `handleFrame`：上下文是上一次 AX 扫描留下的，
+        // 而私密浏览 / AX 超时那几支根本不扫描，前台却已经换了人——不核身份就会串台。
+        let bundleID = withStateLock { frontmostBundleID }
+        coordinator.noteFrameGate(bundleID: bundleID, gated: gated)
+        let ocrRegions = coordinator.handleFrame(image, displayID: displayID, recorder: recorder,
+                                                 gated: gated, trigger: reason,
+                                                 bundleID: bundleID)
+
         recorder.recordCaptureStat(displayID: displayID,
                                    status: "complete",
                                    trigger: reason,
@@ -463,7 +487,8 @@ final class CaptureController: NSObject, @unchecked Sendable {
                                    hamming: hamming,
                                    dirtyRects: changedCells,
                                    dirtyAreaRatio: changedRatio,
-                                   gated: gated)
+                                   gated: gated,
+                                   ocrRegions: ocrRegions > 0 ? ocrRegions : nil)
 
         if count % Self.progressEvery == 0 {
             recorder.logEvent(kind: "capture_progress", detail: currentStats.summary)

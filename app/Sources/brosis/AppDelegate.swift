@@ -55,6 +55,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         lock.onLocking = { [weak self] in self?.stopSubsystems(reason: "locking") }
 
+        // 3.12 的应用采集清单窗口。**这里只是接线，不创建窗口**——
+        // 窗口在用户第一次点菜单项时才建（LSUIElement 的进程不该在启动时拉起 AppKit 窗口）。
+        PoliciesWindowController.shared.configure(recorder: recorder) { [weak self] bundleID, mode in
+            guard let self else { return }
+            // 「生效方式在采集时」：改完档立刻把新档位推给截图侧，不等下一次前台切换。
+            if bundleID == self.foregroundBundleID {
+                self.capture?.setFrontmostApp(bundleID: bundleID, mode: mode)
+            }
+            self.refreshMenu()
+        }
+
         buildStatusItem()
         NSWorkspace.shared.notificationCenter.addObserver(
             self, selector: #selector(applicationActivated(_:)),
@@ -344,6 +355,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         menu.addItem(appPolicyMenuItem())
 
+        // 3.12：设置里那一页"应用"。库锁着也能打开（只是改不了档，窗口里有横幅说明）。
+        let policies = NSMenuItem(title: "应用采集清单…",
+                                  action: #selector(openPoliciesWindow), keyEquivalent: "")
+        policies.target = self
+        menu.addItem(policies)
+
+        // 3.12「新应用：首次出现时按全局默认处理，菜单栏提示一次，可一键改档」。
+        // 一次只挂最早那一条，点掉一条再露下一条——菜单是给人看的，不是队列。
+        if let newApp = CapturePolicyStore.shared.pendingNewAppNotices().first {
+            let mode = CapturePolicyStore.shared.mode(for: newApp)
+            let notice = NSMenuItem(
+                title: "新应用 \(newApp) 已按默认档「\(Self.modeLabel(mode))」记录（点此改档）",
+                action: #selector(openNewAppNotice(_:)), keyEquivalent: "")
+            notice.target = self
+            notice.representedObject = newApp
+            menu.addItem(notice)
+        }
+
         if !permissions.allGranted {
             let request = NSMenuItem(title: "请求权限…",
                                      action: #selector(requestPermissions), keyEquivalent: "")
@@ -377,6 +406,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             menu.addItem(disabledItem("上次导出：\(lastStatsExport)"))
         }
 
+        // T10（分发管线）留下的入口，按 tools/bench/results/m1_r2b_distribution_2026-09-08.md
+        // 第 5 节接进来：菜单项自带 target/action 与可用性判定，默认不联网、fail-closed。
+        menu.addItem(UpdaterController.shared.makeMenuItem())
+
         menu.addItem(.separator())
         let quit = NSMenuItem(title: "退出 brosis", action: #selector(quit), keyEquivalent: "q")
         quit.target = self
@@ -398,13 +431,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         return label
     }
 
-    static func modeLabel(_ mode: CapturePolicyMode) -> String {
-        switch mode {
-        case .none:             return "不采集"
-        case .eventsOnly:       return "只记事件"
-        case .eventsAndContent: return "事件 + 内容"
-        }
-    }
+    /// 三档的中文名只有一处定义（`CapturePolicyMode.label`，见 Policies/PolicyList.swift），
+    /// 菜单与应用清单窗口共用，免得两处文案漂移。
+    static func modeLabel(_ mode: CapturePolicyMode) -> String { mode.label }
 
     /// 3.12 的菜单快捷项：「暂停采集当前应用（今天 / 永久）」。
     private func appPolicyMenuItem() -> NSMenuItem {
@@ -474,6 +503,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         CapturePolicyStore.shared.clearTemporaryPause(bundleID: bundleID)
         CapturePolicyStore.shared.setMode(.eventsAndContent, bundleID: bundleID, source: .user)
         capture?.setFrontmostApp(bundleID: bundleID, mode: .eventsAndContent)
+        refreshMenu()
+    }
+
+    @objc private func openPoliciesWindow() {
+        PoliciesWindowController.shared.present()
+    }
+
+    /// 点掉「新应用 X …」那一行：划掉提示，打开清单窗口并定位到那一行。
+    @objc private func openNewAppNotice(_ sender: NSMenuItem) {
+        guard let bundleID = sender.representedObject as? String else { return }
+        CapturePolicyStore.shared.clearNewAppNotice(bundleID: bundleID)
+        PoliciesWindowController.shared.present(select: bundleID)
         refreshMenu()
     }
 

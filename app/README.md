@@ -1,4 +1,4 @@
-# app/ — brosis.app 采集端（M1 / R1 · T4，R2 · T7 + T5）
+# app/ — brosis.app 采集端（M1 / R1 · T4，R2 · T7 + T5 + T8 + T10 + T9）
 
 对应：`docs/实施计划.md` 的 **3.1**（采集端 + 单一存储服务）、**3.3**（采集策略与完整性状态）、
 **3.5**（密钥与锁定状态机）、**3.12**（应用采集清单）、**4.2**（规则脱敏、暂停触发器）、
@@ -64,30 +64,55 @@
 ```
 app/
 ├── Package.swift                     SwiftPM 可执行目标 brosis；依赖 .package(path: "../core")
+│                                     与 Sparkle 2（唯一的外部依赖，exact "2.9.6"，见 Package.resolved）
 ├── build_app.sh                      swift build（app + core 的 brosis-mcp）→ 组装 .app →
 │                                     先签内嵌的 brosis-mcp 再签 bundle → 验证
 ├── Sources/brosis/
-│   ├── main.swift                    入口；--version / --self-check / --dump-vectors 都不创建 NSApplication
+│   ├── main.swift                    入口；--version / --self-check / --dump-vectors / --dump-ocr
+│   │                                 都不创建 NSApplication
 │   ├── BuildInfo.swift               版本、bundle id、ObservationTrigger 及其到 core 枚举的收敛
 │   ├── AppDelegate.swift             菜单栏（录制 / 暂停 / 锁定 / 权限缺失）、一键暂停、
 │   │                                 「暂停采集当前应用（今天 / 永久）」、锁定 / 解锁、登录项、
-│   │                                 「导出存储统计…」
+│   │                                 「导出存储统计…」、「应用采集清单…」、「检查更新…」、
+│   │                                 新应用一次性提示行
 │   ├── LockController.swift          3.5 锁定状态机：LockPolicy（纯函数）+ 取钥 / 开库 / 校验 / checkpoint / 关库
 │   │                                 并持有下面这个 IPC 服务端（它是本进程唯一拿得到 Store 的地方）
 │   ├── IPCService.swift              3.1 / 3.6 的本地 IPC 服务端：<数据目录>/ipc.sock（0600）、
 │   │                                 对端同 Team ID 校验（写死，不读环境变量）、按客户端限流
 │   ├── Recorder.swift                写入 BrosisCore.Store 的唯一出口 + DataLocation（D16）+ AXTextSummary
-│   ├── CapturePolicy.swift           3.12 三档数据层、内置默认不采集清单、私密浏览判定
+│   ├── CapturePolicy.swift           3.12 三档数据层、内置默认不采集清单、全局默认档、
+│   │                                 新应用一次性提示、今日临时暂停、私密浏览判定
+│   ├── Policies/                     **3.12 应用采集清单界面（M1 R2 / T9）**
+│   │   ├── PolicyList.swift          视图模型（纯函数）：三处数据源合并、分组、排序、过滤、
+│   │   │                             改档状态机 + 自检用的合成向量
+│   │   └── PoliciesWindow.swift      AppKit 窗口：NSTableView（分组行 + 每行一个档位弹出菜单）、
+│   │                                 顶部全局默认档与搜索框、降档时的删数据询问
 │   ├── Redaction.swift               入库前规则脱敏（gitleaks 子集 + Luhn + 验证码）+ 33 条测试向量
 │   ├── Permissions.swift             TCC 探测与请求；SystemState（空闲、安全输入、锁屏）
 │   ├── EventSkeleton.swift           NSWorkspace 通知 + AXObserver + 屏保通知 + 显示器归属 + 策略闸门
 │   ├── AXSupport.swift               AX 读取（进程级 0.5 s 超时）、Chromium/Electron 两路判定 +
 │   │                                 AXManualAccessibility、按 bundle id 的 BFS 限额、正文与统计
+│   ├── Adapters/                     **适配规则引擎（3.3，M1 R2 / T8）**
+│   │   ├── AXNodeSource.swift        读 AX 的协议 + 真实实现 LiveAXNode + 测试用合成树 SyntheticAXNode
+│   │   ├── AdapterRule.swift         规则的纯数据结构：区域定位 / 读取方式 / 视口处理 / 气泡布局
+│   │   ├── AdapterRegistry.swift     首批规则：Safari、Claude 桌面版、飞书、微信 + 通用兜底
+│   │   ├── AdapterEngine.swift       执行规则：定位 → 读取（含视口裁剪）→ 排 OCR → 判完整性
+│   │   ├── BubbleAttribution.swift   气泡归属（单聊左右 / 群聊昵称 / 语音标签）+ 合成布局结构
+│   │   └── AdapterVectors.swift      四棵合成 AX 树与全部判定用例（自检与 --dump-vectors 共用）
+│   ├── OCR/                          **视口 OCR（3.3 / D24，M1 R2 / T8）**
+│   │   ├── OCRTrigger.swift          三类触发条件（纯函数）+ 同一窗口区域的最小间隔限流
+│   │   ├── ReadingOrder.swift        按 boundingBox 行聚类重建阅读顺序 + 低置信 token 判定
+│   │   ├── ViewportOCR.swift         裁剪（AX 坐标 → 显示器局部 → 像素）+ Vision accurate
+│   │   ├── CaptureCoordinator.swift  把 AX 扫描、截图帧、OCR、采样审计接起来的协调者
+│   │   ├── OCRSelfTest.swift         自绘图像基准（CER / 标识符召回，口径同 tools/bench/ocr_bench）
+│   │   └── OCRDump.swift             --dump-ocr：把样张的真值与识别原文摊开
 │   ├── CaptureController.swift       按需截图（SCScreenshotManager）+ 帧门控 + 定时兜底 + 策略排除
 │   ├── DHash.swift                   9×8 灰度差分哈希（64 bit）
 │   ├── PermissionGuide.swift         权限引导窗口
 │   ├── StatsExport.swift             「导出存储统计…」：stats() + statsDetail() → 数据目录的 JSON
-│   └── SelfCheck.swift               无 GUI / 无 TCC / 不碰钥匙串的自检（55 项）+ --dump-vectors 判定表转储
+│   ├── Updater.swift                 Sparkle 2 签名更新：Info.plist 的 SU* 配置检查（纯函数）+
+│   │                                 「检查更新…」菜单入口（默认不联网、fail-closed）
+│   └── SelfCheck.swift               无 GUI / 无 TCC / 不碰钥匙串的自检（90 项）+ --dump-vectors 判定表转储
 ├── Support/
 │   ├── Info.plist                    LSUIElement=1 + 三个 usage string
 │   ├── brosis.entitlements           不沙盒 + apple-events
@@ -165,24 +190,127 @@ DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer \
 `Resources/AppIcon.icns` 由 `Support/icon/make_icon.swift` 生成（只用 CoreGraphics / ImageIO），`Info.plist` 里
 `CFBundleIconFile` / `CFBundleIconName` = `AppIcon`，`build_app.sh` 随 `Resources/` 一起拷进 bundle。
 
+### 3.2 分发：DMG、公证、Sparkle 签名更新（计划 4.2）
+
+脚本在仓库根的 `dist/`：
+
+```
+dist/
+├── build_dmg.sh    build_app.sh → 压缩 DMG（含 /Applications 快捷方式）→ 签 DMG →
+│                   公证 + staple（可 --skip-notarize）→ spctl 评估 → sha256 与 manifest.json
+├── make_appcast.sh Sparkle 的 generate_appcast：给归档目录里的 DMG 生成签名的 appcast.xml
+└── RELEASE.md      发布清单（一次性配置、七步流程、两台机器安装验证、TCC 不丢的判据）
+```
+
+```bash
+# 出一个可分发的 DMG（要先解锁屏幕并配好公证凭据）
+DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer \
+  SCRATCH="$HOME/Library/Caches/brosis-build/dist-app" \
+  <项目目录>/dist/build_dmg.sh
+
+# 屏幕锁定 / 还没配公证凭据时：只出一个自己能装的包
+… <项目目录>/dist/build_dmg.sh --skip-notarize
+```
+
+产物在 `~/Library/Caches/brosis-build/dist/<版本>/`：`brosis-<版本>.dmg`、
+`manifest.json`（版本 / sha256 / Team ID / 公证状态 / Gatekeeper 判定）、`SHA256SUMS.txt`；
+DMG 同时硬链一份到 `~/Library/Caches/brosis-build/dist/appcast/`，
+那是 `make_appcast.sh` 的输入目录（`generate_appcast` 要在一个目录里看到所有历史版本）。
+
+#### Sparkle 在 bundle 里长什么样
+
+| 位置 | 内容 |
+|---|---|
+| `Contents/Frameworks/Sparkle.framework` | SwiftPM 的 binaryTarget 解出来的 XCFramework，`build_app.sh` 用 `ditto` 放进去 |
+| ↳ `Versions/B/{Sparkle,Autoupdate}` | 主 dylib 与安装器 |
+| ↳ `Versions/B/Updater.app` | 更新时替换 app 的那个小程序 |
+| ↳ `Versions/B/XPCServices/{Downloader,Installer}.xpc` | **只有沙盒应用才用得到**；brosis 不沙盒，留着是为了将来真沙盒化时不用改脚本 |
+
+**主程序的 rpath**：SwiftPM 链出来只带一条 `@loader_path`（裸二进制跑得通，框架就在它旁边），
+装进 bundle 后 `@loader_path` 是 `Contents/MacOS`，找不到框架，所以 `build_app.sh` 用
+`install_name_tool -add_rpath @executable_path/../Frameworks` 补一条，并当场
+`otool -l` 核对。**没走 `Package.swift` 的 `.unsafeFlags`**：带 `unsafeFlags` 的清单
+不能被别的包按版本引用。
+
+**签名**：`--deep` 不可靠（Apple 自己也不建议），所以逐个签，顺序由内向外——
+两个 `.xpc` → `Updater.app` → `Autoupdate` → `Sparkle.framework` → 外层 bundle。
+反了的话外层的 `CodeResources` 封印会立刻作废。每一件都带 hardened runtime 与安全时间戳
+（公证要求**所有**内嵌代码都带时间戳）。签完 `build_app.sh` 会：
+
+- `codesign --verify --deep --strict` 验封印；
+- 逐个 Mach-O 问一次 `TeamIdentifier`，与主程序不一致就 fail（漏签一个，hardened runtime
+  的库校验会在加载时拒绝，公证也会退回）；
+- 从 bundle 里跑一次 `--version`，证明 dyld 真的按 rpath 找到了框架。
+
+#### 更新的口径：默认不联网、fail-closed
+
+`Info.plist` 里四个键（`build_app.sh` 会核对，改坏了构建就失败）：
+
+| 键 | 值 | 为什么 |
+|---|---|---|
+| `SUFeedURL` | `https://github.com/AllenBall/brosis/releases/latest/download/appcast.xml` | 必须 https；`latest/download/<资产名>` 指向最新 release 的同名资产，所以**每次**发版都要带上 `appcast.xml` |
+| `SUPublicEDKey` | 仓库里是占位符 `__SUPublicEDKey__` | 真公钥由你用 `generate_keys` 生成，放 `~/Library/Application Support/brosis-dev/sparkle_public_ed_key.txt`，构建时注入；**私钥只在你的钥匙串里** |
+| `SUEnableAutomaticChecks` | `false` | 不自动检查、不弹"要不要自动检查更新"的许可框 |
+| `SUAutomaticallyUpdate` | `false` | 就算将来打开自动检查，也不允许后台静默下载 / 安装 |
+
+代码在 `Sources/brosis/Updater.swift`，两块：
+
+- `enum UpdaterConfig`（非隔离的纯函数）：`issues(in:)` 把上面四个键逐条查一遍——
+  源是不是 https、公钥是不是占位符、解出来是不是 32 字节、自动检查是不是显式 `false`。
+  可以在任何线程调用，也可以直接喂自造的字典做测试。
+- `@MainActor final class UpdaterController`：**只有它会创建 Sparkle 的对象**，而且是
+  **懒创建**——只有用户点「检查更新…」的那一刻才 `SPUStandardUpdaterController(startingUpdater: false, …)`
+  再自己 `try updater.start()`。没被点过就一个字节都不会发出去。
+  配置有问题时不联网，直接弹一个说清楚原因的框。
+
+**fail-closed 的含义**：没注公钥的构建里 `SUPublicEDKey` 是占位符（不是合法 base64），
+`UpdaterConfig.issues` 当场拦下、Sparkle 的 `start()` 也会失败，
+也就是**这份构建装不上任何"更新"**，而不是"没验签就装"。
+`dist/make_appcast.sh` 同样会拒绝给这种构建生成 appcast。
+
+#### 菜单项（M1 R2 / T9 已接入）
+
+「检查更新…」在菜单栏里，位置是「导出存储统计…」之后、退出前那条分隔线之前：
+
+```swift
+menu.addItem(UpdaterController.shared.makeMenuItem())
+```
+
+菜单项自带 target/action 与可用性判定；`UpdaterController.shared` 是 `@MainActor` 单例，
+`refreshMenu` 本身就在主线程。**点它之前一个字节都不会出网**（updater 是点下去那一刻才创建的）。
+想在菜单上再显示一行只读状态的话，`UpdaterController.shared.statusLine()` 返回
+「更新源已配置：…」或「更新未启用：…」，也不联网——当前没有显示这一行。
+
+#### 签名身份跨版本不变（D13）
+
+TCC 授权绑的是 `bundle id + 签名的 Designated Requirement`。换 Team、换 bundle id
+都会让用户已经给过的屏幕录制 / 辅助功能授权作废。证书到期换新证书时**必须**还是
+同一个 Team 的 Developer ID。升级后怎么验见 `dist/RELEASE.md` 第 7 节。
+
 ## 4. 自检（安全，不触发任何授权弹窗、不碰钥匙串）
 
 ```bash
 ~/Library/Caches/brosis-build/m1-app/brosis.app/Contents/MacOS/brosis --self-check
 ~/Library/Caches/brosis-build/m1-app/brosis.app/Contents/MacOS/brosis --dump-vectors
+~/Library/Caches/brosis-build/m1-app/brosis.app/Contents/MacOS/brosis --dump-ocr
 ```
 
 `SelfCheck.swift` 明确不调用 `CGPreflightScreenCaptureAccess` / `CGRequestScreenCaptureAccess` /
 `AXIsProcessTrusted` / `AXIsProcessTrustedWithOptions` / `SCShareableContent` / 任何 `AXUIElement*`，
 不创建 `NSApplication`，**也不用 `KeychainKeyProvider`**（那会弹钥匙串授权框）。
-共 **55 项**（M0 骨架 38 → R2/T7 的 47 → R2/T5 又加了 8 项 MCP：`ipc.sock` 权限 0600、
+共 **90 项**（M0 骨架 38 → R2/T7 的 47 → R2/T5 又加了 8 项 MCP → R2/T8 又加了 21 项适配器与视口 OCR
+→ R2/T9 又加了 14 项 3.12 应用采集清单）。
+MCP 那 8 项是：`ipc.sock` 权限 0600、
 没有 grant 全拒、加了 grant 之后 search 命中、`fields = summary` 不回原文、`fields = evidence` 回原文、
 `mcp_audit` 记了每次调用且不含查询串、**应用白名单也裁 `get_evidence` 的出现上下文**、
 对端同 Team ID 校验），退出码 0 = 全通过。
 **对端校验那一项分两支**：本进程有 Team ID（从签名过的 `.app` 里跑）时要求同 Team 的连接**放行**；
 没有 Team ID（`swift build` 的裸二进制）时要求**一律拒绝**——两支都是断言，不是"跳过"。
-**从裸二进制（`swift build` 的产物）跑是 54 项 PASS + 1 项 SKIP**：版本那一项没有 `Info.plist` 可读，会打印
+**从裸二进制（`swift build` 的产物）跑是 75 项 PASS + 1 项 SKIP**：版本那一项没有 `Info.plist` 可读，会打印
 `[SKIP]` 并说明，不计失败——要验它必须跑 `brosis.app/Contents/MacOS/brosis --self-check`。
+**T8 加的 21 项里有 5 项真的跑 Vision**（对本进程自绘的位图，合计 10 次识别），
+Vision 是本地推理、不需要任何授权，所以自检仍然不触发弹窗；
+代价是自检时间从不到 1 s 涨到约 1.8 s（本机实测 `real 1.83`）。
 
 | 组 | 项数 | 验什么 |
 |---|---|---|
@@ -197,12 +325,25 @@ DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer \
 | 截图触发口径 | 2 | 7 条 `isEventTrigger` 用例（`periodic+queued` 不算事件触发）；`setPaused` 只在状态变化时写事件 |
 | AX 深度上限 | 1 | 4 条 `depthLimitHit` 用例；已命中后不再多取一次 `kAXChildren` |
 | 版本号单一来源 | 1 | `Bundle.main` 的两个版本键 == `BuildInfo.version`（裸二进制跳过） |
+| **适配规则（T8）** | 6 | bundle id → 规则的路由（4 条首批 + 兜底，兜底继承按 bundle id 的 BFS 限额）；四个应用各一棵**合成 AX 树**上的完整判定：片段数、完整性、必含串、**视口外与回滚区的内容必须不出现**、该排哪些 OCR 区域 |
+| **视口与可见范围（T8）** | 2 | 7 条视口相交用例（完全在内 / 部分相交 / 回滚区 / 视口下方 / 读不到 frame / 没有视口 / 零面积）；5 条 `AXVisibleCharacterRange` 裁剪用例（含越界与长度 0 不崩） |
+| **completeness 四态（T8）** | 1 | 三态由适配器在合成树上判出来，`excluded` 由 3.12 档位与私密浏览先行判——四个取值各有出处 |
+| **OCR 触发条件（T8）** | 2 | 三类触发条件 + 4 条反例（**AX 值变了就不 OCR**）；同一「bundle id + 区域名」的最小间隔限流（首次放行 / 半个间隔内被限 / 别的区域不受影响 / 超过间隔再放行） |
+| **阅读顺序与低置信（T8）** | 2 | 3 条行聚类用例（两栏、行距紧、同行高度不齐）；D24 的低置信 token 正例 4 条 / 反例 5 条 |
+| **气泡归属（T8）** | 1 | 2 份**合成布局 JSON**：单聊左 = 对方 / 右 = 自己 + 语音记 `[语音]`；群聊取气泡上方昵称且昵称行不入库成正文 |
+| **视口 OCR（T8）** | 3 | 裁剪坐标（AX → 显示器局部 → 像素，含 2x 与"矩形在另一块屏上就不裁"）；**6 组自绘图像的 Vision 基准**（3 样张 × 2x/1x，标识符召回与中文行 CER）；采样审计的覆盖率口径冒烟 |
+| **端到端（T8）** | 4 | 走产品路径 `CaptureCoordinator.handleFrame`：AX 全空 → 写一条 `capture_method = ocr` 的观察（region 前缀 `ocr:`、confidence 与 note 都在）；**前台已换应用时整帧不处理**（换一张自绘"屏幕"当另一个应用：跑 0 个区域、一个字都不入库，同一张图换回原应用作阳性对照就会入库）；**同一区域正文逐字节未变时不写第二条观察**；轮到采样审计 → 全窗口 OCR 对照 → `capture_audit` 一行（`method` 照抄被审计那条观察的 `capture_method`） |
 
 自检的加密库开在 `$TMPDIR/brosis-selfcheck-<pid>/`，**跑完删除**，
 既不碰产品数据目录也不碰 M0 库；跑几次结果都一样。
 
 `--dump-vectors` 把判定表逐条摊开成 Markdown 表格（正例 21 / 反例 12 / 三档开关 / 21 条转移 /
-7 条补做用例 / **11 条取消补做用例** / 内置清单分类，共 **7** 节），输出可以直接贴进结果文件核对。
+7 条补做用例 / **11 条取消补做用例** / 内置清单分类 / **四条适配规则的完整规则表 / 7 条 OCR 触发条件 /
+完整性四态的判定来源 / 6 组自绘样张的 OCR 基准**，共 **11** 节），输出可以直接贴进结果文件核对。
+
+`--dump-ocr` 只做一件事：把自绘样张的真值与 **Vision 识别出来的原文**逐行打印。
+存在的理由是"召回没到"这个数字本身没法复核——看了原文才知道是**真认错了**，
+还是只是 accurate 模型把 `(` `)` `:` 认成了全角（D24 / E8 早就实测过，本项目的 FTS 与查询串都折叠）。
 
 ## 5. 首次运行：**两次 TCC 授权 + 一次钥匙串授权，都必须手动**
 
@@ -387,7 +528,87 @@ locked ──launch / menuUnlock / systemDidWake──▶ unlocking ──取钥
     而且必须在库还没开（`locked`）时也能读到。
   - **永久**：真正改档到 `none` 并写库（`source = user`）。
   - 另有「恢复采集」改回 `events_and_content`。
-- **改为更低档时询问是否删除已有数据**（3.12 最后一条）属于应用清单窗口，**第二轮做**。
+- **全局默认档可改**（M1 R2 / T9）：应用清单窗口顶部那一格，存 UserDefaults 的
+  `policy.globalDefault`（出厂值 `events_and_content`）。**改它不动任何已有的
+  `app_policies` 行**——那些行是"已经定过的应用"，其中还包括用户显式设过的档；
+  全局默认只对"以后才第一次出现的应用"生效。和 `policy.pausedToday` 一样放 UserDefaults
+  而不是库里，因为库没开（`locked`）的时候冒出来的新应用也要按它做临时判定。
+
+#### 应用采集清单窗口（3.12 的界面，M1 R2 / T9）
+
+菜单栏 →「应用采集清单…」。判定逻辑全在 `Policies/PolicyList.swift`（纯函数，自检整段跑），
+`Policies/PoliciesWindow.swift` 只负责把行画出来、把点击转成一次调用。
+
+**数据源是三处的并集**（3.12：「来源是 NSWorkspace 的运行记录和本系统自己的观察记录」）：
+
+| 来源 | core 里的查询 | 给出什么 | 为什么少不了 |
+|---|---|---|---|
+| `app_policies` 全表 | `Store.appPolicies()` | 已经定过档的应用 | 「不采集」的应用永远没有观察，只能从这里看到 |
+| 最近 7 天的观察聚合 | `Store.appObservationStats(since:)` | 观察数、完整性四态分布、最近出现 | 3.12 要求每行显示这些 |
+| 当前运行的 GUI 应用 | `NSWorkspace.runningApplications` | 刚装上、采集端还没碰到的应用 | 用户想"先设好再用"时得能找到它 |
+
+统计口径三条，写死在 core 里（`Store+AppInventory.swift`）：**只算未删除的观察**
+（`deleted_at IS NULL`）、**只算本机**（`device_id`，D17 同步下来的另一台机器不参与本机策略判断）、
+**窗口下界由调用方给**（7 天这个数字在 app 侧的 `PolicyList.statsWindowDays`）。
+这条聚合走 `idx_obs_live(device_id, ts) WHERE deleted_at IS NULL` 部分索引，
+不是全表扫——`--self-check` 里有一项直接把 `EXPLAIN QUERY PLAN` 打出来。
+
+**窗口里的列**：
+
+| 列 | 内容 |
+|---|---|
+| 应用 | 显示名。优先级：`apps.name`（库里记过的）> `NSWorkspace` 的 localizedName > bundle id |
+| bundle id | 等宽字体，就是 `app_policies.bundle_id` |
+| 分组 | 有适配器（带规则 id，如 `safari` / `wechat`）/ 通用采集 / 默认不采集 |
+| 采集模式 | 三档弹出菜单。显示的是**存下来**的那一档；库锁着时整列是灰的 |
+| 最近 7 天观察 | 未删除的本机观察条数 |
+| 完整性分布 | `完整 n · 部分 n · 不可用 n · 排除 n`，四项之和 == 观察数；0 条时显示 `—` |
+| 最近出现 | 相对时间（`3 小时前`）；窗口内没有观察时显示 `—` 或 `运行中，无观察` |
+| 状态 | `运行中` / `今日暂停至 HH:mm` / `你设的` / `内置清单` |
+
+**分组顺序是「内置清单 > 有适配器 > 通用」**，并且分的是**出厂分类**不是当前档位：
+用户把某个密码管理器显式改成「事件 + 内容」之后，它仍然留在「默认不采集」组里，
+只是状态列标「你设的」。这样"这台机器上哪些应用是默认被挡掉的"始终一眼看得全。
+一个应用既在内置清单里、又碰巧有适配规则时按内置清单归组——用户最需要看到的是
+"它默认不被采集"，而不是"它有适配器"。
+
+**排序**：先分组，组内按最近 7 天观察数倒序 → 最近出现倒序 → bundle id（保证全序，
+同名同数的两行不会随机换位置）。**搜索框**按应用名或 bundle id 做不区分大小写子串匹配。
+
+**改档流程是一个状态机**（`PolicyModeChange.plan`，8 条用例在 `--dump-vectors` 第 13 节）：
+
+| 情况 | 结果 |
+|---|---|
+| 库没开（`locked` / `locking` / `unlocking`） | **挡下**，弹框说明原因并提示「今日暂停」不需要开库 |
+| 档位没变 | 什么都不做 |
+| 升档或平级 | 直接写库（`setMode`，`source = user`），不问删数据 |
+| **降档**且这个应用全库还有未删除的观察 | 先写档，再问「是否删除该应用已有数据」 |
+| 降档但这个应用一条数据都没有 | 直接写档，**不弹框**（问"是否删除 0 条"是纯噪音） |
+
+档位高低：不采集 0 < 只记事件 1 < 事件 + 内容 2。
+"要不要弹框"看的是**全库**计数 `Store.appObservationCount(bundleID:)`（走 `idx_obs_app_ts`），
+不是列表里那个 7 天数字——7 天没动过不等于库里没有这个应用的东西。
+
+**删除询问的默认是"不删"**：默认按钮（回车）是「保留数据」，第二个按钮才是
+「删除这 N 条」。选删走 `Store.deleteByApp(bundleID:reason: .policy)`，也就是 3.8 的
+按应用删除并级联（观察打墓碑 → occurrences → 无引用的 text_version → FTS 行 →
+会话与日台账标 stale → 缩略图 → `deletions` 审计行），删完把
+「观察 / 文本版本 / 索引行 / 释放字节 / 待重建的会话与台账」摊在窗口底部那一行。
+两个分支都写运行期事件：`app_policy_downgrade_kept_data` / `app_policy_downgrade_deleted`。
+
+**改完档立刻生效**：窗口回调把新档位推给 `CaptureController.setFrontmostApp`
+（当它就是当前前台应用时），不等下一次前台切换——3.12 的「生效方式在采集时」。
+
+**新应用一次性提示**（3.12：「首次出现时按全局默认处理，菜单栏提示一次，可一键改档」）：
+`CapturePolicyStore.resolve` 真的往 `app_policies` 插了一行时，除了原有的
+`runtime_event:app_policy_new_app`，还把这个 bundle id 放进提示队列。菜单栏最多挂**一行**
+「新应用 X 已按默认档「…」记录（点此改档）」，点它就划掉提示并打开清单窗口、
+**定位并选中那一行**。提示过的 bundle id 记在 UserDefaults 的 `policy.newAppNoticed`
+里，重启 app 也不会再提示同一个。
+
+**窗口自己不开库**：所有读写都经 `Recorder.withStore`，与采集端同一个 `Store` 实例。
+库锁着时窗口照样能开，只是横幅说明"读不到 `app_policies`，下面只有当前运行的应用，
+并且不能改档"。
 
 ### 8.3 入库前规则脱敏（2.2 硬约束 2 / 4.2）
 
@@ -500,14 +721,195 @@ AX 树里一段正文常被拆成几十个 `AXStaticText`，逐节点入库会�
 `hit=depth`，这个字段等于没有信息。现在要真的还有子节点才算，代价是**一次遍历最多多发一轮
 `kAXChildren`**（已经命中过就不再判定，`hasChildren` 是 `@autoclosure`）。
 口径改了之后 `hit=depth` 才是"该收紧限额了"的信号。
-`occurrences.region` 存 AX 角色（3.2 允许 region 是"AX 路径"，角色是它最粗的一档）。
-`completeness` 仍是**占位**：读到正文 = `partial`，读不到 = `unavailable`，
-被策略排除 / 私密浏览 = `excluded`。真正的 `complete` 判定要等第二轮的适配规则 + OCR 对照。
+**M1 R2 / T8 起这段话只描述兜底规则**：正文读取的入口换成了适配规则引擎
+（`AdapterEngine.scan`，见 8.6），没有专门规则的应用走的就是上面这套四角色 BFS，
+唯一的差别是加了视口裁剪。`occurrences.region` 也从裸角色名换成带来源前缀的区域名
+（`adapter:generic.window` / `ocr:wechat.chat_panel`）。
+`completeness` **不再是占位值**：四个取值的判定见 8.6 的表。
 
 **source_state 分离**（评审 F5，判定顺序）：`locked` > `permission_lost` > `secure_input` >
 `user_idle`（≥30 s）> `ok`；AX 读不到焦点窗口时单独记 `timeout`。绝不混成一个「空」。
 
-### 8.6 按需截图
+### 8.6 适配器与视口 OCR（3.3 / D24，M1 R2 / T8）
+
+M0 的真实数据（`tools/bench/results/m0_closeout_2026-09-07.md` §2.2）决定了这一节存在的理由：
+
+| 应用 | AX 正文 | 结论 |
+|---|---:|---|
+| Safari | 81.9% 的观察有正文、109,035 字符 | AX 够用，规则只负责收窄区域 + 裁视口 |
+| Claude 桌面版（Electron，探针里停留第一） | **0 字符 / 74 条观察** | 先设 `AXManualAccessibility`，读不到就视口 OCR |
+| 访达 | 80.0%，但 22% 的观察 0.5 s 超时 | 兜底规则 + 收紧限额（400 节点 / 6 层） |
+| 飞书（Electron） | 12/17 条"有正文"，合计 **156 字符** | 消息列表按行读，读不到就对消息面板 OCR |
+| 微信 | 0 字符、6 条里 2 条超时 | AX 一路都不走，聊天面板与会话名都视口 OCR |
+
+#### 规则怎么写
+
+一条规则 = `AdapterRule`（`Adapters/AdapterRule.swift`），全是**纯数据**，所以能单元测试：
+
+| 字段 | 作用 |
+|---|---|
+| `bundleIDs` | 命中哪些应用；空数组 = 兜底规则 |
+| `electron` | 读树前要不要设 `AXManualAccessibility`（沿用 `AXSupport` 的两路判定） |
+| `regions` | 一到多个正文区域，每个区域声明**定位**、**读取方式**、**视口处理**、**字符上限** |
+| `chatLayout` | 有值就对 OCR 结果做气泡归属 |
+| `limits` / `maxFrameProbes` | BFS 节点 / 深度上限；以及**一次扫描最多问多少次元素坐标** |
+| `notes` | 已知局限，`--dump-vectors` 第 8 节原样打出来 |
+
+**定位**（`ElementLocator`）：`role` / `roleAndSubrole` / `identifier` / `rolePath`（从窗口逐层下钻）/
+`relativeRect`（窗口内的 0–1 相对矩形，给 AX 读不到、只能按坐标 OCR 的应用）/ `wholeWindow`。
+
+**读取方式**（`ReadMethod`）：
+
+| 值 | 做什么 |
+|---|---|
+| `ax_value` | 直接读节点的 `AXValue` / `AXDescription`，配合 `AXVisibleCharacterRange` 裁视口 |
+| `ax_subtree` | 子树限额 BFS，收集四个文本角色，按 frame 相交裁视口 |
+| `ax_rows` | 消息列表：`AXList` 的每个 `AXRow` 拼成「发送者 时间 文本」，只取视口内已渲染的行 |
+| `ocr` | 不读 AX，这块区域直接走视口 OCR（**规则声明 AX 不可用**） |
+
+**可见范围处理**（计划 3.3「只入库视口内实际显示的内容；回滚区与视口外的 AX 节点不入库，
+完整性字段标记为 partial」）分三层，按精度从高到低：
+
+1. `AXVisibleCharacterRange` 可用时**优先用它**——它是文本控件自己报的"现在显示的是哪一段"，
+   比按坐标猜准得多；真的裁掉了东西就置 `clippedByCharRange`。
+2. 否则用**元素 frame 与窗口可见区域相交**判定。容器整块在视口外时**整棵子树一次剪掉**
+   （聊天窗口的回滚区最大的一块开销就是这么省掉的）；`frame.maxY <= viewport.minY` 的另记为"回滚区"。
+3. **读不到 frame 一律按可见处理**。宁可多存一点，也绝不因为读不到坐标就丢证据。
+
+`maxFrameProbes`（默认 **300**）是主线程预算的闸：每问一次坐标要发两条 AX 消息
+（position + size）。配合"只问带正文的节点与滚动 / 列表类容器"（`AdapterEngine.shouldProbeFrame`），
+真实窗口远到不了这个数；真到了就**不再裁视口**并把完整性降成 `partial`，而不是让菜单栏 app 卡住。
+
+**新鲜度判定**（两侧都有，R2 复核时补齐了 OCR 侧）：
+- **AX 侧**：每次扫描把「区域名 → 文本」存进 `CaptureCoordinator`，下一次同一个应用同一个区域拿来比对。
+  它决定第二类 OCR 触发条件里的"AX 值有没有变"。
+- **OCR 侧**：认出来的正文与这个窗口区域上一次逐字节相同就**不写第二条观察**（计数进
+  `ocrUnchanged`）。没有这一层的话，微信这类全 OCR 的规则在屏幕静止时每 12 s 就会写一条
+  一模一样的 `ocr` 观察（约 300 条/小时）；AX 侧的观察照写，所以时间线不缺段。
+  OCR 拦不到"认之前"——得认了才知道变没变，所以省下的是入库，不是识别。
+
+**入库形状**：适配器读到的片段 `region` 写 `adapter:<规则 id>.<区域名>`，
+OCR 读到的写 `ocr:<规则 id>.<区域名>`；`observations.capture_method` 相应记
+`ax`（兜底规则）/ `adapter` / `ocr` / `mixed`（AX 与 OCR 都有）。
+`observations.visible_range` 存一段 JSON——**只有形状没有正文**：窗口矩形、每个区域的
+字符数 / 视口内节点数 / 视口外节点数 / 回滚区节点数 / 是否被字符范围裁过 / 区域矩形。
+
+#### 四个应用的规则与局限
+
+| 规则 | 区域 | 读取 | 已知局限 |
+|---|---|---|---|
+| `safari` | `web_area`（AXWebArea 子树） | AX | AXWebArea 找不到时（PDF 预览、部分扩展页）退回整窗口 BFS；跨 iframe 的顺序按 AX 树顺序，不是视觉顺序 |
+| `claude_desktop` | `conversation`（AXWebArea 子树，**允许回退 OCR**） | AX → OCR | 必须先设 `AXManualAccessibility`（M0 没设时正文为 0）；代码块是等宽小字，OCR 回退时按 D24 不降采样；折叠起来的长回复只记展开的部分 |
+| `feishu` | `message_list`（AXList/AXRow，**允许回退 OCR**）、`conversation_title`（顶部 8% 相对矩形，OCR，非必需） | AX 行 → OCR | 只记视口内已渲染的消息，**不追溯未打开的会话与未滚动到的历史**；图片 / 文件 / 语音 / 通话只有屏幕上显示的文字才可能被 OCR；发送者与时间取自行内子元素，行结构变了就退化成整行文本 |
+| `wechat` | `chat_panel`（左 22% 之后、上 8%–78% 的相对矩形，OCR）、`conversation_title`（顶部 8%，OCR，非必需） | 全 OCR | 相对矩形是按三栏布局估的，**用户改了窗口比例或开了浮层会偏**；主窗口标题恒为「微信」，会话名只能从顶部区域 OCR；语音只记 `[语音]`；支付 / 转账 / 红包与聊天一起记录，不特殊处理（D14 已定） |
+| `generic` | `window`（整窗口子树） | AX | 就是 M0 那套四角色 BFS，唯一差别是加了视口裁剪；不触发 OCR |
+
+**气泡归属**（`BubbleAttribution`）：单聊按气泡中心的 x 分左右（阈值 0.55，右 = 自己）；
+群聊时"够短 + 紧贴下一行 + 与下一行同侧"的那一行判为**昵称**，本身不入库成正文，
+而是当作后面那条气泡的发送者；形如 `3"` / `12''` / `5 秒` 的气泡记 `[语音]`。
+判定的输入是 OCR 的行与归一化矩形，所以可以直接对**合成布局 JSON** 跑（自检里就是这么验的）。
+
+#### OCR 触发条件：只有三类
+
+计划 3.3 写死了，`OCRTriggerGate.reason(...)` 是它的纯函数版本：
+
+| # | 条件 | 触发原因 |
+|---|---|---|
+| ① | 规则声明 AX 不可用的区域（`read = ocr`），或规则允许回退且 AX 读到空 | `rule_declared` |
+| ② | 帧变化超阈值（帧门控判为**没被门控**）**但该区域的 AX 值没变** | `frame_changed_ax_stable` |
+| ③ | 覆盖检查失败的区域（上一次采样审计的覆盖率低于阈值） | `coverage_failed` |
+
+**反例同样重要**：AX 值变了就**不 OCR**——AX 通道还在工作，再认一遍是白花钱
+（3.3「文本是否变化以 AX 通知与值比较为准」）。帧没变也不 OCR。
+
+**第二类的已知局限（M1 记录在案，等真机数据再改）**：请求是在"变化帧之后"的那次 AX 扫描里排出来的，
+所以它只有在**再下一帧也没被门控**时才会真的跑。「屏幕变了一次然后静止」（新消息到达）这种最典型的
+场景里，静止帧显示的恰恰就是变化后的内容，却会被跳过，而上下文被下一次扫描替换后请求就丢了。
+产品路径上第二类因此几乎不执行；要量化影响得有真机数据（第 11 节的清单里）。
+
+**频率限制**：同一「bundle id + 区域名」两次 OCR 最少间隔 **5 s**
+（`capture.ocrMinInterval`，下限 1 s），被限的次数计进统计，不推进时钟。
+
+**分辨率按 D24**：正文类区域允许 1x（只有当图像超过区域点宽 2 倍时才降到 1x——D24 实测降采样不省时间，
+所以默认不主动降）；`kind = code` 的区域**不降采样**。语言 `zh-Hans` + `en-US`，
+`usesLanguageCorrection = false`，级别 `accurate`。**采集端不做 NFKC 折叠**（折叠只在索引侧）。
+
+**低置信标记（D24）**：短哈希、十六进制串、内存地址（`0x…`）在识别文本里被数出来，
+条数写进 `occurrences.note`（形如 `lowconf=2 conf=0.84 px=864x560 rect=…`），
+片段的 `confidence` 写 Vision 按字符数加权的平均置信度。文本照样入库（它确实在屏幕上），
+但检索与叙述侧不该把这类串当成可引用的证据。
+
+#### 挂在哪儿：`CaptureCoordinator`
+
+AX 在主线程读、图像在 utility 队列才有，两边时机对不上，所以中间有个协调者
+（`OCR/CaptureCoordinator.swift`），一把 `NSLock` 串行：
+
+```
+EventSkeleton（主线程）                     CaptureController（utility 队列）
+  AX.focusedWindowInfo 一次拿窗口元素+定位          SCScreenshotManager 截一张图
+  AdapterEngine.scan(rule:window:…)               analyze() 算 dHash + 32×32 网格差
+  → 片段 / 完整性 / visible_range / 待办 OCR        → noteFrameGate(gated:)
+  → noteScan(Context)  ──────────────────────────→ handleFrame(image:…)
+                                                     ├ 跑待办 OCR → 写一条 ocr / mixed 观察
+                                                     └ 轮到审计 → 全窗口 OCR → capture_audit
+```
+
+绝大多数帧 `handleFrame` 直接返回 0：没有待办请求、也没轮到审计时它什么都不做。
+实际跑了几个区域会写进 `capture_stats.ocr_regions`。
+
+**上下文必须与当前前台应用对得上**（R2 复核发现的缺陷，两道防线）：上下文只在 AX 扫描时更新，
+而**私密浏览 / AX 超时或读不到焦点窗口 / 「只记事件」档这三支根本不扫描**，
+截图那条通路并不知道，照样会出图并调 `handleFrame`。所以：
+
+1. `EventSkeleton` 在这三支里调 `coordinator.clearContext()`——事前不留；
+2. `handleFrame` 还要把 `CaptureController` 自己记的 `frontmostBundleID` 与上下文里的
+   bundle id 核一次，对不上就整帧不处理并把这份上下文丢掉（计数进 `ocrStaleContext`）。
+
+不这么做的后果是实打实的：微信（或飞书、AX 为空的 Claude）之后切到 Safari 无痕窗口，
+下一帧就会把无痕页面上落在微信 `chat_panel` 矩形里的正文**以微信的身份、
+`capture_method = ocr` 入库**——既破了"私密浏览正文一个都不存"，也归错了应用。
+自检里有这条的复现与阳性对照（第 4 节「端到端」那一组）。
+
+#### 完整性四态（3.2 的 `completeness`，M1 R2 起是真判定）
+
+M0 时期只有 `partial` / `unavailable` 两个占位值，**一条 `complete` 都没有**。现在：
+
+| 状态 | 谁判的 | 条件 |
+|---|---|---|
+| `complete` | `AdapterEngine` | 规则声明的**必需**区域全部读到，且没有视口外内容、没命中任何限额、没被字符范围裁过、没有待办 OCR |
+| `partial` | `AdapterEngine` | 读到了一些，但上面任意一条成立 |
+| `unavailable` | `AdapterEngine` | 一个字都没读到（含读不到焦点窗口） |
+| `excluded` | `EventSkeleton` | 3.12 的「不采集」/「只记事件」档，或私密浏览命中——**读都不读**，所以轮不到适配器判 |
+
+OCR 那条观察单独判：所有请求的区域都认出东西、且平均置信度 ≥ 0.5 才算 `complete`，否则 `partial`。
+
+#### 采样审计（3.3，M1 低频版）
+
+AX 非空的观察每 **50** 次（`capture.auditEvery`，0 = 关）取一次全窗口 OCR 对照，
+覆盖率写进 core 的 `capture_audit` 表（schema v3）与一条 `runtime_event:capture_audit`。
+覆盖率口径是「**AX 文本的 token 有多少比例能在 OCR 文本里找到**」——去空白与标点、NFKC 折叠、
+汉字按 bigram 切、AX 侧 token 去重、判定用子串（详见 `core/README.md` 的「采样审计」一节）。
+低于阈值 **0.6**（`capture.coverageThreshold`）就把该应用标成"覆盖检查失败"，
+下一轮触发第三类 OCR。审计行**不存正文**，也不是证据：不参与同步、不进删除级联。
+
+#### 可调参数一览
+
+| UserDefaults 键 | 默认 | 作用 |
+|---|---|---|
+| `capture.ocrMinInterval` | 5 s（下限 1 s） | 同一窗口区域两次 OCR 的最小间隔 |
+| `capture.auditEvery` | 50 | 每多少条 AX 非空观察做一次采样审计；0 = 关 |
+| `capture.coverageThreshold` | 0.6 | 覆盖率低于它就标"覆盖检查失败" |
+
+#### 还没接上的两处（交给主会话）
+
+1. **菜单入口**：本轮按并行约束**没有改 `AppDelegate.swift`**。`CaptureCoordinator.shared.currentStats`
+   已经能给出「OCR 次数 / 限流次数 / 平均耗时 / 采样审计次数与平均覆盖率」，
+   要放进菜单栏或状态面板只需在 `AppDelegate` 里读它；`CaptureController` 的
+   `capture_disarmed` 事件里已经带上了这段统计。
+2. **真机验证**：相对矩形（微信 / 飞书）与 `AXList` 行结构都是按公开资料与 M0 数据估的，
+   必须在真机上按第 11 节的清单核一遍再定稿。
+
+### 8.7 按需截图
 
 `SCScreenshotManager.captureImage` 一次性截图（macOS 14.4 起常驻 SCStream 会让菜单栏常亮紫色
 「正在共享」图标）。触发：事件骨架每写一条应用级观察记录、焦点换屏、系统唤醒 / 解锁 / 屏保结束，
@@ -541,13 +943,13 @@ AX 树里一段正文常被拆成几十个 `AXStaticText`，逐节点入库会�
 纯定时截图。现在重排队不再追加原因，**`capture_stats.trigger` 里不会再出现 `queued`**
 （老库里的历史值仍按非事件处理）。
 
-### 8.7 退出
+### 8.8 退出
 
 `applicationWillTerminate`：停事件骨架 → 停截图（`Task.detached` + 信号量，**不能用 `Task { }`**：
 在 `@MainActor` 上下文里创建的 Task 继承 MainActor 隔离，而主线程正被 `DispatchSemaphore.wait`
 挡着，任务根本没机会开始）→ `LockController.shutdown()` 同步做 checkpoint + 关库 + 清零密钥。
 
-### 8.8 导出存储统计（菜单项「导出存储统计…」）
+### 8.9 导出存储统计（菜单项「导出存储统计…」）
 
 产品库是 SQLCipher 加密的、钥匙在钥匙串里：`sqlite3` 打不开，`core` 的 `brosis-store` 也只支持
 `--key-file`（第 5 节第 6 条）。所以"这个库现在有多大、正文 / 索引 / 元数据各占多少、多少行"
@@ -579,7 +981,7 @@ AX 树里一段正文常被拆成几十个 `AXStaticText`，逐节点入库会�
   `exported_at_ms` / `observations` / `text_versions` / `occurrences` / `dbstat` 非空且四个键齐全 /
   文件名），并打印实际字段清单，跑完删除。
 
-### 8.9 本地 IPC 服务端（3.1 / 3.6）
+### 8.10 本地 IPC 服务端（3.1 / 3.6）
 
 `IPCService.swift` 里的 `MCPIPCService` 挂在 `LockController` 上——那是本进程里唯一持有 `Store`
 的地方。协议、socket、grant 判定、裁剪与审计都在 core（`BrosisIPC` + `StoreMCPService` + `MCPGate`），
@@ -758,6 +1160,25 @@ claude mcp add brosis-lark --env BROSIS_CLIENT_ID=claude-code-lark \
 7. **3.12 三档的实际效果**：把某个应用改成「不采集」后，它不该再产生观察；
    「只记事件」的应用应该有观察但 `completeness = excluded`。
 8. **菜单快捷项**「暂停采集当前应用（今天 / 永久）」与「恢复采集」。
+8b. **应用采集清单窗口（T9，本轮新加，全部需要真人看）**：
+   - 菜单栏 →「应用采集清单…」应打开窗口，三组（有适配器 / 通用采集 / 默认不采集）都在，
+     组标题行显示每组条数；跑过一阵之后「最近 7 天观察」与「完整性分布」应该有数字。
+   - **搜索框**输入中文应用名与 bundle id 片段（大小写混着打）都能过滤。
+   - **顶部「新应用的全局默认档」**改成「只记事件」，再打开一个从没用过的应用，
+     库里那条 `app_policy_new_app` 的 `mode` 应是 `events_only`；已经在清单里的应用不受影响。
+   - **升档不问删数据**：把某个应用从「只记事件」改成「事件 + 内容」，不该弹框。
+   - **降档问删数据**：把一个有数据的应用从「事件 + 内容」改成「不采集」，应弹框，
+     **默认按钮是「保留数据」**；选「保留」→ 库里多一条 `app_policy_downgrade_kept_data`；
+     再降一次并选「删除这 N 条」→ 窗口底部显示删了多少、释放多少字节，
+     库里多一条 `app_policy_downgrade_deleted`，该应用的观察数归零、策略行还在。
+   - **锁定时改不了档**：⌘L 锁库后打开窗口，横幅应出现、整列弹出菜单是灰的；
+     这时菜单栏的「暂停采集当前应用 → 今天」应该照常能用。
+   - **新应用提示**：第一次遇到某个应用时菜单栏应出现一行
+     「新应用 … 已按默认档「…」记录（点此改档）」，点它打开窗口并**选中那一行**；
+     点过之后这一行不再出现（重启 app 也不再出现）。
+8c. **「检查更新…」菜单项（T10 的入口，本轮接进菜单）**：点一次应弹
+   「更新功能未启用：SUPublicEDKey 还是占位符…」——除非已经按 `dist/RELEASE.md`
+   配好了真公钥再构建。点它之前不应有任何出网。
 9. **私密浏览**：Safari 开无痕窗口，看该窗口的观察 `completeness = excluded`，
    且**没有正文、没有窗口标题、没有 URL**（`windows` / `urls` 里不该出现那个无痕窗口）。
 10. **屏幕录制月度再授权**（第 6 节）与 **SMAppService 登录项批准**（第 7 节）。
@@ -781,14 +1202,42 @@ claude mcp add brosis-lark --env BROSIS_CLIENT_ID=claude-code-lark \
     再调一次。修之前这一步会让 `brosis-mcp` 被 SIGPIPE 打死（要重启 Claude Code），
     现在应该只是慢一下（重连的 150 ms）就自己接上。
     注意**锁定不算**这条路径：锁定不断连接，只让调用返回 `[locked]`（那是第 13 条）。
+17. **适配规则在真窗口上的表现（T8，最需要真人看的一批）**：
+    - **Safari**：打开一篇长文，滚到中间。库里那条观察的 `capture_method` 应是 `adapter`，
+      `visible_range` 里 `offscreen` / `scrollback` 应大于 0，正文里**不该有**屏幕外那几屏的内容。
+    - **Claude 桌面版**：现在它已经在 `chromiumFamilyBundleIDs` 里，应该能读到 AXWebArea。
+      读到了 → `capture_method = adapter`；仍然读不到 → 应看到 `runtime_event:ocr_regions_captured`
+      且观察是 `capture_method = ocr`。**两种结果都要记下来**，它决定这条规则最终长什么样。
+    - **飞书**：打开一个会话滚几屏。先看 `AXList` 那条路走不走得通（`adapter` 且正文里有消息），
+      走不通就该看到 `ocr:feishu.message_list` 的片段。顺带确认顶部会话名 OCR 出来的对不对。
+    - **微信**：单聊与群聊各看一次。重点核**相对矩形对不对**（`chat_panel` 是左 22% 之后、
+      上 8%–78%）——窗口比例不同会偏；以及气泡归属对不对（左 = 对方、右 = 自己、群聊昵称）、
+      语音是不是记成 `[语音]`、会话名 OCR 出来对不对。
+    - **OCR 频率**：连续操作 1 分钟，`capture_stats` 里 `ocr_regions` 非空的行不该超过
+      `60 / 5 = 12` 条每区域；`ocr_failed` 应为 0。
+    - **采样审计**：跑够 50 条 AX 非空的观察后，库里 `capture_audit` 应出现一行，
+      `runtime_event:capture_audit` 里能看到覆盖率。**这个数字是 2.4「常用应用 complete + partial ≥ 90%」
+      的校准依据**，请按应用记下来。
+    - **主线程有没有变卡**：适配规则比 M0 多问了元素坐标。切应用 / 滚动时菜单栏应该照常跟手；
+      如果卡，看 `runtime_event:adapter_limit_hit` 里有没有 `hit=frame_probe`，
+      有就把 `maxFrameProbes` 调小。
+    - **切走之后不许串台（R2 复核补的那条，真机务必看一次）**：微信 / 飞书停在前台几秒，
+      再切到 **Safari 无痕窗口**，停十几秒。库里不该出现任何 `region` 以 `ocr:wechat.` /
+      `ocr:feishu.` 开头、而内容是无痕页面的观察；无痕那段时间的观察应当是
+      `completeness = excluded` 且没有正文 / 标题 / URL。换成"AX 会超时的访达"再试一遍
+      （M0 实测 22% 超时），同样不该出现归属错误的 `ocr:` 观察。
+    - **OCR 新鲜度**：微信停在前台不动几分钟。`ocr:wechat.chat_panel` 的观察应该只有**一条**
+      （屏幕没变就不写第二条）；发一条新消息之后应该立刻多出一条。
 
 **本轮明确没做的**：
 
 - **3.12 的应用清单窗口**（分组、7 天统计、改档时询问是否删数据）→ 第二轮。
 - **查询时那一道脱敏**（计划 4.2 说入库前一道、查询时一道）→ 属于 T3 的检索层。
-- **视口裁剪**：计划 3.3 要求只入库视口内实际显示的内容，本轮只有 20 000 字符的粗上限；
-  真正的视口判定要等 E5 的适配规则。
-- **适配器、局部 OCR、`completeness = complete` 的判定、采样审计** → 第二轮。
+- ~~**视口裁剪**~~、~~**适配器、局部 OCR、`completeness = complete` 的判定、采样审计**~~
+  → **M1 R2 / T8 已做**，见 8.6；但四条规则的区域参数都还没在真机上核过（第 11 节第 17 条）。
+- **适配器的菜单入口**：本轮按并行约束没改 `AppDelegate.swift`，
+  `CaptureCoordinator.shared.currentStats` 已经就绪，接进菜单由主会话做。
+- **OCR 结果没有二次校验**：同一区域两次识别不一致时不做投票，取最后一次。
 - **未公证**；`spctl` 预期 `rejected: Unnotarized Developer ID`。
 - `NSAppleEventsUsageDescription` 与 `com.apple.security.automation.apple-events` 已就位，
   但没有真去发 Apple 事件（浏览器 URL 目前只走 AX）。

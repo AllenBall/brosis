@@ -27,6 +27,9 @@ public struct StoreOptions: Sendable {
     /// `mcp_audit` 保留天数（3.6 的调用审计），`maintenance()` 按它滚动清理。
     /// 比遥测留得久：授权与访问记录是要能回溯的，而它每行只有几十字节。
     public var mcpAuditRetentionDays: Int = 90
+    /// `capture_audit` 保留天数（3.3 的采样审计），`maintenance()` 按它滚动清理。
+    /// 与 MCP 审计同档：它是"AX 覆盖率随时间怎么变"的曲线，跨月对比才有意义。
+    public var captureAuditRetentionDays: Int = 90
 
     public init() {}
 }
@@ -212,13 +215,20 @@ public final class Store: @unchecked Sendable {
             try conn.exec(Schema.createMCPAudit)
             try conn.run("INSERT INTO migrations(version, applied_at, note) VALUES (?,?,?);",
                          [.int(2), .int(now), .text("v2：mcp_audit（3.6 MCP 调用审计）")])
+            // v3 同理：`occurrences` 的两列已经写在 createTables 里（新库直接带上），
+            // 这里只建 capture_audit 并补审计行。
+            try conn.exec(Schema.createCaptureAudit)
+            try conn.run("INSERT INTO migrations(version, applied_at, note) VALUES (?,?,?);",
+                         [.int(3), .int(now),
+                          .text("v3：capture_audit（3.3 采样审计）+ occurrences.confidence / note（D24）")])
         }
     }
 
     /// 已有库的 schema 迁移。走 `migrations` 表，一版一个事务，失败整版回滚。
     ///
-    /// 只在库文件已存在时调用。迁移**不改任何已有表的结构**，只加表——
-    /// v1 的库直接补一张 `mcp_audit` 就变成 v2，用户不用重建库、不丢数据。
+    /// 只在库文件已存在时调用。迁移只做**纯新增**：加表，或给已有表加**可空**列——
+    /// v1 的库补一张 `mcp_audit` 就是 v2，再补 `capture_audit` 与 `occurrences` 的两个可空列
+    /// 就是 v3；不重写数据、不改已有列的语义，用户不用重建库、不丢数据。
     private func migrateIfNeeded() throws {
         guard let text = try conn.scalarText("SELECT value FROM meta WHERE key = 'schema_version';"),
               let found = Int(text) else {
@@ -237,6 +247,25 @@ public final class Store: @unchecked Sendable {
                 try conn.run("INSERT INTO migrations(version, applied_at, note) VALUES (?,?,?);",
                              [.int(2), .int(now),
                               .text("v2：mcp_audit（3.6 MCP 调用审计），由 v\(found) 就地迁移")])
+            }
+        }
+        if found < 3 {
+            try conn.transaction {
+                // 建表与加列都**先查再做**：迁移要能被中断后重跑，也要容得下
+                // "库里已经有这张表 / 这一列"的情况（例如从更老的版本一路迁上来）。
+                let tables = Set(try conn.textColumn(
+                    "SELECT name FROM sqlite_schema WHERE type = 'table';"))
+                if !tables.contains("capture_audit") { try conn.exec(Schema.createCaptureAudit) }
+                let columns = Set(try conn.textColumn(
+                    "SELECT name FROM pragma_table_info('occurrences');"))
+                for item in Schema.alterOccurrencesV3 where !columns.contains(item.column) {
+                    try conn.exec(item.sql)
+                }
+                try conn.run("UPDATE meta SET value = '3' WHERE key = 'schema_version';")
+                try conn.run("INSERT INTO migrations(version, applied_at, note) VALUES (?,?,?);",
+                             [.int(3), .int(now),
+                              .text("v3：capture_audit（3.3 采样审计）+ occurrences.confidence / note"
+                                    + "（D24），由 v\(found) 就地迁移")])
             }
         }
     }
