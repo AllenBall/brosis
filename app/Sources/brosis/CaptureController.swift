@@ -1,4 +1,5 @@
 import AppKit
+import BrosisCore
 import CoreGraphics
 import Foundation
 import ScreenCaptureKit
@@ -19,7 +20,9 @@ enum CaptureEvent: Sendable {
 /// - 事件骨架每写一条应用级观察记录（切应用、切窗口、标题变化、节流后的焦点元素变化）；
 /// - 焦点窗口换到另一台显示器；
 /// - 系统唤醒 / 解锁回来；
-/// - 定时兜底：每 5 s 一次，只在 `source_state == ok`（有输入、未锁屏、非安全输入）时截。
+/// - 定时兜底：默认每 12 s 一次（2026-09-07 由 5 s 放宽，见 `periodicInterval`），
+///   只在 `source_state == ok`（有输入、未锁屏、非安全输入）时截，
+///   且距最近一次事件触发的截图不足一个兜底间隔时**跳过本次兜底**（计入 `stats.skippedRecent`）。
 /// 锁屏、安全键盘输入时一律不截；用户空闲（≥30 s 无输入）时只响应事件、不做定时兜底。
 ///
 /// 每张图只算一次 dHash 与 32×32 网格亮度差，随即丢弃，不保存图像。`frame_stats` 口径：
@@ -46,8 +49,36 @@ final class CaptureController: NSObject, @unchecked Sendable {
     /// 网格亮度差阈值（0–255）。
     static let gridDiffThreshold = 24
 
-    /// 定时兜底间隔（秒）。
-    static let periodicInterval: TimeInterval = 5
+    /// 定时兜底间隔（秒），默认 **12 s**。
+    ///
+    /// 为什么从 5 s 放宽：M0 实测（`tools/bench/results/m0_closeout_2026-09-07.md` 2.3）
+    /// 11.8 分钟出 129 张 `periodic` 截图，其中 **111 张（86%）被门控**、平均变化面积只有 0.73%，
+    /// 也就是绝大多数定时兜底没有新信息；同一段时间事件触发的 50 张平均变化面积 4.5%、门控率 60%。
+    /// 配合下面「刚因为事件截过图就跳过这次兜底」的规则，兜底张数还能再降。
+    ///
+    /// 需要临时改回去（例如复现 M0 的口径）用 UserDefaults，不必重新编译：
+    /// `defaults write com.brosis.app capture.periodicInterval -float 5`
+    /// 值会被夹到下限 3 s 以上；没设或设成非法值（≤ 0 / NaN）时用默认 12 s。
+    static let periodicIntervalKey = "capture.periodicInterval"
+    static let periodicIntervalDefault: TimeInterval = 12
+    static let periodicIntervalMinimum: TimeInterval = 3
+
+    private static let periodicIntervalResolution = resolvePeriodicInterval()
+    static var periodicInterval: TimeInterval { periodicIntervalResolution.value }
+    /// `default` / `defaults` / `defaults_clamped` / `defaults_invalid`，写进 `capture_armed`。
+    static var periodicIntervalSource: String { periodicIntervalResolution.source }
+
+    static func resolvePeriodicInterval(_ defaults: UserDefaults = .standard)
+        -> (value: TimeInterval, source: String) {
+        guard defaults.object(forKey: periodicIntervalKey) != nil else {
+            return (periodicIntervalDefault, "default")
+        }
+        let raw = defaults.double(forKey: periodicIntervalKey)
+        guard raw.isFinite, raw > 0 else { return (periodicIntervalDefault, "defaults_invalid") }
+        let clamped = max(periodicIntervalMinimum, raw)
+        return (clamped, clamped == raw ? "defaults" : "defaults_clamped")
+    }
+
     /// 两次截图的最小间隔（秒）。
     static let minimumInterval: TimeInterval = 1.0
     /// 事件合并窗口（秒）。
@@ -62,18 +93,27 @@ final class CaptureController: NSObject, @unchecked Sendable {
         var skippedLocked = 0
         var skippedSecureInput = 0
         var skippedIdle = 0
+        /// 定时兜底因为「刚因为事件截过图」而跳过的次数。
+        var skippedRecent = 0
+        /// 3.12：前台应用不是「事件 + 内容」档，本次不做截图内容检查。
+        var skippedPolicy = 0
         var lastCaptureAt: Double = 0
+        /// 最近一次**非纯定时**截图的时间（事件触发、armed、queued 都算），
+        /// 定时兜底用它判断「刚截过图就别再截一张」。
+        var lastEventCaptureAt: Double = 0
         var lastDurationMs: Double = 0
         var totalDurationMs: Double = 0
 
         var summary: String {
             let avg = captures > 0 ? totalDurationMs / Double(captures) : 0
             return "截图 \(captures) 张（门控 \(gated)，失败 \(failures)）"
-                 + "，平均 \(Int(avg)) ms，跳过 锁屏 \(skippedLocked) / 安全输入 \(skippedSecureInput) / 空闲 \(skippedIdle)"
+                 + "，平均 \(Int(avg)) ms，跳过 锁屏 \(skippedLocked) / 安全输入 \(skippedSecureInput)"
+                 + " / 空闲 \(skippedIdle) / 刚截过 \(skippedRecent) / 策略 \(skippedPolicy)"
         }
     }
 
-    private let store: Store
+    private let recorder: Recorder
+    private let policy: CapturePolicyStore
     private let hasher = DHasher()
     private let onEvent: @Sendable (CaptureEvent) -> Void
     private let queue = DispatchQueue(label: "com.brosis.app.capture", qos: .utility)
@@ -89,9 +129,16 @@ final class CaptureController: NSObject, @unchecked Sendable {
     private var stats = Stats()
     private var previousHash: DHash?
     private var previousGrid: [UInt8]?
+    /// 前台应用与它的采集档位。由 `AppDelegate` 在焦点变化时推进来——
+    /// 截图跑在 utility 队列上，不能在那里去问 `NSWorkspace.frontmostApplication`。
+    private var frontmostBundleID: String?
+    private var frontmostMode: CapturePolicyMode = CapturePolicyStore.globalDefault
 
-    init(store: Store, onEvent: @escaping @Sendable (CaptureEvent) -> Void) {
-        self.store = store
+    init(recorder: Recorder,
+         policy: CapturePolicyStore = .shared,
+         onEvent: @escaping @Sendable (CaptureEvent) -> Void) {
+        self.recorder = recorder
+        self.policy = policy
         self.onEvent = onEvent
         super.init()
     }
@@ -108,7 +155,20 @@ final class CaptureController: NSObject, @unchecked Sendable {
 
     func setPaused(_ value: Bool) {
         withStateLock { paused = value }
-        store.logEvent(kind: value ? "capture_paused" : "capture_resumed")
+        recorder.logEvent(kind: value ? "capture_paused" : "capture_resumed")
+    }
+
+    /// 3.12：前台应用换了 / 它的档位变了。`AppDelegate` 在焦点变化与改档时调。
+    func setFrontmostApp(bundleID: String?, mode: CapturePolicyMode) {
+        let changed = withStateLock { () -> Bool in
+            guard frontmostBundleID != bundleID || frontmostMode != mode else { return false }
+            frontmostBundleID = bundleID
+            frontmostMode = mode
+            return true
+        }
+        guard changed else { return }
+        recorder.logEvent(kind: "capture_policy_frontmost",
+                          detail: "bundle=\(bundleID ?? "(unknown)") mode=\(mode.rawValue)")
     }
 
     /// 焦点换屏：只换目标显示器，不重建任何东西。
@@ -121,7 +181,7 @@ final class CaptureController: NSObject, @unchecked Sendable {
             previousGrid = nil
             return true
         }
-        if changed { store.logEvent(kind: "capture_display_changed", detail: "display=\(displayID)") }
+        if changed { recorder.logEvent(kind: "capture_display_changed", detail: "display=\(displayID)") }
     }
 
     // MARK: - 武装 / 解除
@@ -139,8 +199,9 @@ final class CaptureController: NSObject, @unchecked Sendable {
             stats = Stats()
         }
         startPeriodicTimer()
-        store.logEvent(kind: "capture_armed",
+        recorder.logEvent(kind: "capture_armed",
                        detail: "mode=on_demand display=\(display) periodic=\(Self.periodicInterval)s "
+                             + "periodic_source=\(Self.periodicIntervalSource) "
                              + "min_interval=\(Self.minimumInterval)s debounce=\(Self.debounceInterval)s")
         onEvent(.started(displayID: display))
         requestCapture(reason: "armed")
@@ -159,7 +220,7 @@ final class CaptureController: NSObject, @unchecked Sendable {
         stopPeriodicTimer()
         guard wasArmed else { return }
         let stats = currentStats
-        store.logEvent(kind: "capture_disarmed", detail: "\(reason)；\(stats.summary)")
+        recorder.logEvent(kind: "capture_disarmed", detail: "\(reason)；\(stats.summary)")
     }
 
     private func startPeriodicTimer() {
@@ -184,7 +245,17 @@ final class CaptureController: NSObject, @unchecked Sendable {
         // 定时兜底只在用户活跃时截；空闲 / 锁屏 / 安全输入都跳过。
         let state = SystemState.sourceState(permissions: Permissions.snapshot())
         switch state {
-        case .ok:          requestCapture(reason: "periodic")
+        case .ok:
+            // 距最近一次事件触发的截图不足一个兜底间隔就跳过：那一张刚拍过，
+            // 这次兜底大概率还是被门控的那 86%（m0_closeout 2.3）。
+            let skip = withStateLock { () -> Bool in
+                guard stats.lastEventCaptureAt > 0,
+                      Date().timeIntervalSince1970 - stats.lastEventCaptureAt < Self.periodicInterval
+                else { return false }
+                stats.skippedRecent += 1
+                return true
+            }
+            if !skip { requestCapture(reason: "periodic") }
         case .locked:      withStateLock { stats.skippedLocked += 1 }
         case .secureInput: withStateLock { stats.skippedSecureInput += 1 }
         case .userIdle:    withStateLock { stats.skippedIdle += 1 }
@@ -234,6 +305,15 @@ final class CaptureController: NSObject, @unchecked Sendable {
             withStateLock { stats.skippedSecureInput += 1; captureInFlight = false }
             return
         }
+        // 3.12「生效方式在采集时」：前台应用不是「事件 + 内容」档就不做内容检查。
+        // 「不采集」的应用还会另外进 SCContentFilter 的排除列表（见 capture(reason:)），
+        // 两道是互补的——排除列表挡的是"别的窗口在前台时它露出来的那部分"。
+        let mode = withStateLock { frontmostMode }
+        if CapturePolicyStore.gate(for: mode).readsContent == false {
+            withStateLock { stats.skippedPolicy += 1; captureInFlight = false }
+            recorder.recordCaptureStat(status: "skipped", trigger: reason)
+            return
+        }
         Task.detached(priority: .utility) { [weak self] in
             await self?.capture(reason: reason)
         }
@@ -266,8 +346,11 @@ final class CaptureController: NSObject, @unchecked Sendable {
                     ?? content.displays.first else {
                 throw CaptureError.noDisplay
             }
+            // 3.12：排除列表 = 所有解析结果为「不采集」的运行中应用
+            // （内置默认清单 + 用户改档 + 今日临时暂停都在 resolve 里合过了）。
+            // 顺带把没见过的 bundle id 登记进 app_policies，第二轮的应用清单窗口要用。
             let excluded = content.applications.filter {
-                ExclusionList.shared.contains(bundleID: $0.bundleIdentifier)
+                self.policy.resolve(bundleID: $0.bundleIdentifier).mode == .none
             }
             let filter = SCContentFilter(display: display,
                                          excludingApplications: excluded,
@@ -321,75 +404,39 @@ final class CaptureController: NSObject, @unchecked Sendable {
             stats.captures += 1
             if gated { stats.gated += 1 }
             stats.lastCaptureAt = Date().timeIntervalSince1970
+            // 合并后的 reason 里只要还有别的触发（"app_activated+periodic"），就算事件触发。
+            if reason != "periodic" { stats.lastEventCaptureAt = stats.lastCaptureAt }
             stats.lastDurationMs = elapsedMs
             stats.totalDurationMs += elapsedMs
             return (hamming, cells, ratio, gated, stats.captures)
         }
 
-        store.insertFrameStat(FrameStat(displayID: displayID,
-                                        status: "complete",
-                                        width: image.width,
-                                        height: image.height,
-                                        contentScale: pointWidth > 0 ? Double(image.width) / Double(pointWidth) : nil,
-                                        dHashHex: hash?.hex,
-                                        hamming: hamming,
-                                        dirtyRectCount: changedCells,
-                                        dirtyAreaRatio: changedRatio,
-                                        gated: gated,
-                                        trigger: reason))
+        recorder.recordCaptureStat(displayID: displayID,
+                                   status: "complete",
+                                   trigger: reason,
+                                   width: image.width,
+                                   height: image.height,
+                                   contentScale: pointWidth > 0
+                                       ? Double(image.width) / Double(pointWidth) : nil,
+                                   dhash: hash?.hex,
+                                   hamming: hamming,
+                                   dirtyRects: changedCells,
+                                   dirtyAreaRatio: changedRatio,
+                                   gated: gated)
 
         if count % Self.progressEvery == 0 {
-            store.logEvent(kind: "capture_progress", detail: currentStats.summary)
+            recorder.logEvent(kind: "capture_progress", detail: currentStats.summary)
         }
     }
 
     private func handleFailure(reason: String, displayID: UInt32, message: String, permissionLost: Bool) {
         withStateLock { stats.failures += 1 }
-        store.insertFrameStat(FrameStat(displayID: displayID, status: "failed", trigger: reason))
-        store.logEvent(kind: "capture_failed",
+        recorder.recordCaptureStat(displayID: displayID, status: "failed", trigger: reason)
+        recorder.logEvent(kind: "capture_failed",
                        detail: "\(message) permission_lost=\(permissionLost) trigger=\(reason)")
         guard permissionLost else { return }
         // 权限被收回 / 月度再授权到期：解除武装，交给 AppDelegate 弹引导。
         Task { await stop(reason: "permission_lost") }
         onEvent(.stopped(reason: message, permissionLost: true))
     }
-}
-
-/// 排除清单（报告 3.4）。默认写死一份最小集合，Resources/exclusions.txt 存在时覆盖。
-final class ExclusionList: @unchecked Sendable {
-    static let shared = ExclusionList()
-
-    private let bundleIDs: Set<String>
-    /// true = 从 Contents/Resources/exclusions.txt 读到；false = 用代码内默认集合。
-    let loadedFromResource: Bool
-
-    private init() {
-        var ids: Set<String> = [
-            "com.apple.keychainaccess",
-            "com.apple.Passwords",
-            "com.agilebits.onepassword7", "com.1password.1password",
-            "com.lastpass.LastPass", "org.keepassxc.keepassxc",
-            "com.apple.ScreenSharing", "com.apple.iPhoneMirroring"
-        ]
-        var fromResource = false
-        if let url = Bundle.main.url(forResource: "exclusions", withExtension: "txt"),
-           let text = try? String(contentsOf: url, encoding: .utf8) {
-            let parsed = text.split(whereSeparator: \.isNewline)
-                .map { $0.trimmingCharacters(in: .whitespaces) }
-                .filter { !$0.isEmpty && !$0.hasPrefix("#") }
-            if !parsed.isEmpty {
-                ids = Set(parsed)
-                fromResource = true
-            }
-        }
-        bundleIDs = ids
-        loadedFromResource = fromResource
-    }
-
-    func contains(bundleID: String?) -> Bool {
-        guard let bundleID else { return false }
-        return bundleIDs.contains(bundleID)
-    }
-
-    var count: Int { bundleIDs.count }
 }

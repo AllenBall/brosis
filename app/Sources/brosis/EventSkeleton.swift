@@ -1,5 +1,6 @@
 import AppKit
 import ApplicationServices
+import BrosisCore
 import CoreGraphics
 import Foundation
 
@@ -18,14 +19,23 @@ private func axNotificationCallback(_ observer: AXObserver,
 }
 
 /// 事件骨架（计划 3.3）：NSWorkspace 激活 / 退出、AXFocusedWindowChanged、窗口标题、
-/// kAXDocument、kAXURL、CGEventSource 空闲秒数、锁屏与睡眠。
+/// kAXDocument、kAXURL、CGEventSource 空闲秒数、锁屏、屏保与睡眠。
+///
+/// **M1 相对 M0 的四处改动**：
+/// 1. 写入走 `Recorder` → `BrosisCore.Store`（加密库），不再有明文库；
+/// 2. **AX 正文本身入库**（`text_versions` / `occurrences`，`region` 记 AX 角色），
+///    入库前先过 `Redactor`；
+/// 3. 每条观察先过 3.12 的三档策略：`不采集` 连事件都不记、连 AX 都不附着，
+///    `只记事件` 不读正文；
+/// 4. **窗口标题、URL、文件路径也过 `Redactor`**，私密浏览命中时这三样连同正文一起不存。
 @MainActor
 final class EventSkeleton {
 
-    private let store: Store
+    private let recorder: Recorder
+    private let policy: CapturePolicyStore
     private let onFocusChanged: @MainActor (UInt32?) -> Void
     /// 每写一条应用级观察记录 / 系统唤醒 / 切换回来时调用，参数是 trigger 名；
-    /// AppDelegate 用它触发一次按需截图（2026-09-07）。
+    /// AppDelegate 用它触发一次按需截图。
     private let onContentChanged: @MainActor (String) -> Void
 
     private var observer: AXObserver?
@@ -34,6 +44,11 @@ final class EventSkeleton {
     private var lastFingerprint: String?
     private var lastElementScanAt: Double = 0
     private var throttledElementNotifications = 0
+    /// 每个 bundle id 命中 BFS 限额的次数，用来控制 `ax_bfs_limit_hit` 的写入频次。
+    private var bfsLimitHits: [String: Int] = [:]
+    /// 累计脱敏命中数，按类型分。`stop()` 时汇总写一条事件。
+    private var redactionTotals: [RedactionType: Int] = [:]
+    private var redactionSinceFlush = 0
 
     /// 距上次输入超过这么多秒视为未活动（报告 3.4 第 3 条）。
     static let idleThreshold: Double = 30
@@ -41,28 +56,26 @@ final class EventSkeleton {
     /// `AXFocusedUIElementChanged` 的节流窗口，单位秒。
     ///
     /// 在编辑器 / 浏览器里这个通知一秒可能来几十次，每次都做完整 AX 遍历
-    /// （≤1500 节点的正文统计 + ≤400 节点的 AXWebArea URL 搜索，都在主线程）
+    /// （≤1500 节点的正文遍历 + ≤400 节点的 AXWebArea URL 搜索，都在主线程）
     /// 既会写出大量重复行，也会污染 E7 的资源占用口径。这里只对它节流：
     /// 距上次遍历不足 2 秒的焦点元素变化直接丢弃（只计数）。
-    /// 应用切换、焦点**窗口**变化、标题变化是另外的通知，**不受节流影响**，
-    /// 所以「换了窗口 / 换了标题 / 换了应用」这类真正的位置变化仍然即时记录。
+    /// 应用切换、焦点**窗口**变化、标题变化是另外的通知，**不受节流影响**。
     static let elementScanThrottle: Double = 2.0
 
     /// 锁屏判定用两路信号，任一路先到都算数，靠 `screenIsLocked` 去重：
-    /// ① **前台应用 = `com.apple.loginwindow`**——直接观测，不依赖通知投递，
-    ///    进程在锁屏之后启动也成立，是第一优先；
+    /// ① **前台应用 = `com.apple.loginwindow`**——直接观测，不依赖通知投递；
     /// ② 分布式通知 `com.apple.screenIsLocked` / `Unlocked`——私有通知，不保证投递，只作补充。
     /// `NSWorkspace.sessionDidResignActive` / `DidBecomeActive` **不是锁屏通知**，
     /// 它们只在快速用户切换时触发，记成 `user_switched_away` / `_back`。
-    /// `source_state = locked` 走的是另一条路（`SystemState.screenLocked()` 现查会话字典），
-    /// 不受这里影响。
     static let loginWindowBundleID = "com.apple.loginwindow"
     private var screenIsLocked = false
 
-    init(store: Store,
+    init(recorder: Recorder,
+         policy: CapturePolicyStore = .shared,
          onFocusChanged: @escaping @MainActor (UInt32?) -> Void,
          onContentChanged: @escaping @MainActor (String) -> Void = { _ in }) {
-        self.store = store
+        self.recorder = recorder
+        self.policy = policy
         self.onFocusChanged = onFocusChanged
         self.onContentChanged = onContentChanged
     }
@@ -82,17 +95,23 @@ final class EventSkeleton {
                            name: NSWorkspace.sessionDidResignActiveNotification, object: nil)
         center.addObserver(self, selector: #selector(userSwitchedBack(_:)),
                            name: NSWorkspace.sessionDidBecomeActiveNotification, object: nil)
-        // 锁屏第二路信号：分布式通知（私有、不保证投递，所以只作补充）。
+        // 锁屏第二路信号 + 屏保（M1 新增）：都是分布式通知（私有、不保证投递，只作补充）。
         let dnc = DistributedNotificationCenter.default()
         dnc.addObserver(self, selector: #selector(distributedScreenLocked(_:)),
                         name: Notification.Name("com.apple.screenIsLocked"), object: nil)
         dnc.addObserver(self, selector: #selector(distributedScreenUnlocked(_:)),
                         name: Notification.Name("com.apple.screenIsUnlocked"), object: nil)
+        dnc.addObserver(self, selector: #selector(screensaverDidStart(_:)),
+                        name: Notification.Name("com.apple.screensaver.didstart"), object: nil)
+        dnc.addObserver(self, selector: #selector(screensaverDidStop(_:)),
+                        name: Notification.Name("com.apple.screensaver.didstop"), object: nil)
 
-        store.logEvent(kind: "event_skeleton_started",
-                       detail: "ax_timeout=\(AX.messagingTimeout)s(全局) "
-                             + "element_throttle=\(Self.elementScanThrottle)s "
-                             + "idle_threshold=\(Self.idleThreshold)s")
+        recorder.logEvent(kind: "event_skeleton_started",
+                          detail: "ax_timeout=\(AX.messagingTimeout)s(全局) "
+                                + "element_throttle=\(Self.elementScanThrottle)s "
+                                + "idle_threshold=\(Self.idleThreshold)s "
+                                + "max_chars_per_role=\(AX.maxCharsPerRole) "
+                                + "redaction_rules=\(Redactor.ruleCount)")
         // 进程可能是在已锁屏的时候启动的：用现查的会话字典初始化，不补记事件。
         screenIsLocked = SystemState.screenLocked()
         if let frontmost = NSWorkspace.shared.frontmostApplication,
@@ -106,10 +125,11 @@ final class EventSkeleton {
         DistributedNotificationCenter.default().removeObserver(self)
         detachObserver()
         if throttledElementNotifications > 0 {
-            store.logEvent(kind: "ax_element_notifications_throttled",
-                           detail: "累计丢弃 \(throttledElementNotifications) 次"
-                                 + "（节流窗口 \(Self.elementScanThrottle) s）")
+            recorder.logEvent(kind: "ax_element_notifications_throttled",
+                              detail: "累计丢弃 \(throttledElementNotifications) 次"
+                                    + "（节流窗口 \(Self.elementScanThrottle) s）")
         }
+        flushRedactionTotals()
     }
 
     // MARK: - NSWorkspace
@@ -118,7 +138,6 @@ final class EventSkeleton {
         guard let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication
         else { return }
         // 锁屏第一路信号，也是最可靠的一路：锁屏 / 登录窗口时前台应用恒为 loginwindow。
-        // 直接观测，不依赖任何通知投递（tools/probe/appswitch.swift 里已验证过这套判定）。
         if app.bundleIdentifier == Self.loginWindowBundleID {
             updateLockState(true, source: "前台应用 = loginwindow", reattach: false)
             return                       // 登录窗口不做 AX 附着
@@ -132,8 +151,8 @@ final class EventSkeleton {
     private func updateLockState(_ locked: Bool, source: String, reattach: Bool) {
         guard locked != screenIsLocked else { return }
         screenIsLocked = locked
-        store.logEvent(kind: locked ? "screen_locked_detected" : "screen_unlocked_detected",
-                       detail: "来源=\(source)")
+        recorder.logEvent(kind: locked ? "screen_locked_detected" : "screen_unlocked_detected",
+                          detail: "来源=\(source)")
         recordSystem(trigger: locked ? .screenLocked : .screenUnlocked)
         if !locked, reattach, let frontmost = NSWorkspace.shared.frontmostApplication,
            frontmost.bundleIdentifier != Self.loginWindowBundleID {
@@ -147,13 +166,8 @@ final class EventSkeleton {
         record(app: app, trigger: .appDeactivated, collectText: false)
     }
 
-    @objc private func systemWillSleep(_ note: Notification) {
-        recordSystem(trigger: .systemWillSleep)
-    }
-
-    @objc private func systemDidWake(_ note: Notification) {
-        recordSystem(trigger: .systemDidWake)
-    }
+    @objc private func systemWillSleep(_ note: Notification) { recordSystem(trigger: .systemWillSleep) }
+    @objc private func systemDidWake(_ note: Notification) { recordSystem(trigger: .systemDidWake) }
 
     @objc private func distributedScreenLocked(_ note: Notification) {
         updateLockState(true, source: "com.apple.screenIsLocked", reattach: false)
@@ -163,10 +177,22 @@ final class EventSkeleton {
         updateLockState(false, source: "com.apple.screenIsUnlocked", reattach: true)
     }
 
-    /// 快速用户切换离开 / 回来。**不是锁屏**——锁屏时这两个通知根本不触发。
-    @objc private func userSwitchedAway(_ note: Notification) {
-        recordSystem(trigger: .userSwitchedAway)
+    /// 屏保（M1 新增的暂停触发器）。锁定状态机在 `LockController` 里订阅同一对通知并进入
+    /// `paused`；这里只负责把它记成一条运行期事件，两边互不依赖。
+    @objc private func screensaverDidStart(_ note: Notification) {
+        recordSystem(trigger: .screensaverStarted)
     }
+
+    @objc private func screensaverDidStop(_ note: Notification) {
+        recordSystem(trigger: .screensaverStopped)
+        if let frontmost = NSWorkspace.shared.frontmostApplication,
+           frontmost.bundleIdentifier != Self.loginWindowBundleID {
+            attach(to: frontmost, trigger: .appActivated)
+        }
+    }
+
+    /// 快速用户切换离开 / 回来。**不是锁屏**——锁屏时这两个通知根本不触发。
+    @objc private func userSwitchedAway(_ note: Notification) { recordSystem(trigger: .userSwitchedAway) }
 
     @objc private func userSwitchedBack(_ note: Notification) {
         recordSystem(trigger: .userSwitchedBack)
@@ -176,16 +202,15 @@ final class EventSkeleton {
         }
     }
 
+    /// 系统级事件**只写运行期事件**，不写 `observations`（理由见 `ObservationTrigger.isSystemLevel`）。
     private func recordSystem(trigger: ObservationTrigger) {
         let permissions = Permissions.snapshot()
-        store.insertObservation(ObservationRow(
-            app: nil, appName: nil, pid: nil, title: nil, url: nil, document: nil,
-            trigger: trigger,
-            sourceState: SystemState.sourceState(permissions: permissions,
-                                                 idleThreshold: Self.idleThreshold),
-            idleSeconds: SystemState.idleSeconds(),
-            displayID: nil))
-        if trigger == .systemDidWake || trigger == .userSwitchedBack || trigger == .screenUnlocked {
+        let state = SystemState.sourceState(permissions: permissions, idleThreshold: Self.idleThreshold)
+        recorder.logEvent(kind: trigger.rawValue,
+                          detail: "source_state=\(state.rawValue) "
+                                + "idle_s=\(String(format: "%.1f", SystemState.idleSeconds()))")
+        if trigger == .systemDidWake || trigger == .userSwitchedBack
+            || trigger == .screenUnlocked || trigger == .screensaverStopped {
             onContentChanged(trigger.rawValue)
         }
     }
@@ -193,11 +218,22 @@ final class EventSkeleton {
     // MARK: - AXObserver
 
     private func attach(to app: NSRunningApplication, trigger: ObservationTrigger) {
+        // 3.12「不采集」：连 AX 都不附着——这是"生效方式在采集时"最硬的一条。
+        let resolution = policy.resolve(bundleID: app.bundleIdentifier)
+        guard CapturePolicyStore.gate(for: resolution.mode).recordsEvents else {
+            detachObserver()
+            return
+        }
         let pid = app.processIdentifier
         if observedPID != pid {
             detachObserver()
             // Chromium / Electron 系必须先打开手动无障碍再读树（报告 3.2）。
-            AX.enableManualAccessibilityIfNeeded(bundleID: app.bundleIdentifier, pid: pid)
+            let manual = AX.enableManualAccessibilityIfNeeded(bundleID: app.bundleIdentifier,
+                                                              bundleURL: app.bundleURL,
+                                                              pid: pid)
+            if manual.firstSeen {
+                recorder.logEvent(kind: "ax_manual_accessibility", detail: manual.detail)
+            }
             attachObserver(pid: pid)
         }
         record(app: app, trigger: trigger, collectText: true)
@@ -205,13 +241,13 @@ final class EventSkeleton {
 
     private func attachObserver(pid: pid_t) {
         guard Permissions.snapshot().accessibility else {
-            store.logEvent(kind: "ax_observer_skipped", detail: "缺辅助功能权限，pid=\(pid)")
+            recorder.logEvent(kind: "ax_observer_skipped", detail: "缺辅助功能权限，pid=\(pid)")
             return
         }
         var created: AXObserver?
         guard AXObserverCreate(pid, axNotificationCallback, &created) == .success,
               let created else {
-            store.logEvent(kind: "ax_observer_create_failed", detail: "pid=\(pid)")
+            recorder.logEvent(kind: "ax_observer_create_failed", detail: "pid=\(pid)")
             return
         }
         let element = AX.applicationElement(pid: pid)
@@ -264,9 +300,9 @@ final class EventSkeleton {
             guard now - lastElementScanAt >= Self.elementScanThrottle else {
                 throttledElementNotifications += 1
                 if throttledElementNotifications % 100 == 0 {
-                    store.logEvent(kind: "ax_element_notifications_throttled",
-                                   detail: "累计丢弃 \(throttledElementNotifications) 次"
-                                         + "（节流窗口 \(Self.elementScanThrottle) s）")
+                    recorder.logEvent(kind: "ax_element_notifications_throttled",
+                                      detail: "累计丢弃 \(throttledElementNotifications) 次"
+                                            + "（节流窗口 \(Self.elementScanThrottle) s）")
                 }
                 return
             }
@@ -280,6 +316,11 @@ final class EventSkeleton {
     // MARK: - 写观察记录
 
     private func record(app: NSRunningApplication, trigger: ObservationTrigger, collectText: Bool) {
+        // —— 3.12 第一道闸：模式判定在采集时，不是入库后过滤 ——
+        let resolution = policy.resolve(bundleID: app.bundleIdentifier)
+        let gate = CapturePolicyStore.gate(for: resolution.mode)
+        guard gate.recordsEvents else { return }
+
         let permissions = Permissions.snapshot()
         var sourceState = SystemState.sourceState(permissions: permissions,
                                                   idleThreshold: Self.idleThreshold)
@@ -287,7 +328,7 @@ final class EventSkeleton {
 
         var info = AX.WindowInfo(title: nil, url: nil, document: nil, frame: nil, timedOut: false)
         if permissions.accessibility && sourceState != .locked {
-            info = AX.windowInfo(pid: pid)
+            info = AX.windowInfo(pid: pid, bundleID: app.bundleIdentifier)
             if info.timedOut && sourceState == .ok { sourceState = .timeout }
         }
 
@@ -298,31 +339,160 @@ final class EventSkeleton {
         if fingerprint == lastFingerprint { return }
         lastFingerprint = fingerprint
 
-        let observationID = store.insertObservation(ObservationRow(
-            app: app.bundleIdentifier,
-            appName: app.localizedName,
-            pid: pid,
-            title: info.title,
-            url: info.url,
-            document: info.document,
-            trigger: trigger,
-            sourceState: sourceState,
-            idleSeconds: SystemState.idleSeconds(),
-            displayID: displayID))
+        // —— 第二道闸：正文读不读 ——
+        let privateBrowsing = PrivateBrowsing.isPrivate(bundleID: app.bundleIdentifier,
+                                                        windowTitle: info.title)
+        let shouldReadText = collectText
+            && gate.readsContent
+            && !privateBrowsing
+            && permissions.accessibility
+            && (sourceState == .ok || sourceState == .userIdle)
 
-        if collectText, observationID > 0,
-           permissions.accessibility,
-           sourceState == .ok || sourceState == .userIdle {
-            // 任何一次真正的遍历都重置节流时钟：刚因为换窗口做过全量 BFS 时，
-            // 紧随其后的焦点元素变化不必再来一遍。
+        var fragments: [TextFragment] = []
+        var completeness: Completeness
+        var axChars = 0
+        if shouldReadText {
+            // 任何一次真正的遍历都重置节流时钟。
             lastElementScanAt = Date().timeIntervalSince1970
-            for summary in AX.textSummaries(pid: pid) {
-                store.insertAXText(observationID: observationID, summary: summary)
+            let scan = AX.textScan(pid: pid, bundleID: app.bundleIdentifier)
+            axChars = scan.totalChars
+            for summary in scan.summaries where !summary.text.isEmpty {
+                // —— 入库前脱敏（2.2 硬约束 2）：库里从一开始就没有这些明文 ——
+                let redacted = Redactor.redact(summary.text)
+                noteRedaction(redacted)
+                fragments.append(TextFragment(text: redacted.text, region: summary.role))
             }
+            completeness = fragments.isEmpty ? .unavailable : .partial
+            if scan.truncated { noteBFSLimitHit(bundleID: app.bundleIdentifier, scan: scan) }
+        } else if privateBrowsing {
+            // 私密浏览：事件照记（不然台账凭空少一段），正文、标题、URL、文件路径一个都不存。
+            completeness = .excluded
+        } else if !gate.readsContent {
+            // 3.12「只记事件」：不读正文是**策略排除**，不是"读不到"，所以是 excluded 不是 unavailable。
+            completeness = .excluded
+        } else {
+            completeness = .unavailable
+        }
+
+        // —— 元数据同样过入库前脱敏 ——
+        // 标题与 URL 不是"正文之外的安全字段"：邮件 / 浏览器标签标题里常见
+        // 「Your verification code is 482913」，URL 查询串里常见 `?access_token=…`。
+        // 只脱敏正文的话，这些明文照样进 windows.title / urls。
+        //
+        // 私密浏览命中时更进一步：**标题、URL、文件路径一个都不记**——
+        // 页面标题与地址正是私密浏览要保护的东西，只留 app + 时间 + completeness=excluded，
+        // 台账上仍然有这一段时间，但没有"在看什么"。
+        var storedTitle: String?
+        var storedURL: URLRef?
+        var storedPath: String?
+        if !privateBrowsing {
+            storedTitle = redactedForStorage(info.title)
+            storedURL = Self.urlRef(info.url,
+                                    storedLocator: redactedForStorage(info.url))
+            storedPath = redactedForStorage(Self.filePath(info.document))
+        }
+
+        let observationID = recorder.record(ObservationInput(
+            ts: Recorder.milliseconds(),
+            displayID: displayID.map(Int64.init),
+            app: AppRef(bundleID: app.bundleIdentifier ?? "(unknown)",
+                        name: app.localizedName ?? app.bundleIdentifier ?? "(unknown)"),
+            windowTitle: storedTitle,
+            url: storedURL,
+            filePath: storedPath,
+            trigger: trigger.coreTrigger,
+            captureMethod: .ax,
+            completeness: completeness,
+            sourceState: sourceState,
+            texts: fragments))
+
+        if observationID != nil, axChars > 0 || privateBrowsing {
+            recorder.recordCaptureStat(status: privateBrowsing ? "private_browsing" : "ax",
+                                       trigger: trigger.rawValue,
+                                       axChars: axChars)
         }
 
         onFocusChanged(displayID)
         if trigger != .appDeactivated { onContentChanged(trigger.rawValue) }
+    }
+
+    // MARK: - 规范化对象的取值推断
+
+    /// `kAXURL` 读到的可能是网页地址、`file://` 路径，也可能是应用自己的 deeplink。
+    ///
+    /// `storedLocator` 是**脱敏后**真正入库的定位串；`kind` 与 `host` 仍然用原始 URL 判定——
+    /// 占位符里的 `[` `]` 会让 `URL(string:)` 解析失败，而 host 段本身不会被规则命中。
+    nonisolated static func urlRef(_ raw: String?, storedLocator: String? = nil) -> URLRef? {
+        guard let raw, !raw.isEmpty else { return nil }
+        let locator = storedLocator ?? raw
+        let lower = raw.lowercased()
+        if lower.hasPrefix("http://") || lower.hasPrefix("https://") {
+            return URLRef(rawLocator: locator, canonicalURL: locator,
+                          host: URL(string: raw)?.host, kind: .web)
+        }
+        if lower.hasPrefix("file://") || raw.hasPrefix("/") {
+            return URLRef(rawLocator: locator, canonicalURL: locator, host: nil, kind: .file)
+        }
+        if lower.contains("://") {
+            return URLRef(rawLocator: locator, canonicalURL: locator,
+                          host: URL(string: raw)?.host, kind: .deeplink)
+        }
+        return URLRef(rawLocator: locator, canonicalURL: locator, host: nil, kind: .other)
+    }
+
+    /// `kAXDocument` 通常是 `file://` URL；`files.path` 存的是文件系统路径。
+    nonisolated static func filePath(_ document: String?) -> String? {
+        guard let document, !document.isEmpty else { return nil }
+        if document.lowercased().hasPrefix("file://") {
+            return URL(string: document)?.path
+        }
+        return document.hasPrefix("/") ? document : nil
+    }
+
+    // MARK: - 事件频次控制
+
+    /// 标题 / URL / 文件路径的入库前脱敏。命中计进同一份 `redaction` 统计。
+    /// 空串按 nil 处理（core 侧不该收到空标题）。
+    private func redactedForStorage(_ raw: String?) -> String? {
+        guard let raw, !raw.isEmpty else { return nil }
+        let result = Redactor.redact(raw)
+        noteRedaction(result)
+        return result.text
+    }
+
+    private func noteRedaction(_ result: RedactionResult) {
+        guard result.hit else { return }
+        for (type, count) in result.counts {
+            redactionTotals[type, default: 0] += count
+        }
+        // 每次命中都写一条会把事件表刷满；每累计 20 条写一次，`stop()` 时再冲一次。
+        redactionSinceFlush += result.total
+        if redactionSinceFlush >= 20 {
+            redactionSinceFlush = 0
+            flushRedactionTotals()
+        }
+    }
+
+    private func flushRedactionTotals() {
+        guard !redactionTotals.isEmpty else { return }
+        let detail = RedactionType.allCases
+            .compactMap { type in redactionTotals[type].map { "\(type.rawValue)=\($0)" } }
+            .joined(separator: " ")
+        recorder.logEvent(kind: "redaction", detail: "累计 " + detail)
+    }
+
+    /// BFS 命中限额时写运行期事件，**不动 `completeness`**。两条理由：
+    /// ① `completeness` 是计划 3.2 的固定枚举，M1 还只是「非空 = partial」的占位值，
+    ///    不该为了「这次没遍历完」新增取值；
+    /// ② 一次遍历产出 4 个角色的片段，把同一个事实重复四遍没有意义。
+    /// 频次：每个 bundle id 第一次写，之后每 50 次写一条。
+    private func noteBFSLimitHit(bundleID: String?, scan: AX.TextScan) {
+        let key = bundleID ?? "(unknown)"
+        let count = (bfsLimitHits[key] ?? 0) + 1
+        bfsLimitHits[key] = count
+        guard count == 1 || count % 50 == 0 else { return }
+        recorder.logEvent(kind: "ax_bfs_limit_hit",
+                          detail: "bundle=\(key) \(scan.detail) count=\(count)")
     }
 }
 

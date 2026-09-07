@@ -18,3 +18,7 @@ tools/proto/sqlcipher/Sources/CSqliteVec
 # 不进公开仓库：计划 / 交接文档与探针采集报告只留在本地（含公司与机器信息）
 docs/
 tools/probe/results/
+
+# core/ 的 vendor 符号链接，由 core/setup.sh 重建
+core/Vendor/SQLCipher
+core/Vendor/SqliteVec

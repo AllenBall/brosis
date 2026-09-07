@@ -1,11 +1,48 @@
-# brosis 采集排除清单（报告 3.4）。一行一个 bundle id，# 开头为注释。
-# 这些应用会通过 SCContentFilter(display:excludingApplications:) 从采集流里排除。
-# 本文件存在时完全覆盖代码里的默认集合。
-com.apple.keychainaccess
-com.apple.Passwords
-com.agilebits.onepassword7
+# brosis 内置默认「不采集」清单（计划 3.12）。一行一个 bundle id，# 开头为注释。
+#
+# 用法与 M0 的差别：M0 是「本文件存在就整个覆盖代码里的默认集合」，
+# M1 起改成**并集**——本文件 ∪ CapturePolicy.swift 里 BuiltinDenylist.categories。
+# 覆盖语义在这里是错的：往文件里加一个自己的应用，不该把密码管理器整类默默放开。
+# 要放开某一项，在应用清单里把它改成「只记事件 / 事件 + 内容」，
+# 用户显式设置的优先级高于内置清单（CapturePolicyStore.decide）。
+#
+# 命中这份清单的应用：不记任何事件、进 SCContentFilter 排除列表、跳过 AX。
+#
+# 银行 / 券商类的 bundle id 没有在本机逐一核对（本机没装这些客户端），
+# 它们是「给个起点」；漏掉的应用首次出现时会写一条 app_policy_new_app 事件，
+# 可以在菜单栏「暂停采集当前应用 → 永久」一键改档。
+
+# —— 密码管理器 ——
 com.1password.1password
+com.agilebits.onepassword7
+com.agilebits.onepassword-osx
 com.lastpass.LastPass
+com.lastpass.lastpassmacdesktop
 org.keepassxc.keepassxc
+com.bitwarden.desktop
+com.dashlane.Dashlane
+in.sinew.Enpass-Desktop
+com.nordpass.macos
+com.apple.Passwords
+
+# —— 钥匙串访问 ——
+com.apple.keychainaccess
+
+# —— 验证器（TOTP） ——
+com.authy.authy-mac
+com.yubico.Authenticator
+com.yubico.ykman
+com.mattrubin.Authenticator
+com.raivo-otp.macos
+
+# —— 银行 / 券商 ——
+com.futunn.FutuNiuNiu
+com.tigerbrokers.TigerTrade
+com.interactivebrokers.tws
+com.charlesschwab.schwab
+com.robinhood.Robinhood
+com.eastmoney.mac
+
+# —— 远程屏幕（会把别人的屏幕录进来） ——
 com.apple.ScreenSharing
 com.apple.iPhoneMirroring

@@ -5,12 +5,16 @@ import Foundation
 let arguments = Array(CommandLine.arguments.dropFirst())
 
 if arguments.contains("--version") {
-    print("brosis \(BuildInfo.version)（M0 采集骨架，bundle id \(BuildInfo.bundleIdentifier)）")
+    print("brosis \(BuildInfo.version)（\(BuildInfo.stage)，bundle id \(BuildInfo.bundleIdentifier)）")
     exit(0)
 }
 
 if arguments.contains("--self-check") {
     exit(SelfCheck.run())
+}
+
+if arguments.contains("--dump-vectors") {
+    exit(VectorDump.run())
 }
 
 let application = NSApplication.shared

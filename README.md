@@ -8,6 +8,7 @@
 |---|---|
 | `docs/`（不在本仓库） | 实施计划（决策表 D1–D28、架构、里程碑、实验结果）与会话交接文档，只保存在本地 |
 | `app/` | brosis.app M0 采集骨架（SwiftPM；事件骨架、AX、按需截图、权限引导） |
+| `core/` | 加密存储核心（SwiftPM；SQLCipher、3.2 全部表、写入 / 删除 / 配额 / 维护 / 统计、`brosis-store` CLI） |
 | `tools/probe/` | D2 应用切换探针（无权限） |
 | `tools/bench/` | OCR 基准、FTS 分词对照、E9 运行时结果 |
 | `tools/proto/` | 3.2 schema 原型、合成库、正确性与容量测量、SQLCipher 构建 |

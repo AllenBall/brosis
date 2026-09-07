@@ -1,5 +1,6 @@
 import AppKit
 import ApplicationServices
+import BrosisCore
 import CoreGraphics
 import Foundation
 import Carbon.HIToolbox
