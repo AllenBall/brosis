@@ -144,7 +144,7 @@ find "$P" \( -name .build -o -name DerivedData -o -name __pycache__ -o -name '*.
 > 复核请对 `results/sizes.txt` 里的数量级与 `du -sk` 的 KiB 数，不要要求逐字节相同。
 > （上一遍结果文件里的 3,650,912 字节没有出处，本轮已作废。）
 
-链进来的存储核心：**SQLCipher 4.18.0 community / commoncrypto，SQLite 3.53.4**（`selfcheck.txt` 第 1 行）。
+链进来的存储核心：**SQLCipher 4.18.0 community / commoncrypto，SQLite 3.53.4**（`selfcheck.txt` 第 2 行）。
 
 ### 3.2 自检
 

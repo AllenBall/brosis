@@ -139,14 +139,39 @@ enum LockPolicy {
     /// 反过来：`locking` 期间到达的**锁定类**触发要取消已经攒下的补做——
     /// 用户在关库过程中按了 ⌘L（或屏幕锁了、磁盘满了），就不该因为半分钟前的一次唤醒
     /// 又把库开回来。
-    static func cancelsDeferredUnlock(_ trigger: LockTrigger) -> Bool {
+    ///
+    /// **R2 修正**：`screenLocked` 只在**严格模式**下算锁定类触发。非严格模式下
+    /// 屏幕锁定只往 `pauseReasons` 里加一条（库保持打开，见 `next`），
+    /// 它不关库，就不该把「睡醒了要开库」这件事取消掉——否则"睡眠 → 唤醒 → 屏幕还锁着"
+    /// 这条最常见的路径会把补做吃掉，状态停在 `locked` 直到用户手动 ⌘L。
+    static func cancelsDeferredUnlock(_ trigger: LockTrigger,
+                                      strictScreenLock: Bool = false) -> Bool {
         switch trigger {
-        case .systemWillSleep, .userWillLogout, .menuLock, .lowDisk, .thermalCritical, .screenLocked:
+        case .systemWillSleep, .userWillLogout, .menuLock, .lowDisk, .thermalCritical:
             return true
+        case .screenLocked:
+            return strictScreenLock
         default:
             return false
         }
     }
+
+    /// 自检用的「取消补做」用例表：`(触发, 严格模式, 期望是否取消)`。
+    static let cancelDeferredCases: [(trigger: LockTrigger, strict: Bool, expected: Bool)] = [
+        (.menuLock, false, true),
+        (.systemWillSleep, false, true),
+        (.userWillLogout, false, true),
+        (.lowDisk, false, true),
+        (.thermalCritical, false, true),
+        // 非严格模式：锁屏不关库，不取消补做（R2 修正）
+        (.screenLocked, false, false),
+        // 严格模式：锁屏就是关库，取消
+        (.screenLocked, true, true),
+        (.systemDidWake, false, false),
+        (.menuUnlock, false, false),
+        (.screenUnlocked, false, false),
+        (.screensaverStarted, false, false),
+    ]
 
     /// 自检用的补做用例表：`(起点相位, 触发, 严格模式, 期望补做的触发)`。
     static let deferredUnlockCases:
@@ -222,6 +247,9 @@ final class LockController {
     var onLocking: (@MainActor () -> Void)?
 
     let recorder: Recorder
+    /// 本地 IPC 服务端（3.1 / 3.6）。挂在这里而不是 AppDelegate：
+    /// 这一层才是本进程里唯一持有 `Store` 的地方，MCP 的"能不能服务"就是 3.5 的相位。
+    let ipc: MCPIPCService
     private(set) var snapshot = LockSnapshot()
     private(set) var lastError: String?
     private(set) var directory: URL
@@ -237,6 +265,7 @@ final class LockController {
 
     init(recorder: Recorder, defaults: UserDefaults = .standard) {
         self.recorder = recorder
+        self.ipc = MCPIPCService(recorder: recorder)
         self.defaults = defaults
         let resolved = DataLocation.resolve(defaults)
         self.directory = resolved.url
@@ -283,6 +312,7 @@ final class LockController {
     }
 
     func stop() {
+        ipc.stop()
         NSWorkspace.shared.notificationCenter.removeObserver(self)
         DistributedNotificationCenter.default().removeObserver(self)
         NotificationCenter.default.removeObserver(self)
@@ -342,7 +372,9 @@ final class LockController {
 
     func apply(_ trigger: LockTrigger) {
         // 关库过程中又来了锁定类触发：把之前攒下的补做取消掉。
-        if LockPolicy.cancelsDeferredUnlock(trigger) { pendingUnlock = nil }
+        if LockPolicy.cancelsDeferredUnlock(trigger, strictScreenLock: strictScreenLock) {
+            pendingUnlock = nil
+        }
         // locking 期间到的「要开库」触发先记下来，等关库真正落地再补做（见 LockPolicy.deferredUnlock）。
         if let deferred = LockPolicy.deferredUnlock(from: snapshot, on: trigger,
                                                     strictScreenLock: strictScreenLock) {
@@ -360,6 +392,8 @@ final class LockController {
                 detail: "trigger=\(trigger.rawValue) \(before.phase.rawValue)→\(after.phase.rawValue)"
                       + " pause=[\(after.pauseDescription)] strict=\(strictScreenLock)")
         }
+        // 3.5：`paused` 子状态下库开着，但采集暂停、**MCP 拒绝**。
+        if before.pauseReasons != after.pauseReasons { ipc.setPaused(after.isPaused) }
         if before.phase == .unlocked && after.phase != .unlocked { onLocking?() }
         switch after.phase {
         case .unlocking where before.phase != .unlocking:
@@ -415,6 +449,11 @@ final class LockController {
         }
         self.store = store
         recorder.attach(store)
+        // 3.1：MCP 只经本地 IPC 查询，服务端就在这里。socket 起来之后不再关，
+        // 锁定 / 暂停时回明确错误（3.5），而不是让客户端连不上。
+        ipc.attach(store: store)
+        ipc.setPaused(snapshot.isPaused)
+        ipc.startIfNeeded(directory: store.directory, defaults: defaults)
         CapturePolicyStore.shared.invalidateCache()
         CapturePolicyStore.shared.attach(recorder: recorder)
         let flags = DataDirectory.auditFlags(store.directory)
@@ -443,6 +482,8 @@ final class LockController {
         let store = self.store
         self.store = nil
         recorder.logEvent(kind: "store_closing", detail: recorder.stats.summary)
+        // 顺序要紧：先让 MCP 停止服务（之后所有调用回 locked），再摘采集端、再关库。
+        ipc.detach()
         recorder.detach()
         CapturePolicyStore.shared.invalidateCache()
         guard let store else {
@@ -473,6 +514,7 @@ final class LockController {
 
     /// 退出时同步关库：`applicationWillTerminate` 里主线程不能 await。
     func shutdown() {
+        ipc.stop()
         guard let store else { return }
         self.store = nil
         recorder.logEvent(kind: "app_terminating", detail: recorder.stats.summary)

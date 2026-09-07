@@ -19,6 +19,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var foregroundName: String?
     /// `app_launched` 只在本次进程第一次开库成功时写一条（见 `lock.onUnlocked`）。
     private var didLogLaunch = false
+    /// 最近一次「导出存储统计…」的结果，只在菜单里回显一行。
+    private var lastStatsExport: String?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // 必须在任何 AX 读取之前装上进程级全局 0.5 s 超时（见 AXSupport 的说明）。
@@ -323,6 +325,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             menu.addItem(disabledItem("最近错误：\(lastCaptureError.prefix(60))"))
         }
         menu.addItem(disabledItem("当前应用：\(foregroundLabel)"))
+        // 3.6：MCP 的本地 IPC 服务端状态（socket 起没起、现在服不服务）。
+        menu.addItem(disabledItem(lock.ipc.menuDescription))
         menu.addItem(.separator())
 
         let paused = lock.snapshot.pauseReasons.contains(.user)
@@ -362,6 +366,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                                 action: #selector(revealDataDirectory), keyEquivalent: "")
         reveal.target = self
         menu.addItem(reveal)
+
+        // 库是加密的，外部工具读不了；存储统计只能由本进程导出（见 StatsExport）。
+        let exportStats = NSMenuItem(title: "导出存储统计…",
+                                     action: #selector(exportStats), keyEquivalent: "")
+        exportStats.target = self
+        exportStats.isEnabled = lock.snapshot.phase == .unlocked
+        menu.addItem(exportStats)
+        if let lastStatsExport {
+            menu.addItem(disabledItem("上次导出：\(lastStatsExport)"))
+        }
 
         menu.addItem(.separator())
         let quit = NSMenuItem(title: "退出 brosis", action: #selector(quit), keyEquivalent: "q")
@@ -489,6 +503,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     @objc private func revealDataDirectory() {
         guard let lock else { return }
         NSWorkspace.shared.activateFileViewerSelecting([lock.directory])
+    }
+
+    /// 「导出存储统计…」：`stats()` + `statsDetail()` → 数据目录下的 `stats-<日期>.json`。
+    /// 库没开就什么都不做（菜单项那时是灰的）。导出前先 checkpoint，
+    /// 否则 `dbstat` 看不到还在 WAL 里的脏页（core 的 `stats()` 口径）。
+    @objc private func exportStats() {
+        guard let lock, lock.snapshot.phase == .unlocked else { return }
+        let directory = lock.directory
+        let outcome = recorder.withStore { store -> StatsExport.Outcome in
+            try store.checkpoint()
+            return try StatsExport.export(store: store, directory: directory)
+        }
+        guard let outcome else {
+            lastStatsExport = "失败（见「写入」那一行的错误计数）"
+            refreshMenu()
+            return
+        }
+        recorder.logEvent(kind: "stats_exported", detail: outcome.detail)
+        lastStatsExport = "\(outcome.url.lastPathComponent)（\(outcome.fileBytes) 字节）"
+        NSWorkspace.shared.activateFileViewerSelecting([outcome.url])
+        refreshMenu()
     }
 
     @objc private func quit() {

@@ -14,10 +14,12 @@ final class StoreAPITests: XCTestCase {
                    AND name NOT LIKE 'text_fts_%';
                 """)
         })
-        // 计划 3.2 列的 13 张 + 3.12 的 app_policies + 本包自加的 meta / migrations / capture_stats
+        // 计划 3.2 列的 13 张 + 3.12 的 app_policies + 本包自加的 meta / migrations /
+        // capture_stats / mcp_audit（T5 的 schema v2）
         for table in ["apps", "windows", "urls", "files", "observations", "text_versions",
                       "occurrences", "text_fts", "sessions", "ledgers", "deletions",
-                      "grants", "jobs", "app_policies", "meta", "migrations", "capture_stats"] {
+                      "grants", "jobs", "app_policies", "meta", "migrations", "capture_stats",
+                      "mcp_audit"] {
             XCTAssertTrue(present.contains(table), "schema 里缺少 \(table)")
         }
         // D8 通过前不建 vec 表
@@ -28,7 +30,12 @@ final class StoreAPITests: XCTestCase {
             try conn.scalarText("SELECT value FROM meta WHERE key = 'schema_version';")
         }
         XCTAssertEqual(version, String(Schema.version))
-        XCTAssertEqual(try store.count(table: "migrations"), 1)
+        // 新库直接建到最新版，但 migrations 表里每一版各留一行审计（T5 起是 v1 + v2）
+        XCTAssertEqual(try store.count(table: "migrations"), Schema.version)
+        let applied = try store.withLock { conn in
+            try conn.intColumn("SELECT version FROM migrations ORDER BY version;")
+        }
+        XCTAssertEqual(applied, (1...Schema.version).map(Int64.init))
         XCTAssertFalse(store.deviceID.isEmpty, "D17：每台机器一个 device_id")
 
         // D17：不可变记录的主键都带 device_id

@@ -6,6 +6,7 @@
 
 import Foundation
 import BrosisCore
+import BrosisIPC
 
 // MARK: - 参数
 
@@ -105,6 +106,35 @@ func percentile(_ values: [Double], _ p: Double) -> Double? {
     let k = Double(s.count - 1) * p
     let lo = Int(k), hi = min(lo + 1, s.count - 1)
     return s[lo] + (s[hi] - s[lo]) * (k - Double(lo))
+}
+
+// MARK: - 等退出信号
+
+/// 等 `SIGINT` / `SIGTERM`，或者 `seconds` 到点。返回之后调用方做干净收尾。
+///
+/// **这段必须待在函数里，不能写在顶层**：Swift 6 语言模式下 `main.swift` 的顶层代码是
+/// `@MainActor` 隔离的，而 `setEventHandler(handler:)` 的参数**不是** `@Sendable`，
+/// 顶层写出来的那个闭包于是跟着带上 MainActor 隔离检查；libdispatch 在自己的信号队列上
+/// 调它，`dispatch_assert_queue` 当场失败 → `SIGTRAP`。
+/// 表现是 `serve` 一收到 SIGTERM 就崩（实测退出码 133 = 128 + 5），
+/// 于是 socket 文件留在原地、库没有 checkpoint、密钥没清零——收尾代码一行都没跑到。
+/// 文件作用域的函数默认 `nonisolated`，里面的闭包也就没有这个检查。
+func waitForShutdownSignal(seconds: Int?) {
+    let done = DispatchSemaphore(value: 0)
+    let signalQueue = DispatchQueue(label: "brosis-store.serve.signal")
+    var sources: [DispatchSourceSignal] = []
+    for sig in [SIGINT, SIGTERM] {
+        signal(sig, SIG_IGN)          // 交给 dispatch source，默认处置会直接杀进程
+        let source = DispatchSource.makeSignalSource(signal: sig, queue: signalQueue)
+        source.setEventHandler { done.signal() }
+        source.resume()
+        sources.append(source)
+    }
+    if let seconds {
+        signalQueue.asyncAfter(deadline: .now() + .seconds(seconds)) { done.signal() }
+    }
+    done.wait()
+    for source in sources { source.cancel() }
 }
 
 // MARK: - 打开 store
@@ -317,6 +347,12 @@ brosis-store —— core/ 加密存储核心的命令行工具（M1 / T2）
   ledger            日台账（--date YYYY-MM-DD [--recompute]，或 --days 列出所有有观察的日子）
   bench             四类查询的冷 / 热 p50 / p95（--cold-rounds 20 --hot-reps 20 [--out x.json]）
                     --cold-round 是它自己 spawn 的子进程模式，一般不手动用
+
+本地 IPC / MCP（M1 / T5，计划 3.1 / 3.6）：
+  serve             在 <数据目录>/ipc.sock 上起 IPC 服务端（**测试替身**，产品路径在 brosis.app 里）
+                    [--rate 60] [--seconds N] [--state-file <文件：unlocked|paused|locked>]
+                    [--socket <路径>] [--verbose]
+  mcp-audit         打印最近的 mcp_audit 行（--limit 20 [--client <名字>]），不含正文
 
 通用选项：
   --dir              数据目录（D16：不能在 iCloud Drive 或其他同步盘里）
@@ -901,6 +937,78 @@ do {
             try data.write(to: URL(fileURLWithPath: out))
         }
         emit(object)
+
+    // -------------------------------------------------------------- serve（M1 / T5）
+    // 本地 IPC 服务端的**测试替身**：产品路径的服务端在 brosis.app 里（LockController 那一层，
+    // 计划 3.1），这里用 FileKeyProvider 在给定目录开库再把同一个 `MCPGate` + `StoreMCPService`
+    // 挂到同一个 `IPCServer` 上，好让 `swift test` 不启动 GUI 就能跑完整条链路。
+    case "serve":
+        let store = try openStore(args)
+        let service = StoreMCPService(store: store)
+
+        // 3.5 的锁定 / 暂停在测试里靠一个状态文件模拟：内容是 unlocked / paused / locked。
+        // 产品路径读的是 LockController 的相位，不读文件。
+        let stateFile = args.string("state-file")
+        @Sendable func currentState() -> MCPServiceState {
+            guard let stateFile,
+                  let text = try? String(contentsOfFile: stateFile, encoding: .utf8) else {
+                return .unlocked
+            }
+            return MCPServiceState(rawValue: text.trimmingCharacters(in: .whitespacesAndNewlines))
+                ?? .unlocked
+        }
+        let gate = MCPGate {
+            let state = currentState()
+            // locked = 库关着：不把 service 交出去，被拒的审计先攒着，解锁后补写。
+            return (state, state == .locked ? nil : service)
+        }
+        let verbose = args.has("verbose")
+        gate.onEvent = { line in
+            if verbose { FileHandle.standardError.write(Data(("serve: " + line + "\n").utf8)) }
+        }
+
+        // 默认就是产品路径的 `<数据目录>/ipc.sock`；`--socket` 只是给测试留的口子
+        // （`sun_path` 只有 104 字节，测试的临时目录可能顶到上限）。
+        var configuration = IPCServer.Configuration(
+            socketURL: args.string("socket").map { URL(fileURLWithPath: $0) }
+                ?? IPCProtocol.socketURL(dataDirectory: store.directory))
+        if let rate = args.int("rate") { configuration.requestsPerMinute = rate }
+        // **只有这里读这个环境变量**：`swift test` 编出来的测试进程没有 Developer ID，
+        // 同 Team 校验必然过不去。产品路径（app/Sources/brosis/IPCService.swift）写死
+        // `.requireSameTeam`，不读任何环境变量。
+        let skipCodesign = ProcessInfo.processInfo.environment["BROSIS_IPC_SKIP_CODESIGN"] == "1"
+        configuration.peerPolicy = skipCodesign ? .skip : .requireSameTeam
+
+        let server = IPCServer(configuration: configuration) { call in gate.handle(call) }
+        server.onEvent = { line in
+            if verbose { FileHandle.standardError.write(Data(("serve: " + line + "\n").utf8)) }
+        }
+        try server.start()
+        emit([
+            "command": "serve", "ready": true,
+            "socket": configuration.socketURL.path,
+            "requests_per_minute": configuration.requestsPerMinute,
+            "peer_policy": skipCodesign ? "skip_codesign" : "require_same_team",
+            "host_team_id": server.hostTeamID ?? "none",
+            "state_file": stateFile ?? "none",
+            "schema_version": Schema.version,
+        ])
+
+        // 干净退出：把 socket 文件删掉、checkpoint、关库、清零密钥。
+        waitForShutdownSignal(seconds: args.int("seconds"))
+        server.stop()
+        try? store.checkpoint()
+        store.close()
+        emit(["command": "serve", "stopped": true])
+
+    // -------------------------------------------------------------- mcp-audit
+    case "mcp-audit":
+        let store = try openStore(args, createIfMissing: false)
+        defer { store.close() }
+        let rows = try store.mcpAuditTail(limit: args.int("limit") ?? 20,
+                                          clientID: args.string("client"))
+        emit(["command": "mcp-audit", "count": rows.count,
+              "total": try store.mcpAuditCount(), "rows": jsonValue(rows)])
 
     default:
         throw CLIError("未知子命令 \(args.command)，见 --help")

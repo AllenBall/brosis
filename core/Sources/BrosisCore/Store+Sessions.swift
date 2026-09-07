@@ -242,8 +242,11 @@ extension Store {
     /// 而且再 `--build` 一次也不会自愈（7 条观察就能复现：同屏 `A@T-20s, A@T-10s, A@T, B@T,
     /// B@T+10s, C@T+100s, C@T+110s`，`--force` 3 段、零新观察 `--build` 4 段）。
     ///
-    /// 这里只查「留下的会话」里 `"end" == 起点` 的那几个（每块屏至多一个），
+    /// 这里只查「留下的会话」里 `"end" == 起点` 的那几个（**通常一个、可能多个**：
+    /// 会话按 `(display, app)` 切，同一块屏上多条同毫秒观察分属不同应用时，
+    /// 每个应用各留下一个长度为 0、`"end" == 起点` 的会话），
     /// 展开证据看有没有 `ts == 起点` 的观察；有就返回它们的 `MIN(start)`，没有返回 `nil`。
+    /// 所以下面是遍历所有命中行取 `MIN(start)`，而不是取"那一个"。
     /// 代价是每轮一次 `observations(device_id, ts)` 的索引点查——绝大多数库里
     /// 边界上根本没有同毫秒观察，这条点查直接空集返回。
     private func boundaryStartToInclude(from: Int64, conn: SQLiteConnection) throws -> Int64? {

@@ -1,4 +1,4 @@
-# app/ — brosis.app 采集端（M1 / R1 · T4）
+# app/ — brosis.app 采集端（M1 / R1 · T4，R2 · T7 + T5）
 
 对应：`docs/实施计划.md` 的 **3.1**（采集端 + 单一存储服务）、**3.3**（采集策略与完整性状态）、
 **3.5**（密钥与锁定状态机）、**3.12**（应用采集清单）、**4.2**（规则脱敏、暂停触发器）、
@@ -8,8 +8,9 @@
 `app/` 通过 `Recorder` 这层薄壳写进去。M0 的明文测试库 `~/Library/Application Support/brosis-m0/`
 **原样保留、不再读写、不迁移**——它是 E4 的原始观测数据，schema 与 v1 完全不同。
 
-> 本轮（R1 / T4）**不含 3.12 的应用清单窗口**（那一页 GUI 在第二轮），只做它的数据层、
-> 内置默认清单与菜单栏快捷项。适配器、局部 OCR、MCP 也都不在本轮。
+> **不含 3.12 的应用清单窗口**（那一页 GUI 还没做），只有它的数据层、内置默认清单与菜单栏快捷项。
+> 适配器与局部 OCR 也还没做。**MCP 已经接上了**（R2 / T5）：本地 IPC 服务端在这个进程里，
+> 见 8.9 与第 10 节。
 
 **R1 验收复核后的六处修订**（本文件已同步）：
 
@@ -20,6 +21,30 @@
 4. `locking` 期间到达的唤醒 / 解锁触发会在关库落地后**补做**，不再被丢掉——见 8.1；
 5. `app_launched` 只在本次进程第一次开库时写，之后每次解锁写 `store_unlocked`；
 6. 第 9 节的运行期事件 kind 一览补全到 **54 种**（原来漏了权限引导的 6 种）。
+
+**M1 第二轮（R2 / T7）又改了八处**（本文件已同步；每条都有自检或纯函数断言，
+见 `tools/bench/results/m1_r2a_cleanup_2026-09-07.md`）：
+
+1. **被延后的纯定时截图不再被当成事件截图**：`finish()` 重排队时不再追加 `queued`，
+   `capture_stats.trigger` 里从此不会出现 `queued`——见 8.6；
+2. **`ax_bfs_limit_hit` 的 `hit=depth` 改成"确实有子树没展开"**（原来只要有元素落在最后一层就报）——见 8.5；
+3. **兜底间隔改 `UserDefaults` 后要重启 app 才生效**（值在进程启动时解析一次）——见 8.6；
+4. **`recorder_dropped` 在解锁当次就落库**，不再晚一个锁定周期——见第 9 节；
+5. **非严格模式下的锁屏不再取消"补做的开库"**（它本来就不关库）——见 8.1；
+6. **版本号单一来源**：`build_app.sh` 从 `BuildInfo.swift` 读 `version` 写进 `Info.plist`，自检核对——见第 3、4 节；
+7. **`setPaused` 只在状态变化时写 `capture_paused` / `capture_resumed`**（原来每次 `syncSubsystems` 都写一条）；
+8. **新增菜单项「导出存储统计…」**（加密库的统计在库外读不到）——见 8.8。
+
+**M1 第二轮（R2 / T5）接上了 MCP**（计划 3.1 / 3.6，见
+`tools/bench/results/m1_r2a_mcp_2026-09-07.md`）：
+
+1. **本地 IPC 服务端进了这个进程**（`IPCService.swift`，挂在 `LockController` 上）：
+   数据目录下的 `ipc.sock`（0600）、对端同 Team ID 校验、按客户端限流——见 8.9；
+2. **`brosis-mcp` 一起进了 bundle**（`Contents/MacOS/brosis-mcp`，先单独签再签 bundle）——见第 2、3 节；
+3. **3.5 的相位直接决定 MCP 服不服务**：`paused` 与 `locked` 都拒绝，锁定期间的审计解锁后补写；
+4. **菜单里多一行 MCP 状态**；自检多 8 项（socket 权限、无 grant 全拒、两档字段级别、审计、
+   应用白名单也裁出现上下文、对端校验）；
+5. 配置 Claude Code 的步骤见**第 10 节**。
 
 ## 1. 边界（先说不做什么）
 
@@ -39,13 +64,18 @@
 ```
 app/
 ├── Package.swift                     SwiftPM 可执行目标 brosis；依赖 .package(path: "../core")
-├── build_app.sh                      swift build → 组装 .app → Developer ID 签名 → 验证
+├── build_app.sh                      swift build（app + core 的 brosis-mcp）→ 组装 .app →
+│                                     先签内嵌的 brosis-mcp 再签 bundle → 验证
 ├── Sources/brosis/
 │   ├── main.swift                    入口；--version / --self-check / --dump-vectors 都不创建 NSApplication
 │   ├── BuildInfo.swift               版本、bundle id、ObservationTrigger 及其到 core 枚举的收敛
 │   ├── AppDelegate.swift             菜单栏（录制 / 暂停 / 锁定 / 权限缺失）、一键暂停、
-│   │                                 「暂停采集当前应用（今天 / 永久）」、锁定 / 解锁、登录项
+│   │                                 「暂停采集当前应用（今天 / 永久）」、锁定 / 解锁、登录项、
+│   │                                 「导出存储统计…」
 │   ├── LockController.swift          3.5 锁定状态机：LockPolicy（纯函数）+ 取钥 / 开库 / 校验 / checkpoint / 关库
+│   │                                 并持有下面这个 IPC 服务端（它是本进程唯一拿得到 Store 的地方）
+│   ├── IPCService.swift              3.1 / 3.6 的本地 IPC 服务端：<数据目录>/ipc.sock（0600）、
+│   │                                 对端同 Team ID 校验（写死，不读环境变量）、按客户端限流
 │   ├── Recorder.swift                写入 BrosisCore.Store 的唯一出口 + DataLocation（D16）+ AXTextSummary
 │   ├── CapturePolicy.swift           3.12 三档数据层、内置默认不采集清单、私密浏览判定
 │   ├── Redaction.swift               入库前规则脱敏（gitleaks 子集 + Luhn + 验证码）+ 33 条测试向量
@@ -56,13 +86,20 @@ app/
 │   ├── CaptureController.swift       按需截图（SCScreenshotManager）+ 帧门控 + 定时兜底 + 策略排除
 │   ├── DHash.swift                   9×8 灰度差分哈希（64 bit）
 │   ├── PermissionGuide.swift         权限引导窗口
-│   └── SelfCheck.swift               无 GUI / 无 TCC / 不碰钥匙串的自检（38 项）+ --dump-vectors 判定表转储
+│   ├── StatsExport.swift             「导出存储统计…」：stats() + statsDetail() → 数据目录的 JSON
+│   └── SelfCheck.swift               无 GUI / 无 TCC / 不碰钥匙串的自检（55 项）+ --dump-vectors 判定表转储
 ├── Support/
 │   ├── Info.plist                    LSUIElement=1 + 三个 usage string
 │   ├── brosis.entitlements           不沙盒 + apple-events
 │   └── com.brosis.agent.plist        SMAppService LaunchAgent
 └── Resources/exclusions.txt          3.12 内置默认「不采集」清单（与代码内清单取**并集**）
 ```
+
+**bundle 里还有一个可执行文件**：`Contents/MacOS/brosis-mcp`（core 的产品，计划 3.6 的薄 MCP）。
+`build_app.sh` 会一起构建、放进 bundle、**先单独签它再签外层 bundle**——
+`codesign` 对 bundle 签名不会替 `Contents/MacOS` 里的第二个 Mach-O 生成签名，
+漏了的话 `--verify --deep --strict` 会报 "code object is not signed at all"。
+两者用同一个 Developer ID 身份，所以 Team ID 相同，能过 IPC 的对端校验（见第 10 节）。
 
 **已删除**：M0 的 `Store.swift`（明文 SQLite 测试库）。它的四张表按下表搬进了 core：
 
@@ -84,13 +121,25 @@ DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer \
 
 **前置**：`core` 的 vendor 源码要先就位（一次即可）——`sh core/setup.sh`，它会把 SQLCipher
 amalgamation 与 sqlite-vec 放进 `~/Library/Caches/brosis-build/sqlcipher/vendor/` 并在 `core/Vendor/`
-下建两个符号链接。没有它 `app` 编不过（依赖链 `brosis → BrosisCore → SQLCipher`）。
+下建符号链接（`core/Vendor/{SQLCipher,SqliteVec}` 与 `core/Sources/CSQLCipher/include`）。
+没有它 `app` 编不过（依赖链 `brosis → BrosisCore → SQLCipher`）。
 
 **`DEVELOPER_DIR` 是必须的**：本机 `xcode-select` 指向 CommandLineTools，不加前缀拿不到完整工具链。
 
-脚本七步：确认签名身份 → `swift build --scratch-path` → 组装 bundle 并 `plutil -lint` + 校验六个必备键 →
-`codesign --options runtime --timestamp --entitlements` → `codesign --verify --deep --strict` →
-`codesign -dv --verbose=4` → 打印 entitlements → `spctl` 评估。
+**版本号只有一个来源**：`Sources/brosis/BuildInfo.swift` 的 `static let version`。
+`Support/Info.plist` 里放的是 `__VERSION__` 占位符，`build_app.sh` 组装时把
+`CFBundleShortVersionString` 与 `CFBundleVersion` **都**写成这一串（两者同串；本项目不上
+App Store，不需要"同一版本多次构建"的递增号，真要区分就在末尾追加 `.N`），
+写完立刻读回来核对，自检再从 `Bundle.main` 比一次——手改 plist 没有意义，会被覆盖。
+
+脚本步骤：确认签名身份 → `swift build --scratch-path`（app）→ **`swift build --product brosis-mcp`
+（core，另一个 scratch：`${SCRATCH}-core`）** → 组装 bundle（写版本号、拷进 `brosis-mcp`）并
+`plutil -lint` + 校验**八个**必备键 → **先签 `Contents/MacOS/brosis-mcp`**（hardened runtime，
+identifier `com.brosis.app.mcp`，不带任何权利）→ 签外层 bundle（`--options runtime --timestamp
+--entitlements`）→ `codesign --verify --deep --strict`（外层与 `brosis-mcp` 各验一次）→
+**核对两者 Team ID 一致**（不一致就 `fail`，否则 IPC 的对端校验一定过不去）→
+`codesign -dv --verbose=4` → 打印 entitlements → `spctl` 评估 → 打印
+`claude mcp add` 与 `admin grant add` 两条命令。
 
 环境变量：
 
@@ -98,6 +147,7 @@ amalgamation 与 sqlite-vec 放进 `~/Library/Caches/brosis-build/sqlcipher/vend
 |---|---|---|
 | `CONFIG` | `release` | 传给 `swift build -c` |
 | `SCRATCH` | `~/Library/Caches/brosis-build/app` | SwiftPM scratch 与 .app 输出目录 |
+| `CORE_SCRATCH` | `${SCRATCH}-core` | core 包的 scratch（编 `brosis-mcp` 用；两个 SwiftPM 包不能共用一个 scratch） |
 | `IDENTITY` | 自动探测的 `<Developer ID Application 身份>` | 签名身份 |
 | `SKIP_SIGN` | `0` | `1` = 只组装不签名（此时不要用于任何 TCC 测试） |
 | `TIMESTAMP` | `yes` | `none` = 离线时跳过 Apple 时间戳服务（这样签的包不能公证） |
@@ -125,23 +175,34 @@ DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer \
 `SelfCheck.swift` 明确不调用 `CGPreflightScreenCaptureAccess` / `CGRequestScreenCaptureAccess` /
 `AXIsProcessTrusted` / `AXIsProcessTrustedWithOptions` / `SCShareableContent` / 任何 `AXUIElement*`，
 不创建 `NSApplication`，**也不用 `KeychainKeyProvider`**（那会弹钥匙串授权框）。
-共 **38 项**，退出码 0 = 全通过：
+共 **55 项**（M0 骨架 38 → R2/T7 的 47 → R2/T5 又加了 8 项 MCP：`ipc.sock` 权限 0600、
+没有 grant 全拒、加了 grant 之后 search 命中、`fields = summary` 不回原文、`fields = evidence` 回原文、
+`mcp_audit` 记了每次调用且不含查询串、**应用白名单也裁 `get_evidence` 的出现上下文**、
+对端同 Team ID 校验），退出码 0 = 全通过。
+**对端校验那一项分两支**：本进程有 Team ID（从签名过的 `.app` 里跑）时要求同 Team 的连接**放行**；
+没有 Team ID（`swift build` 的裸二进制）时要求**一律拒绝**——两支都是断言，不是"跳过"。
+**从裸二进制（`swift build` 的产物）跑是 54 项 PASS + 1 项 SKIP**：版本那一项没有 `Info.plist` 可读，会打印
+`[SKIP]` 并说明，不计失败——要验它必须跑 `brosis.app/Contents/MacOS/brosis --self-check`。
 
 | 组 | 项数 | 验什么 |
 |---|---|---|
-| core 往返 | 19 | 用 `InMemoryKeyProvider` 在**临时目录**开一个真加密库：SQLCipher 版本 / `cipher_page_size=16384` / `journal_mode=wal` / `auto_vacuum=2` / `foreign_keys=1` / 编译期 `TEMP_STORE=3`、目录 0700 与两个排除标记、写一条带两个片段的观察、按 ord 读回逐字符比对、库里搜不到脱敏前明文、**库文件字节里搜不到正文明文（带阳性对照）**、运行期事件与遥测各 1 行、`app_policies` 三档往返、**用户策略经「锁定 → 解锁」往返后不变**、**库没开时的判定是临时的（不缓存、不落库）**、13 项悬空引用 + `integrity_check` + FTS、关库后密钥已清零 |
+| core 往返 | 21 | 用 `InMemoryKeyProvider` 在**临时目录**开一个真加密库：SQLCipher 版本 / `cipher_page_size=16384` / `journal_mode=wal` / `auto_vacuum=2` / `foreign_keys=1` / 编译期 `TEMP_STORE=3`、目录 0700 与两个排除标记、写一条带两个片段的观察、按 ord 读回逐字符比对、库里搜不到脱敏前明文、**库文件字节里搜不到正文明文（带阳性对照）**、运行期事件与遥测各 1 行、`app_policies` 三档往返、**用户策略经「锁定 → 解锁」往返后不变**、**库没开时的判定是临时的（不缓存、不落库）**、**存储统计导出 JSON 往返 + 里面没有路径 / 正文**、13 项悬空引用 + `integrity_check` + FTS、关库后密钥已清零 |
+| `recorder_dropped` 时序 | 2 | 另开一个临时加密库走「开库 → 关库 → 三类写入被丢弃 → 再开库」：`jobs` 只在**再开库那一次**多一行；差值计数 = 这一段真丢掉的三类写入 |
 | 入库前脱敏 | 2 | 21 条正例（含窗口标题 / URL 三条）+ 12 条反例逐字符比对；Luhn 能区分卡号与订单号 / 时间戳 |
 | 3.12 三档 | 8 | 三档的生效方式开关表；解析优先级 5 条；内置清单已加载且覆盖四个类别 |
-| 3.5 状态机 | 3 | 21 条转移用例；7 条「`locking` 期间的开库触发要补做」用例；低磁盘阈值 = 2 GiB |
+| 3.5 状态机 | 4 | 21 条转移用例；7 条「`locking` 期间的开库触发要补做」用例；**11 条「锁定类触发取消补做」用例（含非严格模式的锁屏不取消）**；低磁盘阈值 = 2 GiB |
 | 私密浏览 | 2 | 浏览器标题含无痕标记时命中；非浏览器不误伤 |
 | dHash | 2 | 同图稳定、异图汉明距离 > 6 |
 | Electron / CEF | 2 | 伪造 `.app` 正反两例 |
+| 截图触发口径 | 2 | 7 条 `isEventTrigger` 用例（`periodic+queued` 不算事件触发）；`setPaused` 只在状态变化时写事件 |
+| AX 深度上限 | 1 | 4 条 `depthLimitHit` 用例；已命中后不再多取一次 `kAXChildren` |
+| 版本号单一来源 | 1 | `Bundle.main` 的两个版本键 == `BuildInfo.version`（裸二进制跳过） |
 
 自检的加密库开在 `$TMPDIR/brosis-selfcheck-<pid>/`，**跑完删除**，
 既不碰产品数据目录也不碰 M0 库；跑几次结果都一样。
 
 `--dump-vectors` 把判定表逐条摊开成 Markdown 表格（正例 21 / 反例 12 / 三档开关 / 21 条转移 /
-7 条补做用例 / 内置清单分类，共 6 节），输出可以直接贴进结果文件核对。
+7 条补做用例 / **11 条取消补做用例** / 内置清单分类，共 **7** 节），输出可以直接贴进结果文件核对。
 
 ## 5. 首次运行：**两次 TCC 授权 + 一次钥匙串授权，都必须手动**
 
@@ -274,8 +335,13 @@ locked ──launch / menuUnlock / systemDidWake──▶ unlocking ──取钥
    `LockPolicy.next` 会把它当空操作丢掉，状态就停在 `locked` 直到用户手动 ⌘L。
    现在这类触发（`systemDidWake` / `menuUnlock` / 严格模式下的 `screenUnlocked`）先记下来，
    关库落地后补做一次，并写一条 `runtime_event:lock_unlock_deferred`。
-   反过来，关库过程中再来锁定类触发（⌘L / 锁屏 / 睡眠 / 低磁盘 / 热 critical）会**取消**补做——
+   反过来，关库过程中再来**锁定类**触发（⌘L / 睡眠 / 注销 / 低磁盘 / 热 critical）会**取消**补做——
    用户刚按了锁定，不该因为半分钟前的一次唤醒又把库开回来。
+   **锁屏只在 `lock.strict=true` 时算锁定类触发**（M1 R2 修正）：非严格模式下锁屏只往
+   `pauseReasons` 里加一条、库照开着，它不关库，就不该把「睡醒了要开库」这件事吃掉——
+   否则"睡眠 → 唤醒 → 屏幕还锁着"这条最常见的路径会停在 `locked`，正是补做要解决的那个问题。
+   判定是纯函数 `LockPolicy.cancelsDeferredUnlock(_:strictScreenLock:)`，自检 11 条用例
+   （`--dump-vectors` 第 6 节逐条可看）。
 
 **开库（unlocking）三步**：`KeychainKeyProvider` 取钥 → `Store.open`（连接序言由 core 负责，
 顺序 key → cipher_page_size → auto_vacuum → WAL → …）→ 校验（`buildInfo()` + 真读一次 `observations`）。
@@ -419,6 +485,21 @@ locked ──launch / menuUnlock / systemDidWake──▶ unlocking ──取钥
 遇到 `AXSecureTextField` 直接剪枝。同一角色的多个节点按遍历顺序用换行拼成**一个片段**——
 AX 树里一段正文常被拆成几十个 `AXStaticText`，逐节点入库会把 `text_versions` 打成碎片、
 也让 bigram 检索失去上下文。每个角色最多留 **20 000 字符**，命中上限记 `hit=chars`。
+
+**`runtime_event:ax_bfs_limit_hit` 的三个 `hit` 各是什么意思**（`detail` 形如
+`limits=nodes=1500 depth=12 visited=1500 chars=8123 hit=node`）：
+
+| `hit` | 含义 | 判定 |
+|---|---|---|
+| `node` | 节点数吃满 `maxNodes`，队列里还有没走的元素 | `visited >= maxNodes && !queue.isEmpty` |
+| `depth` | **确实有子树因为深度上限没被展开** | 至少一个 `depth == maxDepth` 的元素**还有子节点**（`AX.depthLimitHit`） |
+| `chars` | 至少一个角色的正文吃满 20 000 字符 | 累计字符数越过上限 |
+
+`depth` 这条是 **M1 R2 修正**的：原来只要取出一个 `depth == maxDepth` 的元素就置位，
+而最后一层通常全是叶子（`AXStaticText` 之类），于是限深的应用（访达 6 层）几乎每次遍历都报
+`hit=depth`，这个字段等于没有信息。现在要真的还有子节点才算，代价是**一次遍历最多多发一轮
+`kAXChildren`**（已经命中过就不再判定，`hasChildren` 是 `@autoclosure`）。
+口径改了之后 `hit=depth` 才是"该收紧限额了"的信号。
 `occurrences.region` 存 AX 角色（3.2 允许 region 是"AX 路径"，角色是它最粗的一档）。
 `completeness` 仍是**占位**：读到正文 = `partial`，读不到 = `unavailable`，
 被策略排除 / 私密浏览 = `excluded`。真正的 `complete` 判定要等第二轮的适配规则 + OCR 对照。
@@ -447,12 +528,86 @@ AX 树里一段正文常被拆成几十个 `AXStaticText`，逐节点入库会�
 定时兜底间隔可用 UserDefaults 覆盖：`defaults write com.brosis.app capture.periodicInterval -float 5`，
 下限 3 s，非法值回落 12 s，来源标记（`default` / `defaults` / `defaults_clamped` / `defaults_invalid`）
 写在 `capture_armed` 的 detail 里。
+**改完要退出 brosis 再打开才生效**：这个值在进程里只解析一次（`CaptureController` 的
+静态 `periodicIntervalResolution`，为的是让每条 `capture_stats` 的口径在一次运行里恒定），
+`defaults write` 之后不重启 app 的话，菜单里看到的、事件里记的都还是旧值。
+`--self-check` 的最后几行会打印当前解析结果与来源，可以用它确认改动生效了。
+
+**"刚截过图就跳过这次兜底"用的是哪一次截图**（M1 R2 修正）：只算**事件触发**的那次。
+合并后的触发串去掉 `periodic` 与 `queued` 之后还剩东西才算事件
+（`CaptureController.isEventTrigger`，纯函数，自检 7 条用例）。
+原来 `finish()` 重排队时会追加 `queued`，被延后的**纯定时**截图于是变成 `"periodic+queued"`
+并被当成事件截图记进 `lastEventCaptureAt`，把紧接着的下一次兜底压掉——纯定时截图反而抑制了
+纯定时截图。现在重排队不再追加原因，**`capture_stats.trigger` 里不会再出现 `queued`**
+（老库里的历史值仍按非事件处理）。
 
 ### 8.7 退出
 
 `applicationWillTerminate`：停事件骨架 → 停截图（`Task.detached` + 信号量，**不能用 `Task { }`**：
 在 `@MainActor` 上下文里创建的 Task 继承 MainActor 隔离，而主线程正被 `DispatchSemaphore.wait`
 挡着，任务根本没机会开始）→ `LockController.shutdown()` 同步做 checkpoint + 关库 + 清零密钥。
+
+### 8.8 导出存储统计（菜单项「导出存储统计…」）
+
+产品库是 SQLCipher 加密的、钥匙在钥匙串里：`sqlite3` 打不开，`core` 的 `brosis-store` 也只支持
+`--key-file`（第 5 节第 6 条）。所以"这个库现在有多大、正文 / 索引 / 元数据各占多少、多少行"
+在库外**没有任何出口**。菜单项「导出存储统计…」（`StatsExport.swift`）补上这个出口，
+也是 M1 R2 月报脚本（T6）的输入。
+
+- **什么时候可点**：只有 `unlocked` 时可用，否则是灰的。
+- **做什么**：先 `checkpoint()`（`dbstat` 只看已经落进主库文件的页），再调 core 的
+  `stats()` + `statsDetail()`，把结果写成数据目录下的 **`stats-<yyyy-MM-dd>.json`**
+  （本地日期；同一天再导出会覆盖当天那份），文件权限 0600，随后写一条
+  `runtime_event:stats_exported` 并在 Finder 里选中它。
+- **格式**（`schema_version = 1`，字段表见 `core/README.md` 已知限制第 9 条）：
+
+  | 顶层键 | 类型 | 说明 |
+  |---|---|---|
+  | `schema_version` | int | 格式版本，字段有增删就 +1 |
+  | `generated_by` | string | 采集端版本（= `BuildInfo.version`） |
+  | `device_id` | string | D17 的 `device_id` |
+  | `exported_at` | string | ISO 8601（UTC，`…Z`） |
+  | `exported_at_ms` | int | 同一时刻的 Unix **毫秒**，与 `observations.ts` 同口径 |
+  | `store` | object | `StoreStats` 全字段（snake_case）：`page_size` `page_count` `freelist_pages` `db_file_bytes` **`wal_bytes`** `shm_bytes` `content_bytes` `index_bytes` `fts_bytes` `metadata_bytes` `free_bytes` `text_payload_bytes` `observations` `live_observations` `tombstoned_observations` **`text_versions`** `occurrences` `fts_rows` `apps` `deletions` |
+  | `dbstat` | array | 逐 b-tree 明细，按字节倒序，每项 `{name, bucket, bytes, pages}`；`bucket ∈ content / index / fts / metadata` |
+
+- **文件里没有正文、没有窗口标题、没有 URL、也没有任何路径**——自检有一条断言直接扫全文
+  （连 `/` 都不该出现；`dbstat` 的 `name` 只是表名与索引名）。这份文件是拿来给人拷走看的，
+  不能因为"只是统计"就把路径与用户名带出去。
+- **自检怎么验**：`--self-check` 用 `InMemoryKeyProvider` 的临时库调**同一个** `StatsExport.export`，
+  把 JSON 解析回来逐字段核对（`schema_version` / `device_id` / `generated_by` /
+  `exported_at_ms` / `observations` / `text_versions` / `occurrences` / `dbstat` 非空且四个键齐全 /
+  文件名），并打印实际字段清单，跑完删除。
+
+### 8.9 本地 IPC 服务端（3.1 / 3.6）
+
+`IPCService.swift` 里的 `MCPIPCService` 挂在 `LockController` 上——那是本进程里唯一持有 `Store`
+的地方。协议、socket、grant 判定、裁剪与审计都在 core（`BrosisIPC` + `StoreMCPService` + `MCPGate`），
+这里只负责**接生命周期**：
+
+| 时机 | 做什么 |
+|---|---|
+| 第一次开库成功（`finishUnlock`） | `attach(store:)` + `startIfNeeded(directory:)`：在 `<数据目录>/ipc.sock`（0600）上开始监听 |
+| 暂停原因变化（`apply`） | `setPaused(...)`：3.5 的 `paused` 子状态下库开着，但 **MCP 拒绝** |
+| 开始关库（`beginLock`）| `detach()`——**在 `store.close()` 之前**，之后所有调用回 `locked`。只把 `service` 置 `nil`，**socket 与既有连接都留着**（不断连接） |
+| 退出（`shutdown()` → `stop()`） | 停监听、对每条**存活连接** `shutdown(SHUT_RDWR)`、删掉 socket 文件。这是唯一会断连接的时机 |
+
+**socket 一旦起来就不再关**（除非退出）：锁定时客户端拿到的是一句"brosis 锁着"，
+而不是 `connect: No such file or directory`——后者分不清"没装"和"锁着"。
+锁定期间被拒的调用写不进 `mcp_audit`（库关着），先攒在内存里（上限 200 条），解锁后补写，
+与 8.6 的 `recorder_dropped` 是同一个套路。
+
+**对端校验策略在这里是写死的常量** `.requireSameTeam`：要求对端签名有效且 Team ID 与本进程相同。
+本进程自己没有 Team ID（`swift build` 的裸二进制、`SKIP_SIGN=1` 的 bundle）时**一律拒绝**。
+core 的 `brosis-store serve` 有个 `BROSIS_IPC_SKIP_CODESIGN=1` 的测试开关，
+**产品路径不读任何环境变量**，没有这个口子。
+
+限流默认 60 次 / 分钟 / 客户端，可用
+`defaults write com.brosis.app mcp.requestsPerMinute -int 120` 改（`MCPIPCService.rateLimitKey`）。
+限流窗口用**单调时钟**，系统时钟被回拨不会放大配额。
+
+菜单里多了一行 `MCP：socket 已就绪 · unlocked`（或 `locked` / `paused` / `socket 未启动`），
+用来一眼确认服务端起没起。
 
 ## 9. 数据库
 
@@ -470,10 +625,10 @@ AX 树里一段正文常被拆成几十个 `AXStaticText`，逐节点入库会�
 | `jobs` | 运行期事件，`type = 'runtime_event:<kind>'`。kind 见下 |
 | `app_policies` | 3.12 三档（`bundle_id, mode, source, updated_at`） |
 
-**运行期事件 kind 一览**（`jobs.type = 'runtime_event:<kind>'`，**54 种**）：
+**运行期事件 kind 一览**（`jobs.type = 'runtime_event:<kind>'`，**55 种**）：
 
-- 生命周期（4）：`app_launched`（本次进程只写一次）、`store_unlocked`（之后每次解锁）、
-  `app_terminating`、`self_check`
+- 生命周期（5）：`app_launched`（本次进程只写一次）、`store_unlocked`（之后每次解锁）、
+  `app_terminating`、`self_check`、`stats_exported`（M1 R2 新增，见 8.8）
 - 事件骨架与 AX（7）：`event_skeleton_started`、`ax_global_timeout_installed`、
   `ax_manual_accessibility`、`ax_observer_skipped`、`ax_observer_create_failed`、
   `ax_element_notifications_throttled`、`ax_bfs_limit_hit`
@@ -495,14 +650,97 @@ AX 树里一段正文常被拆成几十个 `AXStaticText`，逐节点入库会�
 
 **锁定期间的写入会被丢弃并计数。** 采集端的事件源（AXObserver 回调、`DispatchSourceTimer`）是异步的，
 不可能保证它们在关库那一刻全部静默。`Recorder` 在库不存在时把写入按类型计数
-（观察 / 事件 / 遥测），下一次开库写一条 `runtime_event:recorder_dropped`——
+（观察 / 事件 / 遥测），**下一次开库当场**写一条 `runtime_event:recorder_dropped`——
 "锁定期间丢了多少"是可核对的，不是悄悄消失。菜单栏「写入：」那一行实时显示同一组计数。
+
+**M1 R2 修正了它的时机**：原来是 `detach()`（关库那一刻）把**当时的累计计数**攒起来、
+等下一次 `attach()` 回放，可锁定期间的丢弃**发生在 `detach()` 之后**，
+于是每条事件都晚一个锁定周期——锁一次解一次，库里什么都没有；要锁第二次解第二次
+才看到第一次的数字（第一轮"需要用户在 GUI 里验证"的第 11 条因此永远对不上）。
+现在改成在 `attach()` 里算差值（`当前累计 − 上一次 attach 时的累计`），
+**锁一次解一次就能看到一条**，detail 形如
+`dropped_observations=3 dropped_events=12 dropped_capture_stats=1 errors=0；累计 观察 …`。
+没丢过就不写。自检用一个独立的临时加密库把整条路径走了一遍（第 4 节的「`recorder_dropped` 时序」两项）。
 
 **M0 的明文库**：`~/Library/Application Support/brosis-m0/`（`m0.sqlite` + `m0-selfcheck.sqlite`）
 **原样保留、本版本不读不写不迁移**。它的 schema 与 v1 差得太远，迁移的收益抵不上污染 v1 库的风险；
 要看 E4 的老数据直接用 `sqlite3` 打开那两个文件即可。
 
-## 10. 还没做 / 需要你操作的
+## 10. 给 Claude Code 配置 brosis-mcp（3.6）
+
+前提：`brosis.app` 已经在跑、处于 `unlocked`（菜单里那行 `MCP：socket 已就绪 · unlocked`）。
+`brosis-mcp` 在 bundle 里：`/Applications/brosis.app/Contents/MacOS/brosis-mcp`
+（本轮还没装到 `/Applications`，路径按你实际放的位置写）。
+
+**第一步：建第一份 grant。** 没有 grant 的客户端**六个工具全拒**，这是 3.6 的口径，
+不是"先能用再收紧"。
+
+```sh
+MCP=/Applications/brosis.app/Contents/MacOS/brosis-mcp
+
+# 看看现在有哪些客户端被授权了（第一次是空的）
+$MCP admin grant list
+
+# 给 Claude Code 一份：全部应用、30 天窗口、可以展开原文
+$MCP admin grant add --client claude-code --fields evidence --apps '*' --time-window 30
+
+# 更保守的一份：只给两个应用、7 天、只给摘要（默认就是 summary）
+$MCP admin grant add --client claude-code --fields summary \
+     --apps com.electron.lark,com.tencent.xinWeChat --time-window 7
+
+$MCP admin status                 # 相位、schema 版本、grant 数、审计行数
+$MCP admin audit --limit 20       # 最近的调用审计（不含正文，也不含查询串本身）
+$MCP admin grant remove --client claude-code
+```
+
+`admin` 走的是同一条本地 socket，服务端只接受**同 uid 且通过代码签名校验**的对端；
+`brosis.app` 没跑或锁着的时候它会明确告诉你连不上 / 锁着。
+
+`--apps` 给了具体清单（不是 `'*'`）时，白名单外的东西**一点都不给**：不只是结果行，
+`get_evidence` 每条证据附带的"出现上下文"（前后相邻的观察，带 bundle id 与窗口标题）
+也会逐条滤掉，被滤掉几条在返回值的 `grant.droppedByGrant` 里报出来。
+另外两条口径值得知道：`get_day_ledger` 按自然日预聚合，**时间窗起点落在某天中间时那天仍是整天口径**
+（返回值里 `coversBeforeWindowStart = true`）；白名单生效时台账 / 时间线 / `get_item(url|path)`
+会丢掉几个回不到"哪个应用"的字段，丢了什么在 `droppedFields` 里列着。
+
+**第二步：把它加进 Claude Code。**
+
+```sh
+claude mcp add brosis /Applications/brosis.app/Contents/MacOS/brosis-mcp
+```
+
+Claude Code 会用 stdio 拉起这个进程，`initialize` 里的 `clientInfo.name` 就是 `client_id`
+（Claude Code 报的是 `claude-code`）。要给同一个客户端开两份不同范围的 grant，
+用环境变量区分：
+
+```sh
+claude mcp add brosis-lark --env BROSIS_CLIENT_ID=claude-code-lark \
+       -- /Applications/brosis.app/Contents/MacOS/brosis-mcp
+```
+
+**六个工具**：`search` / `get_evidence` / `get_context` / `get_timeline` / `get_day_ledger` /
+`get_item`，全部 `readOnlyHint = true`，参数与返回见 `core/README.md` 的
+「本地 IPC 与 `brosis-mcp`」一章。典型用法是 `search` 拿 `evidenceID`，再 `get_evidence` 展开原文。
+
+**排查**：
+
+| 现象 | 原因 |
+|---|---|
+| `连不上 brosis 存储服务` | app 没跑，或还没第一次解锁过（socket 要开库成功后才建） |
+| `[locked]` / `[paused]` | 3.5：库关着 / 采集暂停（用户暂停、锁屏、屏保）。解锁或恢复采集 |
+| `[no_grant]` | 这个 `client_id` 没有 grant，按上面第一步建一份 |
+| `[denied_by_grant]` | 应用白名单 / 时间窗 / 字段级别挡下了；`admin grant list` 看范围 |
+| `[rate_limited]` | 每客户端 60 次 / 分钟，等一会儿或改 `mcp.requestsPerMinute` |
+| `[unauthorized_peer]` | 这个 `brosis-mcp` 与 `brosis.app` 的签名 Team ID 不一致（例如你手工编了一份没签名的）。用 bundle 里那一份 |
+| 退出 brosis.app 再启动之后，第一次调用慢了一下 | 正常：app 退出时 `IPCServer.stop()` 会把存活连接断掉，`brosis-mcp` 下一次调用自己重连（重试前等 150 ms，避开服务端起 socket 时 `bind` 与 `listen` 之间的窗口）。**不用重启 Claude Code**。锁定 / 解锁**不会**断连接，只会让调用返回 `[locked]` |
+| 想知道它连的是哪个 socket | `$MCP --print-socket` |
+
+**如实说明**（3.6 原话）：`mode = strict_local` 只是 grants 表里的一个标记加审计，
+**系统无法在技术上验证客户端是否把内容外发**；工具返回的正文用
+`<brosis:evidence>` 分隔符包起来并标了 `readOnlyHint`，那也只是**提示不是隔离**。
+真正硬的是服务端那几条：只读、按 grant 裁剪、限流、每次调用都进 `mcp_audit`。
+
+## 11. 还没做 / 需要你操作的
 
 **需要真人在 GUI 里验证的（本轮全部没跑）**：
 
@@ -523,6 +761,26 @@ AX 树里一段正文常被拆成几十个 `AXStaticText`，逐节点入库会�
 9. **私密浏览**：Safari 开无痕窗口，看该窗口的观察 `completeness = excluded`，
    且**没有正文、没有窗口标题、没有 URL**（`windows` / `urls` 里不该出现那个无痕窗口）。
 10. **屏幕录制月度再授权**（第 6 节）与 **SMAppService 登录项批准**（第 7 节）。
+11. **锁定期间的丢弃计数**：⌘L 锁一次、再解锁一次，库里就该有**一条**
+    `runtime_event:recorder_dropped`（M1 R2 之前要锁两次才看得到，见第 9 节）。
+12. **「导出存储统计…」**：解锁状态下点一次，数据目录里应出现 `stats-<日期>.json`，
+    Finder 会选中它；库里同时多一条 `runtime_event:stats_exported`。
+    锁定状态下这个菜单项是灰的。JSON 的字段见 8.8。
+13. **MCP 的 socket 真的起来了**：app 解锁后菜单里应显示 `MCP：socket 已就绪 · unlocked`，
+    数据目录里应出现 `ipc.sock`（`ls -l` 看到 `srw-------`）；
+    `/Applications/brosis.app/Contents/MacOS/brosis-mcp admin status` 应打出 JSON。
+    ⌘L 锁一次再看，`admin status` 应报 `[locked]`；解锁后 `admin audit` 里能看到那条 `locked` 记录
+    （它是解锁后补写的）。
+14. **Claude Code 真的连上**：`claude mcp add brosis …` 之后在 Claude Code 里 `/mcp` 应能看到
+    6 个工具；第一次调用应因为没有 grant 被拒，`admin grant add` 之后再调应该有结果。
+    这一步只有真人在 GUI / 终端里做得了（第 10 节）。
+15. **对端签名校验的负面用例**：拿 `swift build` 出来的那个**未签名**的 `brosis-mcp`
+    去连正在跑的 app，应当被拒并在 `admin audit` / 库里留下 `unauthorized_peer`。
+16. **app 重启之后 `brosis-mcp` 自己重连**（M1 R2 第三轮修的就是这条）：
+    解锁 → 在 Claude Code 里调一次 brosis 工具 → **退出 brosis.app** → 重新启动并解锁 →
+    再调一次。修之前这一步会让 `brosis-mcp` 被 SIGPIPE 打死（要重启 Claude Code），
+    现在应该只是慢一下（重连的 150 ms）就自己接上。
+    注意**锁定不算**这条路径：锁定不断连接，只让调用返回 `[locked]`（那是第 13 条）。
 
 **本轮明确没做的**：
 

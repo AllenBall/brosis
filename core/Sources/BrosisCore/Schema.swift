@@ -7,7 +7,11 @@ import Foundation
 public enum Schema {
 
     /// 库里写的 schema 版本。改表结构必须同时加一条 `migrations` 行并把这个数 +1。
-    public static let version = 1
+    ///
+    /// - v1：3.2 全部表 + 3.12 `app_policies` + `meta` / `migrations` / `capture_stats`。
+    /// - v2（M1 R2 / T5）：`mcp_audit`（3.6「审计：每次调用记录客户端、工具、参数摘要、返回条数」
+    ///   + 2.2 硬约束 4）。老库开库时由 `Store.migrateIfNeeded` 就地补建，不用重建库。
+    public static let version = 2
 
     /// 页大小（D23：16384，比 4096 省约 10%）。加密库用 `cipher_page_size`。
     public static let pageSize = 16384
@@ -246,6 +250,34 @@ public enum Schema {
     CREATE INDEX idx_capture_stats_ts ON capture_stats(ts);
     """
 
+    // MARK: - v2 迁移：MCP 审计（3.6 / 2.2 硬约束 4）
+
+    /// 每次 MCP 调用一行。**不存正文、不存查询串本身**：
+    /// `params` 只记参数的形状（长度、条数、时间窗、粒度、bundle id 之类），
+    /// 查询串只记字符数与 SHA-256 前 8 位十六进制——同一条查询能对上，内容不落库。
+    ///
+    /// 它是运行质量与授权的审计，**不是证据**：不参与 D17 同步、不进删除级联，
+    /// 由 `maintenance()` 按 `mcpAuditRetentionDays` 滚动清理（与 `capture_stats` 同一个口径）。
+    static let createMCPAudit = """
+    CREATE TABLE mcp_audit (
+      id           INTEGER PRIMARY KEY,
+      ts           INTEGER NOT NULL,            -- Unix 毫秒
+      client_id    TEXT    NOT NULL,            -- grants.client_id
+      op           TEXT    NOT NULL,            -- tool / admin / ping
+      tool         TEXT    NOT NULL,            -- 工具名或管理命令名
+      params       TEXT    NOT NULL,            -- 参数摘要（形状，不含正文与查询串）
+      decision     TEXT    NOT NULL CHECK (decision IN
+                     ('ok','no_grant','denied_by_grant','rate_limited','locked','paused',
+                      'unauthorized_peer','bad_request','unknown_tool','error')),
+      result_count INTEGER NOT NULL DEFAULT 0,  -- 返回条数（命中 / 证据 / 分桶 / 台账行）
+      peer         TEXT,                        -- uid / pid / Team ID / 签名校验结果
+      elapsed_ms   REAL    NOT NULL DEFAULT 0,
+      note         TEXT                         -- 被裁掉多少条、限流用量之类的补充
+    );
+    CREATE INDEX idx_mcp_audit_ts     ON mcp_audit(ts);
+    CREATE INDEX idx_mcp_audit_client ON mcp_audit(client_id, ts);
+    """
+
     // MARK: - FTS（D22）
 
     /// contentless（`content=''`，不重复存正文）+ `contentless_delete=1`（需要 SQLite ≥ 3.43）
@@ -274,7 +306,7 @@ public enum Schema {
     /// 3.2 里必须存在的表（含 3.12 的 app_policies 与本包自加的三张），`Store.open` 用它自检。
     public static let expectedTables = [
         "apps", "app_policies", "capture_stats", "deletions", "files", "grants", "jobs",
-        "ledgers", "meta", "migrations", "observations", "occurrences", "sessions",
+        "ledgers", "mcp_audit", "meta", "migrations", "observations", "occurrences", "sessions",
         "text_fts", "text_versions", "urls", "windows",
     ]
 }

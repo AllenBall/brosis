@@ -67,14 +67,13 @@ let sqlCipherSettings: [CSetting] = [
     .define("HAVE_STDINT_H"),
     .define("HAVE_GETHOSTUUID", to: "0"),
     .define("SQLITE_OMIT_LOAD_EXTENSION", to: "0"),
-    // 【改动 3】只关一条上游噪声警告。amalgamation 自己 #define 了 MIN / MAX，
-    // 而 unix VFS 那段又 #include <sys/param.h>（SDK 里也定义了同名宏），
-    // clang 因此对 68 处调用报 -Wambiguous-macro。两个定义语义完全相同，纯噪声，
-    // 而源码是 setup.sh 从上游生成的、不能改。关掉它之后本包构建零 warning。
-    //
-    // 注意：`.unsafeFlags` 让本包不能作为**按版本解析的**依赖被引用；
-    // 本包只会被 app/ 以 `.package(path: "../core")`（本地路径）引用，实测可用。
-    .unsafeFlags(["-Wno-ambiguous-macro"]),
+    // 【改动 3 已删除，M1 R2 恢复成"没有任何 unsafeFlags"】
+    // 原来这里有一行 `.unsafeFlags(["-Wno-ambiguous-macro"])`，用来关掉 amalgamation 与
+    // SDK 的 sys/param.h 各有一份 MIN / MAX 引起的 68 处 -Wambiguous-macro。
+    // 代价是**整个包不能被按版本解析的依赖引用**（SwiftPM 对 unsafeFlags 的硬规则）。
+    // 现在改成调整包含顺序：Sources/CSQLCipher/sqlcipher_amalgamation.c 先 #include <sys/param.h>
+    // 再 #include 上游的 sqlite3.c，后到的本地定义覆盖先到的模块宏，警告自然消失。
+    // 上游源码没有改动，编译开关也没有变。理由写在那个文件的注释里。
 ]
 
 let package = Package(
@@ -82,15 +81,24 @@ let package = Package(
     platforms: [.macOS("26.0")],
     products: [
         .library(name: "BrosisCore", targets: ["BrosisCore"]),
+        // 本地 IPC 协议 + socket 客户端 / 服务端（3.1）。app 与 brosis-mcp 都用它；
+        // 它自己**不依赖 BrosisCore**，所以 brosis-mcp 里没有 SQLCipher、没有任何开库能力。
+        .library(name: "BrosisIPC", targets: ["BrosisIPC"]),
         .executable(name: "brosis-store", targets: ["brosis-store"]),
+        // 3.6 的薄 MCP（stdio）。不持钥、不开库、不写库，只把 tools/call 转成 IPC 请求。
+        .executable(name: "brosis-mcp", targets: ["brosis-mcp"]),
     ],
     targets: [
-        // SQLCipher v4.18.0 amalgamation（源码在构建缓存里，Vendor/SQLCipher 是符号链接）
+        // SQLCipher v4.18.0 amalgamation。
+        // 源码在构建缓存里（Vendor/SQLCipher 是符号链接），本目标只编一个包装文件
+        // Sources/CSQLCipher/sqlcipher_amalgamation.c，由它 #include 上游的 sqlite3.c——
+        // 只为了把 <sys/param.h> 的引入提到前面，见那个文件的注释（替代原来的 unsafeFlags）。
+        // Sources/CSQLCipher/include 也是符号链接，指向 Vendor/SQLCipher/include（只有 sqlite3.h）。
         .target(
             name: "SQLCipher",
-            path: "Vendor/SQLCipher",
-            sources: ["src"],
-            publicHeadersPath: "include",   // 只暴露 sqlite3.h；sqlite3ext.h 留在私有的 src/
+            path: "Sources/CSQLCipher",
+            sources: ["sqlcipher_amalgamation.c"],
+            publicHeadersPath: "include",   // 只暴露 sqlite3.h；sqlite3ext.h 留在私有的 Vendor/.../src/
             cSettings: sqlCipherSettings,
             linkerSettings: [
                 // crypto_cc.c 用 CommonCrypto（libSystem）+ SecRandomCopyBytes（Security.framework）
@@ -121,21 +129,39 @@ let package = Package(
             publicHeadersPath: "include",
             cSettings: [.define("SQLITE_CORE")]
         ),
+        // 本地 IPC：协议类型、换行分隔 JSON 编解码、Unix domain socket 客户端 / 服务端、
+        // 对端 uid 与代码签名校验、按客户端限流。**不依赖 BrosisCore**（见 products 的注释）。
+        .target(
+            name: "BrosisIPC",
+            path: "Sources/BrosisIPC",
+            swiftSettings: [.swiftLanguageMode(.v6)],
+            linkerSettings: [
+                // SecCodeCopyGuestWithAttributes / SecCodeCheckValidity（对端签名校验）
+                .linkedFramework("Security"),
+            ]
+        ),
         .target(
             name: "BrosisCore",
-            dependencies: ["SQLCipher", "CBrosisSQLite"],
+            dependencies: ["SQLCipher", "CBrosisSQLite", "BrosisIPC"],
             path: "Sources/BrosisCore",
             swiftSettings: [.swiftLanguageMode(.v6)]
         ),
         .executableTarget(
             name: "brosis-store",
-            dependencies: ["BrosisCore"],
+            dependencies: ["BrosisCore", "BrosisIPC"],
             path: "Sources/brosis-store",
+            swiftSettings: [.swiftLanguageMode(.v6)]
+        ),
+        // 只依赖 BrosisIPC：编译期就保证它拿不到 Store、拿不到密钥。
+        .executableTarget(
+            name: "brosis-mcp",
+            dependencies: ["BrosisIPC"],
+            path: "Sources/brosis-mcp",
             swiftSettings: [.swiftLanguageMode(.v6)]
         ),
         .testTarget(
             name: "BrosisCoreTests",
-            dependencies: ["BrosisCore", "SQLCipher"],
+            dependencies: ["BrosisCore", "BrosisIPC", "SQLCipher"],
             path: "Tests/BrosisCoreTests",
             swiftSettings: [.swiftLanguageMode(.v6)]
         ),

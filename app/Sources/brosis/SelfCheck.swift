@@ -1,4 +1,5 @@
 import BrosisCore
+import BrosisIPC
 import CoreGraphics
 import Foundation
 
@@ -40,6 +41,8 @@ enum SelfCheck {
         defer { try? FileManager.default.removeItem(at: workspace) }
 
         var storeSummary = "—"
+        /// 存储统计导出文件的实际字段，跑完在参数快照里打出来（T6 的月报脚本按它读）。
+        var statsExportShape = "—"
         do {
             let provider = try InMemoryKeyProvider.random()
             var options = StoreOptions()
@@ -160,6 +163,45 @@ enum SelfCheck {
                   lockedPinned.provisional && lockedUnseen.provisional && unseenRow == nil,
                   "锁定期间解析过的 bundle id 没有写进 app_policies")
 
+            // 「导出存储统计…」菜单项走的是同一个 StatsExport.export：
+            // 这里用临时库调它，再把 JSON 解析回来逐字段核对（T6 的月报脚本按这个格式读）。
+            let exportedAt = Date()
+            let exported = try StatsExport.export(store: store, directory: workspace, now: exportedAt)
+            let exportedText = try String(contentsOf: exported.url, encoding: .utf8)
+            let json = try JSONSerialization.jsonObject(with: Data(exportedText.utf8))
+                as? [String: Any] ?? [:]
+            let jsonStore = json["store"] as? [String: Any] ?? [:]
+            let jsonRows = json["dbstat"] as? [[String: Any]] ?? []
+            let exportOK = (json["schema_version"] as? Int) == StatsExport.schemaVersion
+                && (json["device_id"] as? String) == "selfcheck-device"
+                && (json["generated_by"] as? String) == BuildInfo.version
+                && (json["exported_at_ms"] as? Int64) == Recorder.milliseconds(exportedAt)
+                && (json["exported_at"] as? String)?.hasSuffix("Z") == true
+                && (jsonStore["observations"] as? Int) == 1
+                && (jsonStore["text_versions"] as? Int) == 2
+                && (jsonStore["occurrences"] as? Int) == 2
+                && jsonStore["wal_bytes"] is Int
+                && jsonStore["db_file_bytes"] is Int
+                && jsonStore["content_bytes"] is Int
+                && !jsonRows.isEmpty
+                && jsonRows.allSatisfy { $0["name"] is String && $0["bucket"] is String
+                                          && $0["bytes"] is Int && $0["pages"] is Int }
+                && exported.url.lastPathComponent == StatsExport.fileName(for: exportedAt)
+            check("存储统计导出 JSON（stats() + statsDetail() 往返）", exportOK,
+                  "\(exported.url.lastPathComponent)：\(exported.fileBytes) 字节，"
+                  + "dbstat \(jsonRows.count) 项，schema_version "
+                  + "\(json["schema_version"] as? Int ?? -1)")
+            // 这份文件会被用户拷来拷去（月报脚本要读它），所以它里面**不能有任何路径**：
+            // 没有 "/" 就意味着既没有绝对路径也没有用户名（dbstat 里只有表名与索引名）。
+            statsExportShape = "顶层 {" + json.keys.sorted().joined(separator: ", ") + "}"
+                + "；store {" + jsonStore.keys.sorted().joined(separator: ", ") + "}"
+                + "；dbstat[] {" + (jsonRows.first?.keys.sorted().joined(separator: ", ") ?? "")
+                + "}"
+            check("存储统计导出里没有路径 / 正文",
+                  !exportedText.contains("/") && !exportedText.contains(NSHomeDirectory())
+                    && !exportedText.contains("第一段正文") && !exportedText.contains("自检窗口标题"),
+                  "只有计数、字节数与 b-tree 名字")
+
             let integrity = try store.integrityReport()
             check("13 项悬空引用 + integrity_check + FTS", integrity.allPassed,
                   "integrity=\(integrity.integrityCheck) fk=\(integrity.foreignKeyViolations) "
@@ -193,6 +235,60 @@ enum SelfCheck {
             check("关库后密钥已清零（3.5 locking）", store.keyIsZeroized, "SecureKey.wasZeroized && isAllZero")
         } catch {
             print("[FAIL] core 往返：\(error)")
+            failures += 1
+        }
+
+        // ------------------------------------------------- 1b. 锁定期间的丢弃计数何时落库
+        // R2 修正的问题：原来 detach() 把当时的累计计数攒起来、下一次 attach() 才回放，
+        // 而锁定期间的丢弃发生在 detach() 之后，于是每条 recorder_dropped 都晚一个锁定周期
+        // （锁一次解一次库里什么都没有）。这里用一个**独立的**临时加密库把
+        // 「attach → detach → 写入被丢弃 → attach」走一遍，数 jobs 行数。
+        do {
+            let dropWorkspace = workspace.appendingPathComponent("recorder-drop", isDirectory: true)
+            let provider = try InMemoryKeyProvider.random()
+            var options = StoreOptions()
+            options.deviceID = "selfcheck-drop"
+            let store = try Store.open(directory: dropWorkspace, keyProvider: provider,
+                                       options: options)
+            let recorder = Recorder()
+
+            recorder.attach(store)                       // 第一次开库：没有丢过，不该写事件
+            let jobsAfterFirstAttach = try store.count(table: "jobs")
+            recorder.logEvent(kind: "self_check", detail: "recorder_dropped 时序用例")
+            let jobsBeforeLock = try store.count(table: "jobs")
+
+            let beforeDrops = recorder.stats
+            recorder.detach()                            // ← locking：库指针摘掉
+            recorder.logEvent(kind: "self_check", detail: "锁定期间的事件 1")
+            recorder.logEvent(kind: "self_check", detail: "锁定期间的事件 2")
+            recorder.record(ObservationInput(
+                ts: Recorder.milliseconds(),
+                app: AppRef(bundleID: "com.brosis.selfcheck.locked", name: "锁定期间"),
+                trigger: ObservationTrigger.selfCheck.coreTrigger,
+                captureMethod: .ax, completeness: .unavailable, sourceState: .locked))
+            recorder.recordCaptureStat(status: "skipped", trigger: "self_check")
+            let delta = recorder.stats - beforeDrops
+
+            recorder.attach(store)                       // ← unlocking 完成：这里就该落一条
+            let jobsAfterUnlock = try store.count(table: "jobs")
+            recorder.attach(store)                       // 再开一次：这一段没丢过，不该再写
+            let jobsAfterSecondUnlock = try store.count(table: "jobs")
+
+            check("recorder_dropped 在解锁当次就落库（不再晚一个锁定周期）",
+                  jobsAfterFirstAttach == 0 && jobsBeforeLock == 1
+                    && jobsAfterUnlock == jobsBeforeLock + 1
+                    && jobsAfterSecondUnlock == jobsAfterUnlock,
+                  "jobs：首次开库 \(jobsAfterFirstAttach) → 锁定前 \(jobsBeforeLock) → "
+                  + "解锁后 \(jobsAfterUnlock) → 再解锁一次 \(jobsAfterSecondUnlock)")
+            check("recorder_dropped 的计数就是这一段丢掉的三类写入",
+                  delta.droppedObservations == 1 && delta.droppedEvents == 2
+                    && delta.droppedCaptureStats == 1 && delta.errors == 0,
+                  delta.dropDetail)
+
+            recorder.detach()
+            store.close()
+        } catch {
+            print("[FAIL] recorder_dropped 时序：\(error)")
             failures += 1
         }
 
@@ -303,19 +399,28 @@ enum SelfCheck {
                                         + "\(got?.rawValue ?? "(不补)")")
             }
         }
+        check("locking 期间的唤醒 / 解锁触发会被补做（\(LockPolicy.deferredUnlockCases.count) 条）",
+              deferredFailures.isEmpty,
+              deferredFailures.isEmpty
+                ? "关库是异步的，lockCompleted 之前到的 systemDidWake / menuUnlock 记下来补做"
+                : deferredFailures.joined(separator: "；"))
         // 反向：关库过程中又来锁定类触发，要把攒下的补做取消掉。
-        let cancelOK = LockPolicy.cancelsDeferredUnlock(.menuLock)
-            && LockPolicy.cancelsDeferredUnlock(.screenLocked)
-            && LockPolicy.cancelsDeferredUnlock(.systemWillSleep)
-            && !LockPolicy.cancelsDeferredUnlock(.systemDidWake)
-            && !LockPolicy.cancelsDeferredUnlock(.menuUnlock)
-        check("locking 期间的唤醒 / 解锁触发会被补做（\(LockPolicy.deferredUnlockCases.count) 条）"
-              + "，锁定类触发会取消补做",
-              deferredFailures.isEmpty && cancelOK,
-              deferredFailures.isEmpty && cancelOK
-                ? "关库是异步的，lockCompleted 之前到的 systemDidWake / menuUnlock 记下来补做；"
-                  + "期间再按 ⌘L / 锁屏 / 睡眠则取消"
-                : (deferredFailures + (cancelOK ? [] : ["取消补做的判定不符"])).joined(separator: "；"))
+        // R2 修正：非严格模式下 screenLocked 只进 paused、不关库，**不该**取消补做。
+        var cancelFailures: [String] = []
+        for item in LockPolicy.cancelDeferredCases {
+            let got = LockPolicy.cancelsDeferredUnlock(item.trigger, strictScreenLock: item.strict)
+            if got != item.expected {
+                cancelFailures.append("\(item.trigger.rawValue)(strict=\(item.strict)) 期望 "
+                                      + "\(item.expected ? "取消" : "不取消")，实得 "
+                                      + "\(got ? "取消" : "不取消")")
+            }
+        }
+        check("锁定类触发取消补做（\(LockPolicy.cancelDeferredCases.count) 条；"
+              + "非严格模式的锁屏不取消）",
+              cancelFailures.isEmpty,
+              cancelFailures.isEmpty
+                ? "⌘L / 睡眠 / 注销 / 低磁盘 / 热 critical 取消；锁屏只在 lock.strict=true 时取消"
+                : cancelFailures.joined(separator: "；"))
         check("低磁盘阈值 = 2 GiB",
               LockPolicy.lowDiskThresholdBytes == 2 * 1024 * 1024 * 1024,
               "\(LockPolicy.lowDiskThresholdBytes) 字节")
@@ -352,9 +457,218 @@ enum SelfCheck {
         check("Electron 检测（伪造不带框架的 .app）", electron.negativePassed, electron.negativeDetail)
         for note in electron.installedNotes { print("       \(note)") }
 
+        // ---------------------------------------------------------------- 8. 截图触发口径
+        // R2 修正：finish() 重排队时以前会追加 "queued"，纯定时截图于是变成
+        // "periodic+queued" 并被当成事件触发，压掉下一次兜底。现在判定是纯函数。
+        let triggerCases: [(String, Bool)] = [
+            ("periodic", false),
+            ("queued", false),
+            ("periodic+queued", false),
+            ("armed", true),
+            ("app_activated", true),
+            ("app_activated+periodic", true),
+            ("display_changed+periodic+queued", true),
+        ]
+        let triggerFailures = triggerCases.filter {
+            CaptureController.isEventTrigger($0.0) != $0.1
+        }
+        check("截图触发口径：去掉 periodic / queued 后非空才算事件触发",
+              triggerFailures.isEmpty,
+              triggerFailures.isEmpty
+                ? triggerCases.map { "\($0.0)→\($0.1 ? "事件" : "非事件")" }.joined(separator: "，")
+                : triggerFailures.map { "\($0.0) 期望 \($0.1)" }.joined(separator: "；"))
+
+        // setPaused 只在状态真的变了时写事件（否则 syncSubsystems 每次调都刷屏）。
+        // 用一个没挂库的 Recorder 观察：写不进去的事件会计进"锁定期间丢弃"，正好当计数器。
+        let pauseRecorder = Recorder()
+        let pauseController = CaptureController(recorder: pauseRecorder) { _ in }
+        pauseController.setPaused(false)                 // 初始就是 false：不该记
+        pauseController.setPaused(false)
+        let afterNoChange = pauseRecorder.stats.droppedEvents
+        pauseController.setPaused(true)                  // 变了：capture_paused
+        pauseController.setPaused(true)                  // 没变：不记
+        pauseController.setPaused(false)                 // 变了：capture_resumed
+        let afterChanges = pauseRecorder.stats.droppedEvents
+        check("setPaused 只在状态变化时写 capture_paused / capture_resumed",
+              afterNoChange == 0 && afterChanges == 2,
+              "连调两次 false → \(afterNoChange) 条事件；true/true/false → 共 \(afterChanges) 条")
+
+        // ---------------------------------------------------------------- 9. AX 深度上限语义
+        // R2 修正：hit=depth 表示"确实有子树没展开"，不是"有元素落在最后一层"。
+        var childrenCalls = 0
+        let limits = AX.BFSLimits(maxNodes: 100, maxDepth: 6)
+        let depthCases: [(name: String, got: Bool, expected: Bool)] = [
+            ("没到上限的层不算命中",
+             AX.depthLimitHit(alreadyHit: false, depth: 5, limits: limits, hasChildren: true), false),
+            ("到上限但是叶子：不算命中",
+             AX.depthLimitHit(alreadyHit: false, depth: 6, limits: limits, hasChildren: false), false),
+            ("到上限且还有子节点：命中",
+             AX.depthLimitHit(alreadyHit: false, depth: 6, limits: limits, hasChildren: true), true),
+            ("已经命中过就保持命中，且不再取 children",
+             AX.depthLimitHit(alreadyHit: true, depth: 6, limits: limits,
+                              hasChildren: { childrenCalls += 1; return false }()), true),
+        ]
+        let depthFailures = depthCases.filter { $0.got != $0.expected }
+        check("AX 深度上限：只有被截断的元素确实还有子节点才算 hit=depth",
+              depthFailures.isEmpty && childrenCalls == 0,
+              depthFailures.isEmpty && childrenCalls == 0
+                ? "4 条用例全过；已命中时不再多发一轮 kAXChildren（求值次数 \(childrenCalls)）"
+                : depthFailures.map(\.name).joined(separator: "；")
+                  + (childrenCalls == 0 ? "" : "；已命中时仍求值了 \(childrenCalls) 次"))
+
+        // ---------------------------------------------------------------- 10. 版本号单一来源
+        // build_app.sh 组装时把 BuildInfo.version 写进 Info.plist 的两个键；
+        // 这里从 Bundle.main 读回来比一次。裸二进制（swift build 的产物）没有 Info.plist，跳过。
+        if let info = Bundle.main.infoDictionary,
+           let shortVersion = info["CFBundleShortVersionString"] as? String,
+           let bundleVersion = info["CFBundleVersion"] as? String {
+            check("bundle 版本 == BuildInfo.version（单一来源）",
+                  shortVersion == BuildInfo.version && bundleVersion == BuildInfo.version,
+                  "CFBundleShortVersionString=\(shortVersion) CFBundleVersion=\(bundleVersion) "
+                  + "BuildInfo.version=\(BuildInfo.version)")
+        } else {
+            print("[SKIP] bundle 版本 == BuildInfo.version：当前是裸二进制（没有 Info.plist），"
+                  + "这一项只有从 brosis.app/Contents/MacOS/brosis 跑才验得到")
+        }
+
+        // ---------------------------------------------------------------- 11. 本地 IPC / MCP（3.6）
+        // 起一个真的 Unix domain socket，用一个临时加密库（InMemoryKeyProvider，不碰钥匙串）
+        // 跑一遍「没有 grant 全拒 → 加 grant → summary 不回原文 → evidence 回原文 → 审计留痕」。
+        // 不启动 brosis-mcp、不碰产品数据目录、不触发任何授权弹窗。
+        let ipcRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("bmcp-\(ProcessInfo.processInfo.processIdentifier)",
+                                    isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: ipcRoot) }
+        do {
+            try FileManager.default.createDirectory(at: ipcRoot, withIntermediateDirectories: true)
+            let store = try Store.open(directory: ipcRoot.appendingPathComponent("db", isDirectory: true),
+                                       keyProvider: try InMemoryKeyProvider.random())
+            defer { store.close() }
+            let now = Int64(Date().timeIntervalSince1970 * 1000)
+            _ = try store.record(ObservationInput(
+                ts: now - 60_000, displayID: 1,
+                app: AppRef(bundleID: "com.apple.Safari", name: "Safari"),
+                windowTitle: "自检窗口",
+                trigger: .manual, captureMethod: .ax, completeness: .complete, sourceState: .ok,
+                texts: [TextFragment(text: "自检正文 知识图谱 与 存储服务", region: nil)]))
+            // 同一块屏上再放一条**别的应用**的观察：它是上面那条的相邻观察，
+            // 用来验"应用白名单连出现上下文一起裁"（下面第 4 项之后那一条）。
+            _ = try store.record(ObservationInput(
+                ts: now - 55_000, displayID: 1,
+                app: AppRef(bundleID: "com.microsoft.VSCode", name: "Code"),
+                windowTitle: "白名单外的窗口",
+                trigger: .manual, captureMethod: .ax, completeness: .complete, sourceState: .ok,
+                texts: [TextFragment(text: "白名单外的一段正文", region: nil)]))
+
+            let service = StoreMCPService(store: store)
+            let gate = MCPGate { (.unlocked, service) }
+            var configuration = IPCServer.Configuration(
+                socketURL: ipcRoot.appendingPathComponent("s.sock", isDirectory: false))
+            // 自检里先用 .skip 跑通功能，再单独验一次产品口径的 .requireSameTeam（见下）。
+            configuration.peerPolicy = .skip
+            let server = IPCServer(configuration: configuration) { gate.handle($0) }
+            try server.start()
+            defer { server.stop() }
+
+            let mode = (try FileManager.default
+                .attributesOfItem(atPath: configuration.socketURL.path)[.posixPermissions]
+                as? NSNumber)?.uint16Value ?? 0
+            check("ipc.sock 权限 0600", (mode & 0o777) == 0o600, String(mode & 0o777, radix: 8))
+
+            let client = IPCClient(socketURL: configuration.socketURL, clientID: "selfcheck")
+            defer { client.disconnect() }
+
+            let denied = try client.send(op: .tool, name: MCPTool.search.rawValue,
+                                         args: ["q": .string("知识图谱")])
+            check("没有 grant 的客户端被拒（3.6）",
+                  !denied.ok && denied.error?.code == .noGrant && denied.result == nil,
+                  denied.error?.code.rawValue ?? "ok")
+
+            try store.setGrant(Grant(clientID: "selfcheck", mode: .strictLocal, apps: ["*"],
+                                     timeWindowDays: 30, fields: .summary))
+            let searched = try client.send(op: .tool, name: MCPTool.search.rawValue,
+                                           args: ["q": .string("知识图谱"), "limit": .int(5)])
+            let ids = searched.result?["hits"]?.arrayValue?.compactMap { $0["evidenceID"]?.intValue } ?? []
+            check("加了 grant 之后 search 命中", searched.ok && !ids.isEmpty,
+                  "命中 \(ids.count) 条")
+
+            let summaryOnly = try client.send(op: .tool, name: MCPTool.getEvidence.rawValue,
+                                              args: ["ids": .array(ids.map { .int($0) })])
+            let firstSummary = summaryOnly.result?["items"]?.arrayValue?.first
+            check("fields = summary 不回原文",
+                  summaryOnly.ok && firstSummary?["text"] == nil
+                      && firstSummary?["redactedByGrant"]?.boolValue == true,
+                  "text 字段\(firstSummary?["text"] == nil ? "缺席" : "存在")")
+
+            try store.setGrant(Grant(clientID: "selfcheck", mode: .strictLocal, apps: ["*"],
+                                     timeWindowDays: 30, fields: .evidence))
+            let full = try client.send(op: .tool, name: MCPTool.getEvidence.rawValue,
+                                       args: ["ids": .array(ids.map { .int($0) })])
+            let text = full.result?["items"]?.arrayValue?.first?["text"]?.stringValue
+            check("fields = evidence 回原文", full.ok && (text?.contains("知识图谱") ?? false),
+                  text.map { String($0.prefix(24)) } ?? "nil")
+
+            let audit = try store.mcpAuditTail(limit: 10)
+            let noQueryText = audit.allSatisfy { !$0.params.contains("知识图谱") }
+            check("mcp_audit 记了每次调用且不含查询串本身（3.6）",
+                  audit.count == 4 && noQueryText
+                      && audit.contains { $0.decision == .noGrant }
+                      && audit.contains { $0.decision == .ok },
+                  "\(audit.count) 行：" + audit.map { "\($0.tool)/\($0.decision.rawValue)" }
+                      .joined(separator: " "))
+
+            // 应用白名单连**出现上下文**一起裁：before / after 带 bundle id 与窗口标题，
+            // 漏一条就等于绕过白名单（M1 第一轮验收抓到的口子，见 core 的同名断言）。
+            try store.setGrant(Grant(clientID: "selfcheck", mode: .strictLocal,
+                                     apps: ["com.apple.Safari"], timeWindowDays: 30,
+                                     fields: .evidence))
+            let scoped = try client.send(op: .tool, name: MCPTool.getEvidence.rawValue,
+                                         args: ["ids": .array(ids.map { .int($0) }),
+                                                "neighbors": .int(3)])
+            let item = scoped.result?["items"]?.arrayValue?.first
+            let neighbors = (item?["before"]?.arrayValue ?? []) + (item?["after"]?.arrayValue ?? [])
+            let leaked = neighbors.compactMap { $0["appBundleID"]?.stringValue }
+                .filter { $0 != "com.apple.Safari" }
+            let droppedNeighbors = scoped.result?["grant"]?["droppedByGrant"]?.intValue ?? 0
+            check("应用白名单也裁 get_evidence 的出现上下文（3.6）",
+                  scoped.ok && leaked.isEmpty && droppedNeighbors > 0,
+                  leaked.isEmpty ? "裁掉 \(droppedNeighbors) 条相邻观察"
+                                 : "泄漏了 " + leaked.joined(separator: " "))
+
+            // 产品口径：对端必须与本进程同一个 Team ID。签名过的 .app 里这一项真跑；
+            // 裸二进制（swift build 产物、SKIP_SIGN=1 的 bundle）没有 Team ID，按设计**拒绝**。
+            var strict = IPCServer.Configuration(
+                socketURL: ipcRoot.appendingPathComponent("t.sock", isDirectory: false))
+            strict.peerPolicy = .requireSameTeam
+            let strictServer = IPCServer(configuration: strict) { gate.handle($0) }
+            try strictServer.start()
+            defer { strictServer.stop() }
+            let strictClient = IPCClient(socketURL: strict.socketURL, clientID: "selfcheck")
+            defer { strictClient.disconnect() }
+            let strictResponse = try strictClient.send(op: .ping)
+            if let team = strictServer.hostTeamID {
+                check("对端签名校验：同 Team ID 放行（Team \(team)）", strictResponse.ok,
+                      strictResponse.error?.message ?? "ok")
+            } else {
+                check("对端签名校验：本进程没有 Team ID 时一律拒绝（做不到就不放行）",
+                      !strictResponse.ok && strictResponse.error?.code == .unauthorizedPeer,
+                      strictResponse.error?.message ?? "竟然放行了")
+            }
+        } catch {
+            check("本地 IPC / MCP 自检", false, "\(error)")
+        }
+
         // ---------------------------------------------------------------- 参数快照
         print("加密库自检工作目录：\(workspace.path)（跑完删除）")
+        print("MCP：\(MCPTool.allCases.count) 个工具 "
+              + MCPTool.allCases.map(\.rawValue).joined(separator: " ")
+              + "；限流默认 \(MCPIPCService.defaultRequestsPerMinute) 次/分钟"
+              + "（UserDefaults 键 \(MCPIPCService.rateLimitKey)）"
+              + "；socket 名 \(IPCProtocol.socketFileName)"
+              + "；本进程 Team ID \(PeerVerifier.selfTeamID() ?? "无（未签名 / ad-hoc）")")
         print("自检库统计：\(storeSummary)")
+        print("存储统计导出：\(StatsExport.fileName(for: Date()))"
+              + "（schema_version \(StatsExport.schemaVersion)）字段 \(statsExportShape)")
         print("产品数据目录：\(DataLocation.resolve().url.path)"
               + "（来源 \(DataLocation.resolve().source)，UserDefaults 键 \(DataLocation.directoryKey)）")
         print("M0 明文库目录：\(DataLocation.legacyM0URL.path)"
@@ -536,7 +850,17 @@ enum VectorDump {
                   + "| \(got == item.expected ? "PASS" : "FAIL") |")
         }
 
-        print("\n## 6. 内置默认不采集清单（\(BuiltinDenylist.shared.count) 个 bundle id）")
+        print("\n## 6. 3.5 锁定状态机：锁定类触发取消补做（\(LockPolicy.cancelDeferredCases.count) 条）")
+        print("| # | 触发 | 严格模式 | 期望 | 实得 | 判定 |")
+        print("|---|---|---|---|---|---|")
+        for (index, item) in LockPolicy.cancelDeferredCases.enumerated() {
+            let got = LockPolicy.cancelsDeferredUnlock(item.trigger, strictScreenLock: item.strict)
+            print("| \(index + 1) | \(item.trigger.rawValue) | \(item.strict) "
+                  + "| \(item.expected ? "取消" : "不取消") | \(got ? "取消" : "不取消") "
+                  + "| \(got == item.expected ? "PASS" : "FAIL") |")
+        }
+
+        print("\n## 7. 内置默认不采集清单（\(BuiltinDenylist.shared.count) 个 bundle id）")
         for category in BuiltinDenylist.categories {
             print("- **\(category.name)**：\(category.bundleIDs.joined(separator: "、"))")
         }

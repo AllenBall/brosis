@@ -98,8 +98,9 @@ final class CaptureController: NSObject, @unchecked Sendable {
         /// 3.12：前台应用不是「事件 + 内容」档，本次不做截图内容检查。
         var skippedPolicy = 0
         var lastCaptureAt: Double = 0
-        /// 最近一次**非纯定时**截图的时间（事件触发、armed、queued 都算），
-        /// 定时兜底用它判断「刚截过图就别再截一张」。
+        /// 最近一次**事件触发**截图的时间（`armed` 也算），定时兜底用它判断「刚截过图就别再截一张」。
+        /// 判定见 `CaptureController.isEventTrigger(_:)`：合并后的触发集合里去掉
+        /// `periodic` / `queued` 之后还有东西才算事件。
         var lastEventCaptureAt: Double = 0
         var lastDurationMs: Double = 0
         var totalDurationMs: Double = 0
@@ -153,8 +154,18 @@ final class CaptureController: NSObject, @unchecked Sendable {
     var isRunning: Bool { withStateLock { armed } }
     var currentStats: Stats { withStateLock { stats } }
 
+    /// 暂停 / 恢复。**只在状态真的变了的时候写事件**（R2 修正）。
+    ///
+    /// `AppDelegate.syncSubsystems()` 每次菜单展开、每次权限复查、每次进 `unlocked` 都会调一次
+    /// `setPaused(false)`；无条件写事件的话 `capture_resumed` 会在 `jobs` 里刷屏，
+    /// 把真正的暂停 / 恢复淹掉。
     func setPaused(_ value: Bool) {
-        withStateLock { paused = value }
+        let changed = withStateLock { () -> Bool in
+            guard paused != value else { return false }
+            paused = value
+            return true
+        }
+        guard changed else { return }
         recorder.logEvent(kind: value ? "capture_paused" : "capture_resumed")
     }
 
@@ -267,9 +278,20 @@ final class CaptureController: NSObject, @unchecked Sendable {
 
     /// 唯一的截图入口：合并 0.35 s 内的多次触发，保证两次截图至少间隔 1 s。
     func requestCapture(reason: String) {
-        let work = withStateLock { () -> DispatchWorkItem? in
-            guard armed, !paused else { return nil }
+        let accepted = withStateLock { () -> Bool in
+            guard armed, !paused else { return false }
             pendingReasons.append(reason)
+            return true
+        }
+        guard accepted else { return }
+        schedulePending()
+    }
+
+    /// 把已经攒下的触发排进队列。**不新增触发原因**——`finish()` 的重排队走这里，
+    /// 所以被延后的那次截图仍然带着它自己的原始触发集合（R2 修正，见 `isEventTrigger`）。
+    private func schedulePending() {
+        let work = withStateLock { () -> DispatchWorkItem? in
+            guard armed, !paused, !pendingReasons.isEmpty else { return nil }
             pendingWork?.cancel()
             let item = DispatchWorkItem { [weak self] in self?.runPending() }
             pendingWork = item
@@ -281,6 +303,23 @@ final class CaptureController: NSObject, @unchecked Sendable {
             return max(Self.debounceInterval, Self.minimumInterval - sinceLast)
         }
         queue.asyncAfter(deadline: .now() + delay, execute: work)
+    }
+
+    /// 合并后的触发串（`"app_activated+periodic"`）算不算**事件触发**。
+    ///
+    /// 纯函数，自检直接跑。口径：去掉 `periodic`（纯定时兜底）与 `queued`
+    /// （历史上 `finish()` 重排队时加的内部标记）之后还剩下东西才算事件。
+    ///
+    /// 为什么要有它（R2 修正的问题）：`finish()` 以前用 `requestCapture(reason: "queued")`
+    /// 重排队，被延后的**纯定时**截图于是变成 `"periodic+queued"`，
+    /// 旧口径 `reason != "periodic"` 把它当成事件触发写进 `lastEventCaptureAt`，
+    /// 于是下一个兜底窗口被"刚截过图"压掉——纯定时截图反而抑制了下一次纯定时截图。
+    /// 现在 `finish()` 不再追加原因，`capture_stats.trigger` 里也不会再出现 `queued`；
+    /// 这里保留对 `queued` 的过滤只是为了兼容老库里的历史值。
+    static let nonEventTriggers: Set<String> = ["periodic", "queued"]
+
+    static func isEventTrigger(_ reason: String) -> Bool {
+        reason.split(separator: "+").contains { !nonEventTriggers.contains(String($0)) }
     }
 
     private func runPending() {
@@ -324,7 +363,8 @@ final class CaptureController: NSObject, @unchecked Sendable {
             captureInFlight = false
             return armed && !paused && !pendingReasons.isEmpty && pendingWork == nil
         }
-        if reschedule { requestCapture(reason: "queued") }
+        // 重排队不追加任何原因：被延后的那次截图保留它自己的原始触发集合。
+        if reschedule { schedulePending() }
     }
 
     // MARK: - 截图
@@ -404,8 +444,9 @@ final class CaptureController: NSObject, @unchecked Sendable {
             stats.captures += 1
             if gated { stats.gated += 1 }
             stats.lastCaptureAt = Date().timeIntervalSince1970
-            // 合并后的 reason 里只要还有别的触发（"app_activated+periodic"），就算事件触发。
-            if reason != "periodic" { stats.lastEventCaptureAt = stats.lastCaptureAt }
+            // 合并后的 reason 里只要还有**别的**触发（"app_activated+periodic"）才算事件触发；
+            // 纯定时与内部重排队标记不算（`isEventTrigger` 是纯函数，自检覆盖）。
+            if Self.isEventTrigger(reason) { stats.lastEventCaptureAt = stats.lastCaptureAt }
             stats.lastDurationMs = elapsedMs
             stats.totalDurationMs += elapsedMs
             return (hamming, cells, ratio, gated, stats.captures)

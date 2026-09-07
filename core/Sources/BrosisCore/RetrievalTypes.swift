@@ -235,6 +235,9 @@ public struct EvidenceResult: Sendable, Codable {
     public var missing: [Int64]
     /// 被 grant 挡掉的 id（应用白名单 / 时间窗）。
     public var deniedByGrant: [Int64]
+    /// 被 grant 挡掉的**出现上下文**条数（`before` / `after` 里白名单外、时间窗外的相邻观察）。
+    /// 只回条数不回 id：回 id 本身就等于告诉调用方"这个时刻还有别的应用"。
+    public var droppedNeighbors: Int = 0
 }
 
 // =============================================================================

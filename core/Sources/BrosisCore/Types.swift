@@ -256,6 +256,8 @@ public struct MaintenanceReport: Sendable, Codable {
     public var freelistBefore: Int
     public var freelistAfter: Int
     public var captureStatsPruned: Int
+    /// 按 `StoreOptions.mcpAuditRetentionDays` 滚动清掉的 MCP 审计行数（3.6）。
+    public var mcpAuditPruned: Int
     public var elapsedMS: Double
 }
 

@@ -3,10 +3,15 @@
 #
 # 源码一律不进项目目录（项目目录在同步盘里，不放 9.3 MiB 的 amalgamation）：
 # 真正的文件落在 ~/Library/Caches/brosis-build/sqlcipher/vendor/，
-# 包里只留两个符号链接（SwiftPM 的 target path 必须在包内，但实测接受指向包外的符号链接）。
+# 包里只留符号链接（SwiftPM 的 target path 必须在包内，但实测接受指向包外的符号链接）。
 #
 #   core/Vendor/SQLCipher -> ~/Library/Caches/brosis-build/sqlcipher/vendor/route-b
 #   core/Vendor/SqliteVec -> ~/Library/Caches/brosis-build/sqlcipher/vendor/sqlite-vec-target
+#
+# 另外再建一个**相对**符号链接（它本身进仓库，重跑本脚本也是幂等的）：
+#   core/Sources/CSQLCipher/include -> ../../Vendor/SQLCipher/include
+# SQLCipher 目标的源码只有一个包装文件 Sources/CSQLCipher/sqlcipher_amalgamation.c，
+# 由它 #include 上游 amalgamation（为了把 <sys/param.h> 提前，见那个文件的注释）。
 #
 # 取源与 amalgamation 生成复用 M0 已验证的脚本 tools/proto/sqlcipher/setup.sh
 # （SQLCipher v4.18.0、sqlite-vec v0.1.9，SHA-256 由该脚本打印）。
@@ -37,13 +42,18 @@ for f in "$RB/src/sqlite3.c" "$RB/include/sqlite3.h" "$VEC/sqlite-vec.c" "$VEC/i
   fi
 done
 
-echo "[core/setup] 2/3 建符号链接 core/Vendor/{SQLCipher,SqliteVec}"
+echo "[core/setup] 2/3 建符号链接 core/Vendor/{SQLCipher,SqliteVec} 与 Sources/CSQLCipher/include"
 mkdir -p "$HERE/Vendor"
 ln -sfn "$RB"  "$HERE/Vendor/SQLCipher"
 ln -sfn "$VEC" "$HERE/Vendor/SqliteVec"
+# SQLCipher 目标的 publicHeadersPath 指向这里；它是**相对**链接（进仓库），
+# 指向上面刚建好的 Vendor/SQLCipher/include，所以只有 sqlite3.h 会被暴露出去。
+mkdir -p "$HERE/Sources/CSQLCipher"
+ln -sfn ../../Vendor/SQLCipher/include "$HERE/Sources/CSQLCipher/include"
 
 # ---------------------------------------------------------------- .gitignore
-# 两个符号链接指向本机缓存目录，不能进仓库；换机器重跑本脚本即可重建。
+# 指向本机缓存目录的那两个符号链接不能进仓库；换机器重跑本脚本即可重建。
+# （Sources/CSQLCipher/include 是相对链接，它本身可以进仓库。）
 echo "[core/setup] 3/3 把符号链接路径写进项目根 .gitignore（幂等）"
 GI="$PROJECT/.gitignore"
 add_ignore() {

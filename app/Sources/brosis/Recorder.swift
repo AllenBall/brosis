@@ -34,39 +34,61 @@ final class Recorder: @unchecked Sendable {
                 + "，锁定期间丢弃 观察 \(droppedObservations) / 事件 \(droppedEvents)"
                 + " / 遥测 \(droppedCaptureStats)，写入错误 \(errors)"
         }
+
+        /// 两次快照之差，用来算"上一段库不可用期间"新增了多少丢弃。
+        static func - (lhs: Counters, rhs: Counters) -> Counters {
+            Counters(observations: 0, events: 0, captureStats: 0,
+                     droppedObservations: lhs.droppedObservations - rhs.droppedObservations,
+                     droppedEvents: lhs.droppedEvents - rhs.droppedEvents,
+                     droppedCaptureStats: lhs.droppedCaptureStats - rhs.droppedCaptureStats,
+                     errors: lhs.errors - rhs.errors)
+        }
+
+        /// 写进 `runtime_event:recorder_dropped` 的 detail（只有计数，没有内容）。
+        var dropDetail: String {
+            "dropped_observations=\(droppedObservations) dropped_events=\(droppedEvents)"
+                + " dropped_capture_stats=\(droppedCaptureStats) errors=\(errors)"
+        }
     }
 
     private let lock = NSLock()
     private var store: Store?
     private var counters = Counters()
     private var lastErrorText: String?
-    /// 关库期间攒下的、下次开库要补记的说明。
-    private var pendingNotes: [String] = []
+    /// 上一次 `attach()` 时的计数快照。`attach()` 用它算出"刚过去那一段库不可用期间"
+    /// 丢了多少，当场写成一条事件——**不能等到下一次 detach 再攒**（见 `attach`）。
+    private var countersAtLastAttach = Counters()
 
     init() {}
 
     // MARK: - 开合（由 LockController 调用）
 
-    /// `unlocking` 成功后挂上库；同时把上一次锁定期间的丢弃计数补记成一条事件。
+    /// `unlocking` 成功后挂上库；**顺手把刚过去那一段库不可用期间的丢弃计数落成一条事件**。
+    ///
+    /// R2 修正的问题：原来是 `detach()` 把当时的累计计数攒进 `pendingNotes`、
+    /// 由下一次 `attach()` 回放。可锁定期间的丢弃**发生在 `detach()` 之后**，
+    /// 于是每条 `recorder_dropped` 都晚一个锁定周期：锁一次、解一次，库里什么都没有；
+    /// 要锁第二次、解第二次才看到第一次的数字（第一轮验收记的第 11 条现场验证项因此永远对不上）。
+    /// 现在改成在这里算差值：`当前累计 - 上一次 attach 时的累计` = 这一段丢了多少，
+    /// 非零就写一条，锁一次解一次就能看到一条。
     func attach(_ store: Store) {
-        let notes: [String] = lock.withLock {
+        let note: String? = lock.withLock {
             self.store = store
-            let out = pendingNotes
-            pendingNotes.removeAll()
-            return out
+            let current = counters
+            let diff = current - countersAtLastAttach
+            countersAtLastAttach = current
+            guard diff.droppedTotal > 0 || diff.errors > 0 else { return nil }
+            // 先记这一段的差值，再把累计总数附在后面，两个口径都能核对。
+            return diff.dropDetail + "；累计 " + current.summary
         }
-        for note in notes { logEvent(kind: "recorder_dropped", detail: note) }
+        guard let note else { return }
+        logEvent(kind: "recorder_dropped", detail: note)
     }
 
     /// `locking` 时摘掉库指针。**不负责 close**——关库是 `LockController` 的事，
     /// 它要先 checkpoint 再关，顺序不能由这里决定。
     func detach() {
-        lock.withLock {
-            store = nil
-            if counters.droppedTotal > 0 || counters.errors > 0 {
-                pendingNotes.append(counters.summary)
-            }
-        }
+        lock.withLock { store = nil }
     }
 
     var isOpen: Bool { lock.withLock { store != nil } }

@@ -484,6 +484,21 @@ final class RetrievalTests: XCTestCase {
         let old = try store.getEvidence(ids: [3], grant: narrow)
         XCTAssertTrue(old.items.isEmpty)
         XCTAssertEqual(old.deniedByGrant, [3])
+
+        // 出现上下文（before / after）**也归 grant 管**：它带 bundle id 与窗口标题，
+        // 漏一条就等于绕过白名单。id 2 是白名单外的飞书、id 3 在时间窗之外，两个都不能出现。
+        let scoped = try store.getEvidence(ids: [1], grant: narrow, neighbors: 3)
+        let around = (scoped.items.first?.before ?? []) + (scoped.items.first?.after ?? [])
+        XCTAssertTrue(around.allSatisfy { $0.appBundleID == "com.apple.Safari" },
+                      "出现上下文里出现了白名单外的应用：\(around.map { $0.appBundleID ?? "-" })")
+        XCTAssertFalse(around.contains { $0.evidenceID == 3 }, "时间窗之外的相邻观察也不能给")
+        XCTAssertGreaterThan(scoped.droppedNeighbors, 0, "被裁掉的邻居要计数")
+        // 不给 grant 时这两条确实在（否则上面就是空断言）
+        let unrestricted = try store.getEvidence(ids: [1], neighbors: 3)
+        let all = (unrestricted.items.first?.before ?? []) + (unrestricted.items.first?.after ?? [])
+        XCTAssertTrue(all.contains { $0.appBundleID == "com.electron.lark" })
+        XCTAssertTrue(all.contains { $0.evidenceID == 3 })
+        XCTAssertEqual(unrestricted.droppedNeighbors, 0)
     }
 
     // MARK: - 8. get_item / get_context / get_timeline

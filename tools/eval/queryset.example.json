@@ -1,0 +1,120 @@
+{
+ "schema": "brosis/queryset@1",
+ "source": "real",
+ "generated_at": "2026-09-07T00:00:00Z",
+ "seed": null,
+ "quota": {
+  "活动定位": 1,
+  "原文细节": 1,
+  "跨来源": 1,
+  "无答案或已删除": 1
+ },
+ "truth_rule": "真实题没有全量真值：relevant 留空，第一阶段改判「返回的证据满不满足 evidence 里写的条件」（见 queryset.schema.md §7）。",
+ "scoring": {
+  "stage1": {
+   "metric": ["recall@10", "precision@10", "mrr@10"],
+   "hit_pass": "recall@10 == 1.0",
+   "none_pass": "返回 0 条",
+   "target": "可答题 Recall@10 ≥ 0.90（计划 2.4）"
+  },
+  "stage2": {
+   "hit_pass": "答案含 answer_check.must_include 的全部子串，且 cited_evidence_ids 至少一条落在 relevant 里",
+   "none_pass": "unanswerable = true 且不给出任何具体事实、不引用任何证据",
+   "target": "有效证据引用 ≥ 0.95（计划 2.4）；编造一次即记失败（查询集草稿）"
+  }
+ },
+ "queries": [
+  {
+   "id": "ex-loc-01",
+   "class": "活动定位",
+   "holdout": false,
+   "q": "我最近在终端里做过什么？大概是什么时候？",
+   "search": {"q": "app:com.apple.Terminal", "start": null, "end": null, "app": null, "limit": 10},
+   "expect": "hit",
+   "unanswerable_reason": null,
+   "evidence": {
+    "text_substrings": [],
+    "apps": ["com.apple.Terminal"],
+    "time_window": null,
+    "urls": [],
+    "paths": []
+   },
+   "relevant": [],
+   "relevant_count": null,
+   "answer": "把你当时真的在终端里做的事写在这里（时间 + 干了什么）。",
+   "answer_check": {"must_include": ["终端"], "must_not_include": []},
+   "answer_source": "人工回忆",
+   "authored": "2026-09-07",
+   "notes": "定位类题目：证据靠 app / 时间窗定位，不靠正文子串。search 用 app: 前缀走精确字段通道。"
+  },
+  {
+   "id": "ex-det-01",
+   "class": "原文细节",
+   "holdout": false,
+   "q": "我看到过的关于「知识图谱」的那段原文是怎么写的？",
+   "search": {"q": "知识图谱", "start": null, "end": null, "app": null, "limit": 10},
+   "expect": "hit",
+   "unanswerable_reason": null,
+   "evidence": {
+    "text_substrings": ["知识图谱"],
+    "apps": [],
+    "time_window": null,
+    "urls": [],
+    "paths": []
+   },
+   "relevant": [],
+   "relevant_count": null,
+   "answer": "把原文那一句抄在这里。",
+   "answer_check": {"must_include": ["知识图谱"], "must_not_include": []},
+   "answer_source": "原始任务",
+   "authored": "2026-09-07",
+   "notes": "原文细节类：text_substrings 是第一阶段判「上下文裁剪」和第二阶段判内容对不对的依据。"
+  },
+  {
+   "id": "ex-cross-01",
+   "class": "跨来源",
+   "holdout": true,
+   "q": "关于「预算复核」，我在聊天和笔记里分别看到过什么？",
+   "search": {"q": "预算复核", "start": null, "end": null, "app": null, "limit": 10},
+   "expect": "hit",
+   "unanswerable_reason": null,
+   "evidence": {
+    "text_substrings": ["预算复核"],
+    "apps": ["com.electron.lark", "md.obsidian"],
+    "time_window": null,
+    "urls": [],
+    "paths": []
+   },
+   "relevant": [],
+   "relevant_count": null,
+   "answer": "分别写清楚两个来源各说了什么，并注明各自出自哪条证据。",
+   "answer_check": {"must_include": ["预算复核"], "must_not_include": []},
+   "answer_source": "人工回忆",
+   "authored": "2026-09-07",
+   "notes": "跨来源类：evidence.apps 写 ≥ 2 个 bundle_id，答案要求分来源作答。holdout=true 表示留出题，不参与调参。"
+  },
+  {
+   "id": "ex-none-01",
+   "class": "无答案或已删除",
+   "holdout": false,
+   "q": "「犀角」那件事我记在哪儿了？",
+   "search": {"q": "犀角", "start": null, "end": null, "app": null, "limit": 10},
+   "expect": "none",
+   "unanswerable_reason": "not_seen",
+   "evidence": {
+    "text_substrings": [],
+    "apps": [],
+    "time_window": null,
+    "urls": [],
+    "paths": []
+   },
+   "relevant": [],
+   "relevant_count": 0,
+   "answer": "无证据。库里没有出现过这个内容。",
+   "answer_check": {"must_include": [], "must_not_include": []},
+   "answer_source": "排除清单",
+   "authored": "2026-09-07",
+   "notes": "不可答题：返回任何一条证据都算失败；第二阶段要求 unanswerable=true 且不引用证据。unanswerable_reason 取 excluded / not_captured / user_deleted / not_seen / not_recorded 之一。"
+  }
+ ]
+}

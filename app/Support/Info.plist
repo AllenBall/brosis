@@ -19,10 +19,14 @@
 	<string>AppIcon</string>
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
+	<!-- 版本号的唯一来源是 Sources/brosis/BuildInfo.swift 的 `version`：
+	     build_app.sh 组装 bundle 时把下面两个占位符替换成它，
+	     自检再从 Bundle.main 读回来和 BuildInfo.version 比一次（app/README 4、6.1）。
+	     直接手改这里没有意义——组装时会被覆盖。 -->
 	<key>CFBundleShortVersionString</key>
-	<string>0.2.0</string>
+	<string>__VERSION__</string>
 	<key>CFBundleVersion</key>
-	<string>2</string>
+	<string>__VERSION__</string>
 	<key>CFBundleSupportedPlatforms</key>
 	<array>
 		<string>MacOSX</string>

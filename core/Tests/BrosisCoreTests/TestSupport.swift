@@ -137,11 +137,39 @@ enum Products {
         return FileManager.default.isExecutableFile(atPath: candidate.path) ? candidate : nil
     }
 
+    /// M1 / T5：brosis-mcp（stdio 上的 MCP，端到端测试里由 Python 客户端拉起）。
+    static var brosisMCP: URL? {
+        if let override = ProcessInfo.processInfo.environment["BROSIS_MCP_BIN"] {
+            return URL(fileURLWithPath: override)
+        }
+        let dir = Bundle(for: Fixture.self).bundleURL.deletingLastPathComponent()
+        let candidate = dir.appendingPathComponent("brosis-mcp")
+        return FileManager.default.isExecutableFile(atPath: candidate.path) ? candidate : nil
+    }
+
+    /// 只用标准库的 MCP 客户端脚本（`core/Tests/mcp_client.py`）。
+    /// 按本文件的源码路径推出来，验收者也可以直接手跑它。
+    static var mcpClientScript: URL? {
+        if let override = ProcessInfo.processInfo.environment["BROSIS_MCP_CLIENT"] {
+            return URL(fileURLWithPath: override)
+        }
+        // .../core/Tests/BrosisCoreTests/TestSupport.swift → .../core/Tests/mcp_client.py
+        let script = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()      // BrosisCoreTests
+            .deletingLastPathComponent()      // Tests
+            .appendingPathComponent("mcp_client.py")
+        return FileManager.default.fileExists(atPath: script.path) ? script : nil
+    }
+
     @discardableResult
-    static func run(_ executable: URL, _ arguments: [String]) throws -> (status: Int32, out: String, err: String) {
+    static func run(_ executable: URL, _ arguments: [String],
+                    environment: [String: String]? = nil) throws -> (status: Int32, out: String, err: String) {
         let process = Process()
         process.executableURL = executable
         process.arguments = arguments
+        if let environment {
+            process.environment = ProcessInfo.processInfo.environment.merging(environment) { _, new in new }
+        }
         let outPipe = Pipe(), errPipe = Pipe()
         process.standardOutput = outPipe
         process.standardError = errPipe

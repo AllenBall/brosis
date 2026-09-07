@@ -207,6 +207,24 @@ enum AX {
         return limits
     }
 
+    /// 深度上限命中判定（纯函数，自检覆盖）。
+    ///
+    /// **R2 修正的语义**：`hit=depth` 表示"确实有子树因为深度上限没被展开"，
+    /// 而不是"有元素刚好落在第 `maxDepth` 层"。旧写法只要取出一个 `depth == maxDepth`
+    /// 的元素就置位，而这层元素通常是叶子（`AXStaticText` 之类），
+    /// 于是限深的应用（访达 6 层）几乎每次遍历都报 `hit=depth`，事件里全是噪声。
+    ///
+    /// `hasChildren` 是 `@autoclosure`：**已经命中过就不再求值**，
+    /// 所以一次遍历最多为这个标志位多发一轮 `kAXChildren` 消息。
+    static func depthLimitHit(alreadyHit: Bool,
+                              depth: Int,
+                              limits: BFSLimits,
+                              hasChildren: @autoclosure () -> Bool) -> Bool {
+        if alreadyHit { return true }
+        guard depth >= limits.maxDepth else { return false }
+        return hasChildren()
+    }
+
     static func copyAttribute(_ element: AXUIElement, _ attribute: String) -> CFTypeRef? {
         var value: CFTypeRef?
         guard AXUIElementCopyAttributeValue(element, attribute as CFString, &value) == .success else {
@@ -322,8 +340,8 @@ enum AX {
         var visitedNodes: Int
         /// 节点数吃满上限，队列里还有没走的元素。
         var hitNodeLimit: Bool
-        /// 有元素到达了深度上限——它下面的子树（如果有）没有展开。
-        /// 这里故意不去取那个元素的 children 来确认，免得为了记一个标志位多发一轮 AX 消息。
+        /// **确实有子树因为深度上限没被展开**：至少一个 `depth == maxDepth` 的元素还有子节点。
+        /// 只落在最后一层的叶子不算（R2 修正；判定见 `AX.depthLimitHit`）。
         var reachedDepthLimit: Bool
         /// 至少一个角色的正文吃满了 `maxCharsPerRole`。
         var charLimitHit: Bool = false
@@ -385,7 +403,11 @@ enum AX {
             if depth < limits.maxDepth {
                 for child in children(element) { queue.append((child, depth + 1)) }
             } else {
-                reachedDepthLimit = true
+                // 只有当被深度上限截断的元素**确实还有子节点**时才算命中（见 depthLimitHit）。
+                reachedDepthLimit = Self.depthLimitHit(alreadyHit: reachedDepthLimit,
+                                                       depth: depth,
+                                                       limits: limits,
+                                                       hasChildren: !children(element).isEmpty)
             }
         }
 

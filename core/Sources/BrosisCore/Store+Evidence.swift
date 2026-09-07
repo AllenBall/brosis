@@ -68,11 +68,13 @@ extension Store {
             var items: [EvidenceItem] = []
             var missing: [Int64] = []
             var denied: [Int64] = []
+            var droppedNeighbors = 0
+            // grant 的时间窗下界：证据本身与**出现上下文**都按它收，前面的相邻观察不能漏出去。
+            let windowStart: Int64? = grant.map { now - Int64($0.timeWindowDays) * 86_400_000 }
             for id in ids {
                 // observationMetas 已经把墓碑与物理删除的行滤掉了（deleted_at IS NULL）。
                 guard let meta = metas[id] else { missing.append(id); continue }
-                if let grant {
-                    let windowStart = now - Int64(grant.timeWindowDays) * 86_400_000
+                if let grant, let windowStart {
                     guard grant.allows(app: meta.appBundleID), meta.ts >= windowStart else {
                         denied.append(id); continue
                     }
@@ -96,12 +98,15 @@ extension Store {
                     captureMethod: meta.captureMethod, completeness: meta.completeness,
                     sourceState: meta.sourceState, occurrences: occs, text: full, summary: summary,
                     before: try neighborRows(of: meta, before: true, limit: neighbors,
-                                             cal: cal, conn: conn),
+                                             grant: grant, windowStart: windowStart,
+                                             cal: cal, conn: conn, dropped: &droppedNeighbors),
                     after: try neighborRows(of: meta, before: false, limit: neighbors,
-                                            cal: cal, conn: conn),
+                                            grant: grant, windowStart: windowStart,
+                                            cal: cal, conn: conn, dropped: &droppedNeighbors),
                     redactedByGrant: redacted))
             }
-            return EvidenceResult(items: items, missing: missing, deniedByGrant: denied)
+            return EvidenceResult(items: items, missing: missing, deniedByGrant: denied,
+                                  droppedNeighbors: droppedNeighbors)
         }
     }
 
@@ -126,28 +131,44 @@ extension Store {
     }
 
     /// 出现上下文：同一块屏上时间相邻的观察，只给摘要不给原文。
+    ///
+    /// **grant 在这里同样生效**：相邻观察带 bundle id 与窗口标题，
+    /// 白名单外 / 时间窗外的行漏一条就等于绕过白名单（M1 第一轮验收抓到的就是这个口子）。
+    /// 被丢掉的行不占 `limit` 的名额：多取几倍候选、过滤后再截到 `limit`，
+    /// 只把丢掉的条数累加进 `dropped`（进 `EvidenceResult.droppedNeighbors`）。
     func neighborRows(of meta: ObservationMeta, before: Bool, limit: Int,
-                      cal: DayCalendar, conn: SQLiteConnection) throws -> [EvidenceNeighbor] {
+                      grant: Grant?, windowStart: Int64?, cal: DayCalendar,
+                      conn: SQLiteConnection, dropped: inout Int) throws -> [EvidenceNeighbor] {
         guard limit > 0 else { return [] }
         let cmp = before ? "<" : ">"
         let order = before ? "DESC" : "ASC"
-        let st = try conn.prepare("""
+        // 白名单生效时才多取：`apps = ["*"]` 的常规路径行为与取回条数都不变。
+        let scoped = grant.map { !$0.apps.contains("*") } ?? false
+        let fetch = scoped ? min(limit * 8, 200) : limit
+        var sql = """
             SELECT o.id, o.ts, a.bundle_id, a.name, w.title FROM observations o
               LEFT JOIN apps a ON a.id = o.app_id
               LEFT JOIN windows w ON w.id = o.window_id
              WHERE o.device_id = ? AND o.deleted_at IS NULL AND o.ts \(cmp) ?
                AND COALESCE(o.display_id, -1) = ?
-             ORDER BY o.ts \(order), o.id \(order) LIMIT ?;
-            """)
+            """
+        var binds: [SQLValue] = [.text(deviceID), .int(meta.ts), .int(meta.displayID ?? -1)]
+        // 时间窗直接压进 SQL（`before` 方向才可能越界，`after` 方向恒真，留着不碍事）。
+        if let windowStart { sql += " AND o.ts >= ?"; binds.append(.int(windowStart)) }
+        sql += " ORDER BY o.ts \(order), o.id \(order) LIMIT ?;"
+        binds.append(.int(Int64(fetch)))
+        let st = try conn.prepare(sql)
         defer { st.finalize() }
-        try st.bind([.text(deviceID), .int(meta.ts), .int(meta.displayID ?? -1), .int(Int64(limit))])
+        try st.bind(binds)
         var out: [EvidenceNeighbor] = []
-        while try st.step() {
+        while out.count < limit, try st.step() {
+            let bundle = st.text(2)
+            if let grant, !grant.allows(app: bundle) { dropped += 1; continue }
             let ts = st.int(1) ?? 0
-            let head = [st.text(3) ?? st.text(2) ?? "?", st.text(4) ?? "", cal.stamp(ts)]
+            let head = [st.text(3) ?? bundle ?? "?", st.text(4) ?? "", cal.stamp(ts)]
                 .filter { !$0.isEmpty }.joined(separator: " · ")
             out.append(EvidenceNeighbor(evidenceID: st.int(0) ?? 0, ts: ts,
-                                        appBundleID: st.text(2), windowTitle: st.text(4),
+                                        appBundleID: bundle, windowTitle: st.text(4),
                                         summary: TokenBudget.truncate(head, toTokens: 100)))
         }
         return before ? out.reversed() : out

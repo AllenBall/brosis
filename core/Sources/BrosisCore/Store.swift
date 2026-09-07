@@ -24,6 +24,9 @@ public struct StoreOptions: Sendable {
     public var deviceID: String?
     /// `capture_stats` 遥测保留天数，`maintenance()` 按它滚动清理。
     public var captureStatsRetentionDays: Int = 30
+    /// `mcp_audit` 保留天数（3.6 的调用审计），`maintenance()` 按它滚动清理。
+    /// 比遥测留得久：授权与访问记录是要能回溯的，而它每行只有几十字节。
+    public var mcpAuditRetentionDays: Int = 90
 
     public init() {}
 }
@@ -131,6 +134,8 @@ public final class Store: @unchecked Sendable {
             try applyPreamble(creating: isNew)
             if isNew {
                 try createSchema(deviceID: options.deviceID ?? UUID().uuidString)
+            } else {
+                try migrateIfNeeded()
             }
             try loadIdentity()
             try loadCounters()
@@ -200,8 +205,39 @@ public final class Store: @unchecked Sendable {
             try conn.run("INSERT INTO meta(key, value) VALUES ('fts_scheme', ?);",
                          [.text("bigram+unicode61 remove_diacritics 2, contentless, contentless_delete=1 (D22)")])
             try conn.run("INSERT INTO migrations(version, applied_at, note) VALUES (?,?,?);",
-                         [.int(Int64(Schema.version)), .int(now),
+                         [.int(1), .int(now),
                           .text("初始 schema v1：计划 3.2 全部表 + 3.12 app_policies + meta/migrations/capture_stats")])
+            // v2 与 v1 一起建（新库不需要"先建 v1 再迁移"），但审计行照样写两条，
+            // 好让"这个库是哪一版建的 / 迁过哪几版"在 migrations 表里一目了然。
+            try conn.exec(Schema.createMCPAudit)
+            try conn.run("INSERT INTO migrations(version, applied_at, note) VALUES (?,?,?);",
+                         [.int(2), .int(now), .text("v2：mcp_audit（3.6 MCP 调用审计）")])
+        }
+    }
+
+    /// 已有库的 schema 迁移。走 `migrations` 表，一版一个事务，失败整版回滚。
+    ///
+    /// 只在库文件已存在时调用。迁移**不改任何已有表的结构**，只加表——
+    /// v1 的库直接补一张 `mcp_audit` 就变成 v2，用户不用重建库、不丢数据。
+    private func migrateIfNeeded() throws {
+        guard let text = try conn.scalarText("SELECT value FROM meta WHERE key = 'schema_version';"),
+              let found = Int(text) else {
+            throw StoreError.invalidUsage("库里没有 meta.schema_version，可能不是 brosis 的库")
+        }
+        guard found != Schema.version else { return }
+        // 只往前迁；库比本版本更新说明是别的版本的 app 建的，直接报错而不是硬开。
+        guard found < Schema.version else {
+            throw StoreError.schemaVersion(found: found, expected: Schema.version)
+        }
+        let now = Int64(Date().timeIntervalSince1970 * 1000)
+        if found < 2 {
+            try conn.transaction {
+                try conn.exec(Schema.createMCPAudit)
+                try conn.run("UPDATE meta SET value = '2' WHERE key = 'schema_version';")
+                try conn.run("INSERT INTO migrations(version, applied_at, note) VALUES (?,?,?);",
+                             [.int(2), .int(now),
+                              .text("v2：mcp_audit（3.6 MCP 调用审计），由 v\(found) 就地迁移")])
+            }
         }
     }
 

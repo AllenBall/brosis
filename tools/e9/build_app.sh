@@ -24,6 +24,12 @@ set -euo pipefail
 
 E9_SRC="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCRATCH="${SCRATCH:-$HOME/Library/Caches/brosis-build/e9}"
+# 硬约束：构建产物不能落在项目目录。SCRATCH 必须是绝对路径且不含未展开的 ~（env SCRATCH=~/x 时 zsh 不展开）。
+case "$SCRATCH" in
+  /*) ;;
+  *) printf 'ERROR: SCRATCH 必须是绝对路径（收到 "%s"）。用 SCRATCH="$HOME/…" 而不是 ~/…\n' "$SCRATCH" >&2; exit 1 ;;
+esac
+case "$SCRATCH" in *'~'*) printf 'ERROR: SCRATCH 含未展开的 ~：%s\n' "$SCRATCH" >&2; exit 1 ;; esac
 CONFIG="${CONFIG:-release}"
 IDENTITY="${IDENTITY:-$(security find-identity -v -p codesigning 2>/dev/null | grep -o '"Developer ID Application: [^"]*"' | head -1 | tr -d '"')}"
 TEAM_ID="${TEAM_ID:-$(printf '%s' "$IDENTITY" | sed -n 's/.*(\([A-Z0-9]*\))$/\1/p')}"

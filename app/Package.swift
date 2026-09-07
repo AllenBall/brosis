@@ -2,8 +2,8 @@
 // brosis M1 采集端（计划 3.1 / 3.3 / 3.5 / 3.12）。
 //
 // M1 起采集端不再自己开库：唯一持钥者是 ../core 的 BrosisCore（计划 3.1「单一存储服务」）。
-// core 的清单用 swift-tools 6.1 且带 .unsafeFlags（关掉 SQLCipher amalgamation 的
-// -Wambiguous-macro 噪声），所以只能以本地路径依赖引用——按版本解析的依赖不允许 unsafeFlags。
+// 这里用本地路径依赖，是因为 core 与 app 是同一个仓库里一起演进的两个包（core 没有独立版本）；
+// core 的清单**不带任何 .unsafeFlags**（M1 R2 已去掉），所以它并没有被限制成只能路径引用。
 //
 // 构建产物不落项目目录：一律 --scratch-path ~/Library/Caches/brosis-build/m1-app/
 
@@ -19,7 +19,8 @@ let package = Package(
         .executableTarget(
             name: "brosis",
             dependencies: [
-                .product(name: "BrosisCore", package: "core")
+                .product(name: "BrosisCore", package: "core"),
+                .product(name: "BrosisIPC", package: "core")
             ],
             path: "Sources/brosis",
             swiftSettings: [
