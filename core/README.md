@@ -676,3 +676,12 @@ $BIN fts-only --dir $W/db --key-file $W/db.key --q 存储服务      # T2 的最
     单测 `testFTSCandidateTruncationOnEarlyWindowIsReported`）。
     真正的修法是把时间约束推进候选选取（需要 `vrow ↔ 时间` 的映射，`created_at` 是写入墙钟不能用），
     归 M2 与向量 / 排序一起做。
+
+### KeychainKeyProvider 的实跑结论（2026-09-07）
+
+Developer ID + hardened runtime 但没有 application-identifier / keychain-access-groups 权利（要内嵌 Developer ID 描述文件）的 app，
+调 data-protection 钥匙串的 `SecItemAdd` 直接返回 `errSecMissingEntitlement`（OSStatus -34018）。
+`KeychainKeyProvider` 因此按「data-protection 优先，被 -34018 拒绝就回退传统登录钥匙串」工作：
+登录钥匙串条目不进 iCloud 钥匙串同步，默认 ACL 只信任创建它的签名身份（换签名身份会弹一次授权框）。
+`fetchKey(backend:)` 回传实际用的是哪条钥匙串。要真正用上 data-protection 钥匙串，需要在 developer.apple.com
+建 Developer ID 描述文件并把两个权利签进 app（分发管线任务）。
