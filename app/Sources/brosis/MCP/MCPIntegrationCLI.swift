@@ -44,10 +44,15 @@ enum MCPIntegrationCLI {
         // 状态判定只有一份：`MCPIntegration.status` + `Status.stateText`（窗口用的也是它），
         // 以前 CLI 自己又推了一遍，措辞已经和窗口不一致。
         for harness in HarnessCatalog.all {
-            let status = MCPIntegration.status(of: harness, store: nil)
-            print(String(format: "%-12@ %-28@ grant=%@ cli=%@ %@",
+            // CLI 进程开不了库（钥匙串 + 库被跑着的 app 占着），grant 只能隔着
+            // `brosis-mcp admin grant list` 问，所以 store 传 nil 之后要把答案补回去——
+            // 否则 stateText 会一口咬定"没有授权"，和后面 grant= 那列自相矛盾。
+            var status = MCPIntegration.status(of: harness, store: nil)
+            status.hasGrant = grants.contains(harness.id)
+            // 中日文在终端里是双宽，`%-N@` 按字符数补空格永远对不齐，所以用分隔符不用列宽。
+            print(String(format: "%-12@ %@ · grant=%@ · cli=%@ · %@",
                          harness.id as NSString, status.stateText as NSString,
-                         (grants.contains(harness.id) ? "有" : "无") as NSString,
+                         (status.hasGrant ? "有" : "无") as NSString,
                          (status.cliPath.map { ($0 as NSString).lastPathComponent } ?? "无") as NSString,
                          (harness.expandedConfigPath() as NSString).abbreviatingWithTildeInPath as NSString))
         }
