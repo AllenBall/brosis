@@ -18,6 +18,10 @@
 set -euo pipefail
 
 OUT="${1:?用法: build_metallib.sh <输出路径/mlx.metallib>}"
+# metal / metallib 不在 CommandLineTools 里，本脚本自己负责找到它们，
+# 免得每个调用方都要记得传 DEVELOPER_DIR（run_d8.sh 就漏过一次）。
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/ensure_metal_toolchain.sh"
+ensure_metal_toolchain
 SCRATCH="${SCRATCH:-$HOME/Library/Caches/brosis-build/app}"
 SRC="$SCRATCH/checkouts/mlx-swift/Source/Cmlx/mlx-generated/metal"
 WORK="$SCRATCH/metal-air"
