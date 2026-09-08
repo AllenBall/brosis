@@ -112,6 +112,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             foregroundName = frontmost.localizedName
         }
 
+        BrosisLog.lifecycle.notice(
+            "启动 version=\(BuildInfo.version, privacy: .public) pid=\(ProcessInfo.processInfo.processIdentifier)")
         lock.start()
         // 3.5：登录 / 启动 → unlocking（取钥、开库、校验）。
         // 首次运行这一步会弹一次钥匙串授权对话框（data-protection 钥匙串 + ACL 限本应用）。
@@ -129,6 +131,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        // 正常退出留一行：没有这行时"进程不见了"分不清是自己退的还是被杀的（2026-09-08 踩过）。
+        BrosisLog.lifecycle.notice("正常退出（applicationWillTerminate）")
         _ = HotKeys.shared.uninstall()
         NSWorkspace.shared.notificationCenter.removeObserver(self)
         events?.stop()

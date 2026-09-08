@@ -1,6 +1,7 @@
 import AppKit
 import BrosisCore
 import Foundation
+import os
 
 /// 3.5 锁定状态机的四个相位。
 enum LockPhase: String, Sendable, CaseIterable {
@@ -48,6 +49,13 @@ enum LockTrigger: String, Sendable {
 struct LockSnapshot: Sendable, Equatable {
     var phase: LockPhase = .locked
     var pauseReasons: Set<PauseReason> = []
+    /// 这次停在 `locked` 是不是**开库失败**造成的（不是用户自己锁的）。
+    ///
+    /// 为什么要分清楚：屏幕锁着时 data-protection 钥匙串取不到密钥（实测 OSStatus -25308
+    /// errSecInteractionNotAllowed），启动那次开库必然失败并停在 locked；等你解锁屏幕，
+    /// 钥匙串就可用了，这时候应该**自动再试一次**。但用户自己按 ⌃⌥⌘L 锁的库是显式意图，
+    /// 解锁屏幕不能把它带回来——所以只有这一位为真时才自动重试。
+    var lockedByOpenFailure = false
 
     /// `paused` 只在 `unlocked` 下有意义：库开着，但采集暂停、MCP 拒绝。
     var isPaused: Bool { phase == .unlocked && !pauseReasons.isEmpty }
@@ -87,11 +95,11 @@ enum LockPolicy {
         var next = state
         switch trigger {
         case .launch, .menuUnlock, .systemDidWake:
-            if state.phase == .locked { next.phase = .unlocking }
+            if state.phase == .locked { next.phase = .unlocking; next.lockedByOpenFailure = false }
         case .unlockSucceeded:
-            if state.phase == .unlocking { next.phase = .unlocked }
+            if state.phase == .unlocking { next.phase = .unlocked; next.lockedByOpenFailure = false }
         case .unlockFailed:
-            if state.phase == .unlocking { next.phase = .locked }
+            if state.phase == .unlocking { next.phase = .locked; next.lockedByOpenFailure = true }
         case .lockCompleted:
             if state.phase == .locking { next.phase = .locked }
         case .systemWillSleep, .userWillLogout, .menuLock, .lowDisk, .thermalCritical:
@@ -103,7 +111,16 @@ enum LockPolicy {
             }
         case .screenUnlocked:
             next.pauseReasons.remove(.screenLocked)
-            if strictScreenLock, state.phase == .locked { next.phase = .unlocking }
+            if strictScreenLock, state.phase == .locked {
+                next.phase = .unlocking
+                next.lockedByOpenFailure = false
+            } else if state.phase == .locked, state.lockedByOpenFailure {
+                // 2026-09-08 实测：屏幕锁着时换装重启，取钥拿到 -25308 停在 locked，
+                // 之后用户解锁屏幕也不会自动回头再试——库就这么一直关着不采集。
+                // 只对"开库失败造成的 locked"自动重试；用户显式锁的不动。
+                next.phase = .unlocking
+                next.lockedByOpenFailure = false
+            }
         case .screensaverStarted:
             next.pauseReasons.insert(.screensaver)
         case .screensaverStopped:
@@ -193,7 +210,16 @@ enum LockPolicy {
         [(from: LockSnapshot, trigger: LockTrigger, strict: Bool, expected: LockSnapshot)] = [
         (LockSnapshot(phase: .locked), .launch, false, LockSnapshot(phase: .unlocking)),
         (LockSnapshot(phase: .unlocking), .unlockSucceeded, false, LockSnapshot(phase: .unlocked)),
-        (LockSnapshot(phase: .unlocking), .unlockFailed, false, LockSnapshot(phase: .locked)),
+        (LockSnapshot(phase: .unlocking), .unlockFailed, false,
+         LockSnapshot(phase: .locked, lockedByOpenFailure: true)),
+        // 2026-09-08：屏幕锁着时取钥失败（-25308）停在 locked，解锁屏幕要自动再试一次。
+        (LockSnapshot(phase: .locked, lockedByOpenFailure: true), .screenUnlocked, false,
+         LockSnapshot(phase: .unlocking)),
+        // 用户自己锁的库（⌃⌥⌘L）是显式意图：解锁屏幕不能把它带回来。
+        (LockSnapshot(phase: .locked), .screenUnlocked, false, LockSnapshot(phase: .locked)),
+        // 开成功就把标记清掉，免得下次屏幕解锁又莫名其妙重试。
+        (LockSnapshot(phase: .unlocking, lockedByOpenFailure: true), .unlockSucceeded, false,
+         LockSnapshot(phase: .unlocked)),
         (LockSnapshot(phase: .unlocked), .systemWillSleep, false, LockSnapshot(phase: .locking)),
         (LockSnapshot(phase: .unlocked), .userWillLogout, false, LockSnapshot(phase: .locking)),
         (LockSnapshot(phase: .unlocked), .menuLock, false, LockSnapshot(phase: .locking)),
@@ -484,12 +510,17 @@ final class LockController {
                   + "tm_excluded=\(flags.excludedFromBackup)"
                   + (lastCloseSummary.map { " prev_close=[\($0)]" } ?? ""))
         lastCloseSummary = nil
+        BrosisLog.lock.notice("开库成功：dir=\(self.directorySource, privacy: .public)")
         apply(.unlockSucceeded)
         onUnlocked?()
     }
 
+    /// 开库失败。**同时落 os_log**：2026-09-08 一天里三次（干净退出、两次崩溃、这次取钥失败）
+    /// 都因为 app 只把原因写进菜单而查不出来。`log show --predicate 'subsystem == "com.brosis.app"'`
+    /// 现在能直接看到。
     private func failUnlock(_ error: Error) {
         lastError = "\(error)"
+        BrosisLog.lock.error("开库失败：\(String(describing: error), privacy: .public)")
         apply(.unlockFailed)
     }
 
