@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "generatedAt": "2026-09-07",
   "generatedBy": "tools/e9/Support/gen_catalog.py",
-  "note": "随 app 打包、随 app 更新；运行时不联网拉清单（计划 3.11）。",
+  "note": "随 app 打包、随 app 更新；运行时不联网拉清单（计划 3.11）。 2026-09-08：按用户决定去掉叙述功能，清单里不再列生成模型（core 里的叙述代码保留但不接线）。",
   "models": [
     {
       "id": "Qwen3-Embedding-0.6B-8bit",
@@ -109,106 +109,6 @@
       "hfLastModified": "2026-07-14T01:30:13.000Z",
       "hfPipelineTag": "feature-extraction",
       "hfModelType": "Qwen3ForCausalLM"
-    },
-    {
-      "id": "Qwen3.5-4B-MLX-4bit",
-      "purpose": "generation",
-      "source": "huggingface",
-      "repoId": "mlx-community/Qwen3.5-4B-MLX-4bit",
-      "revision": "32f3e8ecf65426fc3306969496342d504bfa13f3",
-      "quantization": "4bit",
-      "totalBytes": 3061132920,
-      "minRAMBytes": 17179869184,
-      "files": [
-        {
-          "path": ".gitattributes",
-          "size": 1570,
-          "sha256": "34448b82c17d60fec9b65b1f093c115ddbaadc04beb1b0140b6bfed2e012a930",
-          "sha256Source": "downloaded"
-        },
-        {
-          "path": "README.md",
-          "size": 2273,
-          "sha256": "49c0a725bdd22705d2d34b93cfe20463b673e3339ce4de8b81a340c05cfef5bc",
-          "sha256Source": "downloaded"
-        },
-        {
-          "path": "chat_template.jinja",
-          "size": 7756,
-          "sha256": "a4aee8afcf2e0711942cf848899be66016f8d14a889ff9ede07bca099c28f715",
-          "sha256Source": "downloaded"
-        },
-        {
-          "path": "config.json",
-          "size": 3366,
-          "sha256": "f3efc81b2ea8d96a45301037d3ccccbcccdef44a961845c87f286aaddbc6eaaa",
-          "sha256Source": "downloaded"
-        },
-        {
-          "path": "model.safetensors",
-          "size": 3034300695,
-          "sha256": "5fb9acd0246866381cf8c5c354c6db1019f6498eec4ccb4f5edcc71ffeacb2db",
-          "sha256Source": "lfs-oid"
-        },
-        {
-          "path": "model.safetensors.index.json",
-          "size": 101944,
-          "sha256": "52e534c41f7b97708329c85f762e5882bf48bd5955a422c6ae74eba321e6048a",
-          "sha256Source": "downloaded"
-        },
-        {
-          "path": "preprocessor_config.json",
-          "size": 390,
-          "sha256": "27225450ac9c6529872ee1924fcb0962ff5634834f817040f444118116f4e516",
-          "sha256Source": "downloaded"
-        },
-        {
-          "path": "processor_config.json",
-          "size": 1300,
-          "sha256": "14932921ca485d458a04dafd8069fbb0a4505622a48208d19ed247115801385b",
-          "sha256Source": "downloaded"
-        },
-        {
-          "path": "tokenizer.json",
-          "size": 19989343,
-          "sha256": "87a7830d63fcf43bf241c3c5242e96e62dd3fdc29224ca26fed8ea333db72de4",
-          "sha256Source": "lfs-oid"
-        },
-        {
-          "path": "tokenizer_config.json",
-          "size": 1139,
-          "sha256": "e98f1901ac6f0adff67b1d540bfa0c36ac1a0cf59eb72ed78146ef89aafa1182",
-          "sha256Source": "downloaded"
-        },
-        {
-          "path": "video_preprocessor_config.json",
-          "size": 385,
-          "sha256": "7768af27c1fafa9cc9011c1dc20067e03f8915e03b63504550e11d5066986d13",
-          "sha256Source": "downloaded"
-        },
-        {
-          "path": "vocab.json",
-          "size": 6722759,
-          "sha256": "ce99b4cb2983d118806ce0a8b777a35b093e2000a503ebde25853284c9dfa003",
-          "sha256Source": "downloaded"
-        }
-      ],
-      "note": "D19 叙述 / 抽取模型（2026-09-07 用户定案）。Apache 2.0。原生多模态（config model_type=qwen3_5，text_config.model_type=qwen3_5_text），但 mlx-swift-lm 3.31.4 的 Qwen35Model.sanitize 会跳过 vision_tower / model.visual 权重，Swift 侧只加载文本塔——视觉权重仍会被下载，只是不进显存。上下文 262,144 token；非思考模式靠对话模板变量 enable_thinking=false 打开（generate 子命令的 --no-think）；按计划 3.10 温度 0、失败重试一次。",
-      "hfLastModified": "2026-03-02T15:00:30.000Z",
-      "hfPipelineTag": null,
-      "hfModelType": "Qwen3_5ForConditionalGeneration"
-    },
-    {
-      "id": "gemma-4-26B-A4B-it-QAT-MLX-4bit",
-      "purpose": "generation",
-      "source": "local-import",
-      "repoId": "lmstudio-community/gemma-4-26B-A4B-it-QAT-MLX-4bit",
-      "revision": null,
-      "quantization": "4bit",
-      "totalBytes": null,
-      "minRAMBytes": 68719476736,
-      "files": [],
-      "note": "D19 高档位，仅 64 GB 以上机器显示；M0 只走本地导入，不下载。"
     }
   ]
 }

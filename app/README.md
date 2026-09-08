@@ -1387,13 +1387,13 @@ menu.addItem(ModelsMenu.menuItem())
 ### 13.2 默认零模型，未安装时功能显示为「未启用」（3.11）
 
 app **不内置、不自动下载**任何模型。清单 `catalog.json` 随包，**运行时不联网拉清单**；
-里面三项：`Qwen3-Embedding-0.6B-8bit`（嵌入，619.02 MiB，最低 8 GiB）、
-`Qwen3.5-4B-MLX-4bit`（生成，2.85 GiB，最低 16 GiB）、
-`gemma-4-26B-A4B-it-QAT-MLX-4bit`（最低 64 GiB，本机置灰并说明原因）。
+**2026-09-08（D29）叙述下架后清单里只剩一项**：`Qwen3-Embedding-0.6B-8bit`（嵌入，619.02 MiB，
+最低 8 GiB）。原来的两个生成模型（`Qwen3.5-4B-MLX-4bit`、`gemma-4-26B-A4B-it-QAT-MLX-4bit`）
+连同「夜间叙述」菜单入口一起去掉了，第 14 节的代码仍在但不接线。
 
 面板里能做四件事：**从本地目录导入**（复制进来 + 逐文件校验 sha256，只复制不引用）、
 **重新校验**、**移除**、**现在跑一次嵌入任务**。
-本轮**没有跑过任何下载**：两个模型是你此前已批准并下载好的，走的是本地导入。
+本轮**没有跑过任何下载**：模型是你此前已批准并下载好的，走的是本地导入。
 下载器代码在 `BrosisModels/Downloader.swift`（E9 实测过：直连 12.3 MiB/s、镜像续传 HTTP 206），
 面板上的下载入口要显式打开 `models.allowDownload` 才出现。
 
@@ -1456,7 +1456,7 @@ app **不内置、不自动下载**任何模型。清单 `catalog.json` 随包�
    清单再平铺一份。
 3. 把 `brosis-embed` 放进 `Contents/MacOS` 并**单独签**（与 `brosis-mcp` 同一处理），
    然后第 4c 步**从 bundle 里真跑一次 `brosis-embed env`**：GPU 冒烟必须算对、
-   sqlite-vec 必须已注册、清单至少两项，否则构建失败。
+   sqlite-vec 必须已注册、清单里必须有嵌入模型且没有生成模型（D29），否则构建失败。
 
 ### 13.6 `brosis-embed` 用法
 
@@ -1506,7 +1506,13 @@ core 的 `swift test` 一条都不碰模型（那边用确定性伪嵌入），�
 
 ---
 
-## 14. 夜间叙述（4.3 / 3.7 / 3.10 / D19 / D27，M2 c 批 / T12）
+## 14. 夜间叙述（4.3 / 3.7 / 3.10 / D19 / D27，M2 c 批 / T12）——**2026-09-08 已下架（D29）**
+
+> **这一节描述的功能现在不可用**：按用户决定去掉了叙述。`catalog.json` 不再列生成模型、
+> 菜单没有「夜间叙述」子菜单、`AppDelegate` 不再 `configure` / `start` `NarrativeScheduler`。
+> 下面的代码与 schema v6 的 `narrative` / `model` / `narrative_meta` 三列**原样保留但休眠**
+> （自检仍跑门控与忠实度的纯逻辑用例）。恢复步骤：装回生成模型 → 把条目加回 `catalog.json`
+> 与 `Catalog.approvedIDs` → 恢复 `AppDelegate` 的两行接线和 `narrativeMenuItem()`。
 
 ### 14.1 四个新文件，`AppDelegate.swift` 一行没改
 

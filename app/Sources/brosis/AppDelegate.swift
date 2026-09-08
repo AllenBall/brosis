@@ -66,15 +66,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         // c 批接线（tools/bench/results/m2_c_{vectors,sync,narrative}_2026-09-08.md 各自的「接入方式」）：
         // 同步控制器链式挂到上面两个回调之后（它自己保留原回调，不覆盖）；
-        // 模型面板 / 嵌入调度器 / 叙述调度器只登记依赖，开关默认关，关着时定时器什么都不做。
+        // 模型面板与嵌入调度器只登记依赖，开关默认关，关着时定时器什么都不做。
         // 调度器在 utility 队列上 tick，而 LockController 是 MainActor 的，所以读快照要回主线程。
         let sync = SyncController()
         sync.install(lock: lock, recorder: recorder)
         self.sync = sync
         let lockSnapshot = makeLockSnapshotReader()
         ModelsWindowController.shared.configure(recorder: recorder, lockSnapshot: lockSnapshot)
-        NarrativeScheduler.shared.configure(recorder: recorder, lockSnapshot: lockSnapshot)
-        if NarrativeScheduler.shared.isEnabled { NarrativeScheduler.shared.start() }
+        // 2026-09-08：用户决定不要叙述功能，夜间叙述调度器**不再接线、不再启动**，
+        // 菜单里也没有入口。core / app 里的叙述代码原样留着（休眠，自检仍跑它的纯逻辑用例），
+        // 将来要恢复：装回生成模型、把清单条目加回 catalog.json、恢复这两行与 narrativeMenuItem()。
 
         // d 批接线（tools/bench/results/m2_d_{export,focus_hotkey}_2026-09-08.md 的「接入方式」）：
         // 加密导出只存一个 weak recorder；Focus 监视挂到锁定状态机（走现有暂停路径）；
@@ -456,10 +457,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // 第 5 节接进来：菜单项自带 target/action 与可用性判定，默认不联网、fail-closed。
         menu.addItem(UpdaterController.shared.makeMenuItem())
 
-        // c 批：模型与向量检索面板（T11）、夜间叙述（T12）、跨设备同步（T13）。
+        // c 批：模型与向量检索面板（T11）、跨设备同步（T13）。
+        // 夜间叙述（T12）的入口 2026-09-08 按用户决定去掉了。
         menu.addItem(.separator())
         menu.addItem(ModelsMenu.menuItem())
-        menu.addItem(narrativeMenuItem())
         let syncItem = NSMenuItem(title: "跨设备同步…（\(sync?.status.enabled == true ? "已开启" : "未开启")）",
                                   action: #selector(openSyncWindow), keyEquivalent: "")
         syncItem.target = self
@@ -643,46 +644,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             let read: @MainActor () -> LockSnapshot = { self?.lock?.snapshot ?? LockSnapshot() }
             if Thread.isMainThread { return MainActor.assumeIsolated { read() } }
             return DispatchQueue.main.sync { MainActor.assumeIsolated { read() } }
-        }
-    }
-
-    /// 夜间叙述的子菜单：开关、门控状态一行、「立刻写一篇」。
-    /// 面板本身是 T11 的「模型」窗口，这里只放三个入口（T12 结果文件第 7 节）。
-    private func narrativeMenuItem() -> NSMenuItem {
-        let scheduler = NarrativeScheduler.shared
-        let item = NSMenuItem(title: "夜间叙述（\(scheduler.isEnabled ? "已开启" : "未开启")）",
-                              action: nil, keyEquivalent: "")
-        let submenu = NSMenu()
-        submenu.addItem(disabledItem(String(scheduler.statusLine().prefix(90))))
-        submenu.addItem(.separator())
-        let toggle = NSMenuItem(title: scheduler.isEnabled ? "关闭夜间叙述" : "开启夜间叙述（需已安装生成模型）",
-                                action: #selector(toggleNarrative), keyEquivalent: "")
-        toggle.target = self
-        submenu.addItem(toggle)
-        let now = NSMenuItem(title: "立刻写一篇（后台，约 10 s / 篇）",
-                             action: #selector(runNarrativeNow), keyEquivalent: "")
-        now.target = self
-        now.isEnabled = scheduler.modelsRootURL() != nil
-        submenu.addItem(now)
-        item.submenu = submenu
-        return item
-    }
-
-    @objc private func toggleNarrative() {
-        NarrativeScheduler.shared.isEnabled.toggle()
-        recorder.logEvent(kind: "narrative_toggled",
-                          detail: "enabled=\(NarrativeScheduler.shared.isEnabled)")
-        refreshMenu()
-    }
-
-    @objc private func runNarrativeNow() {
-        guard let root = NarrativeScheduler.shared.modelsRootURL() else { return }
-        DispatchQueue.global(qos: .utility).async {
-            let summary = NarrativeScheduler.shared.runOnce(modelsRoot: root)
-            DispatchQueue.main.async { [weak self] in
-                self?.recorder.logEvent(kind: "narrative_manual_run", detail: summary.prefix(160).description)
-                self?.refreshMenu()
-            }
         }
     }
 

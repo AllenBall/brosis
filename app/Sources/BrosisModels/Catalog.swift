@@ -54,7 +54,7 @@ public struct CatalogModel: Codable, Sendable {
         return nil
     }
 
-    /// 这一项是不是本项目**已批准**的两个模型之一。
+    /// 这一项是不是本项目**已批准**的模型。
     /// 计划 3.11 允许"高级入口手填任意 HF 仓库 id"，但那条路标记为未验证；
     /// 本轮（M2 c）只放行清单里这两项，界面上其余项一律置灰。
     public var isApproved: Bool { Catalog.approvedIDs.contains(id) }
@@ -66,8 +66,10 @@ public struct Catalog: Codable, Sendable {
     public let note: String?
     public let models: [CatalogModel]
 
-    /// 用户已批准、已下载的两个模型（2026-09-07 / D19）。
-    public static let approvedIDs: Set<String> = ["Qwen3-Embedding-0.6B-8bit", "Qwen3.5-4B-MLX-4bit"]
+    /// 用户已批准、已下载的模型。
+    /// 2026-09-08 起只剩嵌入模型：用户决定不要叙述功能，生成模型（D19 的 Qwen3.5-4B）
+    /// 连同清单条目一起去掉，`Catalog.generationModelID` 只留给休眠的叙述代码引用。
+    public static let approvedIDs: Set<String> = ["Qwen3-Embedding-0.6B-8bit"]
 
     /// 嵌入模型的固定 id（3.4「模型固定为 Qwen3-Embedding-0.6B」）。
     public static let embeddingModelID = "Qwen3-Embedding-0.6B-8bit"

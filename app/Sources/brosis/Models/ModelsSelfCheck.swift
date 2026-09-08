@@ -24,11 +24,16 @@ enum ModelsSelfCheck {
         // ------------------------------------------------------------ 1. 清单（3.11 / D18）
         do {
             let catalog = try Catalog.load()
-            check("模型清单随包读得到", catalog.models.count >= 2,
+            check("模型清单随包读得到", !catalog.models.isEmpty,
                   "\(catalog.models.count) 项，schemaVersion \(catalog.schemaVersion)")
+            // 2026-09-08：用户决定不要叙述，生成模型连同清单条目一起去掉，
+            // 清单里只剩嵌入模型（叙述代码留在 core 里休眠，不接线、不列清单）。
             let approved = catalog.models.filter(\.isApproved)
-            check("清单里有两个已批准的模型", approved.count == 2,
-                  approved.map(\.id).joined(separator: " "))
+            check("清单里只有嵌入模型这一个已批准项", approved.map(\.id) == [Catalog.embeddingModelID],
+                  approved.isEmpty ? "一个都没有" : approved.map(\.id).joined(separator: " "))
+            check("清单里不再有生成模型（叙述已下架）",
+                  !catalog.models.contains { $0.purpose == "generation" },
+                  catalog.models.map { "\($0.id)(\($0.purpose))" }.joined(separator: " "))
             let embedding = catalog.embeddingModel
             check("嵌入模型固定为 \(Catalog.embeddingModelID)（3.4）",
                   embedding?.id == Catalog.embeddingModelID && embedding?.purpose == "embedding",
@@ -41,8 +46,13 @@ enum ModelsSelfCheck {
                   tooBig.isEmpty
                       ? "本机 \(ModelBytes.human(ModelProc.physicalMemory))，清单里没有超内存的项"
                       : tooBig.map { "\($0.id)：\($0.unavailableReason ?? "?")" }.joined(separator: "；"))
-            // E9 验收发现：清单项 files 为空时导入必须拒绝，不能写出空的 installed.json
-            if let placeholder = catalog.models.first(where: { $0.files.isEmpty }) {
+            // E9 验收发现：清单项 files 为空时导入必须拒绝，不能写出空的 installed.json。
+            // 清单里原本那个空 files 条目（gemma 高档位）随生成模型一起去掉了，这里就地造一个：
+            // 这条验收不能因为清单变短就丢掉覆盖。
+            let emptyFilesJSON = "{\"id\":\"selfcheck-empty-files\",\"purpose\":\"embedding\","
+                               + "\"source\":\"local-import\",\"repoId\":\"selfcheck/empty\",\"files\":[]}"
+            if let placeholder = try? JSONDecoder().decode(
+                   CatalogModel.self, from: Data(emptyFilesJSON.utf8)) {
                 let staging = FileManager.default.temporaryDirectory
                     .appendingPathComponent("brosis-modelcheck-\(ProcessInfo.processInfo.processIdentifier)",
                                             isDirectory: true)
