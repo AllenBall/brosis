@@ -1004,6 +1004,57 @@ enum SelfCheck {
               bubbleFailures.isEmpty ? "单聊左 = 对方、右 = 自己；群聊取上方昵称；语音记 [语音]"
                                      : bubbleFailures.joined(separator: " "))
 
+        // 12.10a 会话名与群聊判定（M2：`group` 曾被写死成 false，群聊昵称一条都认不出来）
+        var titleFailures: [String] = []
+        for item in AdapterVectors.chatTitleCases {
+            let got = ChatTitle.resolve(item.raw)
+            if got != item.expected {
+                titleFailures.append("\(item.name)→\(got.map { "\($0.display)/\($0.isGroup)" } ?? "nil")")
+            }
+        }
+        check("会话名与群聊判定：\(AdapterVectors.chatTitleCases.count) 条（含 2 条真机样本）",
+              titleFailures.isEmpty,
+              titleFailures.isEmpty ? "人数后缀「（29）」判群聊；图标残渣与人数后缀不进 windows.title"
+                                    : titleFailures.joined(separator: " "))
+
+        // 12.10b 定点内缩矩形（M2：比例切分在 1085 pt 宽的微信窗口上把半个会话列表当成了聊天面板）
+        var insetFailures: [String] = []
+        for item in AdapterVectors.windowInsetCases {
+            let got = item.inset.resolve(in: item.window)
+            if got != item.expected { insetFailures.append("\(item.name)→\(got)") }
+        }
+        check("定点内缩矩形：\(AdapterVectors.windowInsetCases.count) 条（含窄窗口退回比例兜底）",
+              insetFailures.isEmpty,
+              insetFailures.isEmpty ? "侧栏 / 标题条 / 输入框按点数让开，不随窗口宽度按比例伸缩"
+                                    : insetFailures.joined(separator: " "))
+
+        // 12.10c 分栏边界检测（M2：把写死的 340/60/180 换成从窗口图像现场量）
+        var paneFailures: [String] = []
+        var paneDetail: [String] = []
+        for fixture in PaneFixture.all {
+            guard let image = fixture.render() else {
+                paneFailures.append("\(fixture.name)→构图失败")
+                continue
+            }
+            let got = PaneDetector.detect(window: image,
+                                          windowSize: CGSize(width: fixture.width,
+                                                             height: fixture.height),
+                                          fallback: fixture.fallback)
+            let want = fixture.expected
+            let offBy = max(abs(got.sidebarRight - want.sidebarRight),
+                            max(abs(got.titleBottom - want.titleBottom),
+                                abs(got.composerTop - want.composerTop)))
+            if offBy > fixture.tolerance || got.source != want.source {
+                paneFailures.append("\(fixture.name)→\(got.label) 期望 \(want.label)")
+            } else {
+                paneDetail.append(String(format: "%@ 误差 %.1f pt", fixture.name, offBy))
+            }
+        }
+        check("分栏边界检测：\(PaneFixture.all.count) 份合成窗口（含气泡干扰 / 拖宽侧栏 / 纯色兜底）",
+              paneFailures.isEmpty,
+              paneFailures.isEmpty ? paneDetail.joined(separator: "；")
+                                   : paneFailures.joined(separator: " "))
+
         // 12.11 裁剪坐标：AX 坐标 → 显示器局部 → 像素（含 2x 缩放与跨屏落空）
         var cropDetail = "构图失败"
         var cropOK = false

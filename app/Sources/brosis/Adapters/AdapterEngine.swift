@@ -348,7 +348,7 @@ enum AdapterEngine {
             return node.identifier == id
         case .wholeWindow:
             return true
-        case .rolePath, .relativeRect:
+        case .rolePath, .relativeRect, .insetRect:
             return false
         }
     }

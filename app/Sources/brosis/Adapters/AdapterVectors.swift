@@ -413,4 +413,78 @@ enum AdapterVectors {
                          value: "一二三四", range: NSRange(location: 0, length: 0),
                          expectedText: "一二三四", expectedClipped: false),
     ]
+
+    // MARK: - 会话名与群聊判定（M2）
+
+    struct ChatTitleCase: Sendable {
+        var name: String
+        /// 标题条那一块 OCR 出来的整段文本（可能多行、带图标残渣）。
+        var raw: String
+        /// nil = 认不出会话名（这时观察退回窗口标题，不写 windows 表）。
+        var expected: ChatTitle.Resolved?
+    }
+
+    /// 前两条是**真机样本**：M2 从库里 evidence 2849 / 4260 的 `conversation_title` 区域原样取的。
+    static let chatTitleCases: [ChatTitleCase] = [
+        ChatTitleCase(name: "真机：群聊，带人数后缀与图标残渣",
+                      raw: "④ 省省吧 （29）\n眼",
+                      expected: ChatTitle.Resolved(display: "省省吧", isGroup: true)),
+        ChatTitleCase(name: "真机：框偏时抓到会话列表 → 当单聊处理，取第一行",
+                      raw: "◎ Routines\n白 Dispatch Beta",
+                      expected: ChatTitle.Resolved(display: "Routines", isGroup: false)),
+        ChatTitleCase(name: "单聊：只有联系人名",
+                      raw: "张三",
+                      expected: ChatTitle.Resolved(display: "张三", isGroup: false)),
+        ChatTitleCase(name: "群聊：半角括号（OCR 常把全角认成半角）",
+                      raw: "M1 复核组 (7)",
+                      expected: ChatTitle.Resolved(display: "M1 复核组", isGroup: true)),
+        ChatTitleCase(name: "反例：数字在词中间不是人数后缀",
+                      raw: "2026年7月C端APP日活查询",
+                      expected: ChatTitle.Resolved(display: "2026年7月C端APP日活查询", isGroup: false)),
+        ChatTitleCase(name: "反例：第2组——数字前是汉字，不算人数",
+                      raw: "第2组",
+                      expected: ChatTitle.Resolved(display: "第2组", isGroup: false)),
+        ChatTitleCase(name: "反例：整段都是符号 → 认不出，不写 windows 表",
+                      raw: "◎ ••• ——",
+                      expected: nil),
+        ChatTitleCase(name: "反例：超长（框偏抓到整块面板）→ 认不出",
+                      raw: String(repeating: "长", count: ChatTitle.maxTitleCharacters + 1),
+                      expected: nil),
+        ChatTitleCase(name: "反例：空文本",
+                      raw: "   \n  ",
+                      expected: nil),
+    ]
+
+    // MARK: - 定点内缩矩形（M2）
+
+    struct WindowInsetCase: Sendable {
+        var name: String
+        var window: CGRect
+        var inset: WindowInset
+        var expected: CGRect
+    }
+
+    /// 微信实测窗口：1085×846（库里 evidence 4260 反推出来的那一个）。
+    static let wechatProbeWindow = CGRect(x: 1601, y: 97, width: 1085, height: 846)
+
+    static let windowInsetCases: [WindowInsetCase] = [
+        WindowInsetCase(
+            name: "聊天面板：让开侧栏 340 / 标题条 60 / 输入框 180",
+            window: wechatProbeWindow,
+            inset: WindowInset(left: 340, top: 60, bottom: 180,
+                               fallback: RelativeRect(x: 0.22, y: 0.08, width: 0.78, height: 0.70)),
+            expected: CGRect(x: 1941, y: 157, width: 745, height: 606)),
+        WindowInsetCase(
+            name: "会话名：顶部一条，同样让开侧栏",
+            window: wechatProbeWindow,
+            inset: WindowInset(left: 340, maxHeight: 60, minHeight: 24,
+                               fallback: RelativeRect(x: 0.22, y: 0.0, width: 0.78, height: 0.08)),
+            expected: CGRect(x: 1941, y: 97, width: 745, height: 60)),
+        WindowInsetCase(
+            name: "窄窗口：内缩后不够宽 → 退回比例兜底",
+            window: CGRect(x: 0, y: 0, width: 500, height: 400),
+            inset: WindowInset(left: 340, top: 60, bottom: 180,
+                               fallback: RelativeRect(x: 0.22, y: 0.08, width: 0.78, height: 0.70)),
+            expected: CGRect(x: 110, y: 32, width: 390, height: 280)),
+    ]
 }

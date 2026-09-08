@@ -5,6 +5,112 @@
   "note": "随 app 打包、随 app 更新；运行时不联网拉清单（计划 3.11）。D29：叙述下架，清单里没有生成模型。D30：嵌入模型支持多尺寸并可在面板里切换，统一向量维度 1024。",
   "models": [
     {
+      "id": "Qwen3-Embedding-0.6B-8bit",
+      "purpose": "embedding",
+      "source": "huggingface",
+      "repoId": "mlx-community/Qwen3-Embedding-0.6B-8bit",
+      "revision": "407ad2329cd30702720aafe83f74a1ba30fdfbca",
+      "quantization": "8bit",
+      "totalBytes": 649088604,
+      "minRAMBytes": 8589934592,
+      "files": [
+        {
+          "path": ".gitattributes",
+          "size": 1570,
+          "sha256": "34448b82c17d60fec9b65b1f093c115ddbaadc04beb1b0140b6bfed2e012a930",
+          "sha256Source": "downloaded"
+        },
+        {
+          "path": "README.md",
+          "size": 493,
+          "sha256": "30d2ba25cd223d7c5cd3036808b7c407c150bdc15bd2b079f118ec94d1c2ac57",
+          "sha256Source": "downloaded"
+        },
+        {
+          "path": "added_tokens.json",
+          "size": 707,
+          "sha256": "c0284b582e14987fbd3d5a2cb2bd139084371ed9acbae488829a1c900833c680",
+          "sha256Source": "downloaded"
+        },
+        {
+          "path": "chat_template.jinja",
+          "size": 4116,
+          "sha256": "87a2728cb8dc9fe424d624542f6060ec05a1d285ebbec578bb078900e33396b5",
+          "sha256Source": "downloaded"
+        },
+        {
+          "path": "config.json",
+          "size": 857,
+          "sha256": "65fb46306262bac47c6a89e5ad8a766c3d40d559057c1931e9c10976266a4fc7",
+          "sha256Source": "downloaded"
+        },
+        {
+          "path": "config_sentence_transformers.json",
+          "size": 215,
+          "sha256": "10667c72ddb772627bf1780cb7f86af8e2ae0032b8c243c731172064105c6961",
+          "sha256Source": "downloaded"
+        },
+        {
+          "path": "generation_config.json",
+          "size": 117,
+          "sha256": "28396d421a2108acce96383f6a7de78008f7f1b17f807958f3c14c51dbfb65fb",
+          "sha256Source": "downloaded"
+        },
+        {
+          "path": "merges.txt",
+          "size": 1671853,
+          "sha256": "8831e4f1a044471340f7c0a83d7bd71306a5b867e95fd870f74d0c5308a904d5",
+          "sha256Source": "downloaded"
+        },
+        {
+          "path": "model.safetensors",
+          "size": 633152041,
+          "sha256": "fe956e8d346b4f08215a3cfc48a874354f900c20a59e965b75df0d9d77c54b28",
+          "sha256Source": "lfs-oid"
+        },
+        {
+          "path": "model.safetensors.index.json",
+          "size": 49731,
+          "sha256": "d387721e7d2dd44152b7dc9fcea8d5647e2692e1c064949c000fabad3292d1d1",
+          "sha256Source": "downloaded"
+        },
+        {
+          "path": "modules.json",
+          "size": 349,
+          "sha256": "84e40c8e006c9b1d6c122e02cba9b02458120b5fb0c87b746c41e0207cf642cf",
+          "sha256Source": "downloaded"
+        },
+        {
+          "path": "special_tokens_map.json",
+          "size": 613,
+          "sha256": "76862e765266b85aa9459767e33cbaf13970f327a0e88d1c65846c2ddd3a1ecd",
+          "sha256Source": "downloaded"
+        },
+        {
+          "path": "tokenizer.json",
+          "size": 11423705,
+          "sha256": "def76fb086971c7867b829c23a26261e38d9d74e02139253b38aeb9df8b4b50a",
+          "sha256Source": "lfs-oid"
+        },
+        {
+          "path": "tokenizer_config.json",
+          "size": 5404,
+          "sha256": "443bfa629eb16387a12edbf92a76f6a6f10b2af3b53d87ba1550adfcf45f7fa0",
+          "sha256Source": "downloaded"
+        },
+        {
+          "path": "vocab.json",
+          "size": 2776833,
+          "sha256": "ca10d7e9fb3ed18575dd1e277a2579c16d108e32f27439684afa0e10b1440910",
+          "sha256Source": "downloaded"
+        }
+      ],
+      "note": "Qwen3-Embedding 0.6B（原生 1024 维＝本项目统一维度，不截断）。最快的一档：Air 实测 16.3 块/s，是 4B 的 13.6 倍；代价是检索质量最低（C-MTEB 检索 71.03，4B 是 77.03）。想快就用它，想准用 4B / 8B。",
+      "hfLastModified": "2026-07-14T01:30:13.000Z",
+      "hfPipelineTag": "feature-extraction",
+      "hfModelType": "Qwen3ForCausalLM"
+    },
+    {
       "id": "Qwen3-Embedding-4B-4bit-DWQ",
       "purpose": "embedding",
       "source": "huggingface",
@@ -93,7 +199,7 @@
           "sha256Source": "downloaded"
         }
       ],
-      "note": "Qwen3-Embedding 4B（原生 2560 维，MRL 截到本项目统一的 1024 维）。Air 16 GB 上可用但慢，日常首选；家里机可换 8B。",
+      "note": "Qwen3-Embedding 4B（原生 2560 维，MRL 截到本项目统一的 1024 维）。质量与速度的平衡档：C-MTEB 检索 77.03（0.6B 是 71.03）；Air 实测 1.20 块/s，比 0.6B 慢 13.6 倍。",
       "hfLastModified": "2025-06-07T01:49:06.000Z",
       "hfPipelineTag": "feature-extraction",
       "hfModelType": "Qwen3ForCausalLM"
@@ -187,7 +293,7 @@
           "sha256Source": "downloaded"
         }
       ],
-      "note": "Qwen3-Embedding 8B（原生 4096 维，MRL 截到 1024 维）。质量最好、最慢，建议只在大内存机器上作为索引模型；换模型会让已建的向量索引作废，需要重建。",
+      "note": "Qwen3-Embedding 8B（原生 4096 维，MRL 截到 1024 维）。质量最好、最慢：C-MTEB 检索 78.21，只比 4B 高 1.2 分而慢一倍，建议只在大内存机器上当索引模型。换模型会让已建的向量索引作废，需要重建。",
       "hfLastModified": "2025-06-23T15:36:52.000Z",
       "hfPipelineTag": "feature-extraction",
       "hfModelType": "Qwen3ForCausalLM"

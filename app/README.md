@@ -661,7 +661,6 @@ locked ──launch / menuUnlock / systemDidWake──▶ unlocking ──取钥
 | 锁屏 | M0 就有 | 两路信号（前台应用 = `loginwindow` + 分布式通知），去重后进 `paused` |
 | **屏保** | **M1 新增** | `com.apple.screensaver.didstart` / `.didstop` 分布式通知 → 进 / 出 `paused` |
 | **私密浏览** | **M1 新增（尽力）** | 见下 |
-| **Focus（专注模式）** | **M2 d 新增（默认关，可能不可用）** | 轮询 `~/Library/DoNotDisturb/DB/` 两个 JSON；命中 `focus.pauseModes` 名单就进 `paused`。详见第 17 节 |
 | **全局热键** | **M2 d 新增** | `RegisterEventHotKey`：⌃⌥⌘P 暂停 / 继续、⌃⌥⌘L 锁定。详见第 17 节 |
 | 视频会议前台 | 不做 | 计划 4.2 已定：改为可选开关，默认关闭 |
 
@@ -1389,13 +1388,15 @@ menu.addItem(ModelsMenu.menuItem())
 app **不内置、不自动下载**任何模型。清单 `catalog.json` 随包，**运行时不联网拉清单**。
 D29 叙述下架后清单里没有生成模型；**D30（2026-09-08）起嵌入模型是多尺寸、可切换**：
 
-| 清单项 | 体积 | 原生维度 | 最低内存 | 说明 |
-|---|---|---|---|---|
-| `Qwen3-Embedding-4B-4bit-DWQ` | 2.12 GiB | 2560 | 8 GiB | 日常首选；Air 上可用 |
-| `Qwen3-Embedding-8B-4bit-DWQ` | 3.98 GiB | 4096 | 16 GiB | 质量最好、最慢，建议大内存机器 |
+| 清单项 | 体积 | 原生维度 | 最低内存 | Air 实测吞吐 | C-MTEB 检索 | 说明 |
+|---|---|---|---|---|---|---|
+| `Qwen3-Embedding-0.6B-8bit` | 0.60 GiB | 1024 | 8 GiB | 16.3 块/s | 71.03 | 快档，唯一不需要截断的 |
+| `Qwen3-Embedding-4B-4bit-DWQ` | 2.12 GiB | 2560 | 8 GiB | 1.20 块/s | 77.03 | 平衡档 |
+| `Qwen3-Embedding-8B-4bit-DWQ` | 3.98 GiB | 4096 | 16 GiB | 未测 | 78.21 | 质量最好、最慢，建议大内存机器 |
 
-0.6B 按用户决定去掉了。两者都 **MRL 截断到统一的 1024 维**（`SchemaV4.dimension`，schema v9
-从 512 改上来）——所有尺寸落到同一维度，换模型只要重建向量、不用改表。
+都落到统一的 **1024 维**（`SchemaV4.dimension`，schema v9 从 512 改上来）——所有尺寸同一维度，
+换模型只要重建向量、不用改表；0.6B 的原生维度正好是 1024，所以它是唯一不经 MRL 截断的一档。
+（0.6B 曾按 D30 去掉，实测 4B 在 Air 上慢 13.6 倍后又加回来当快档。）
 
 **模型从哪来（三条路）**：
 1. **下载**：面板里的「下载」按钮，或 `brosis-embed models --download --id <清单 id>`。
@@ -1822,110 +1823,47 @@ let exportItem = NSMenuItem(title: "加密导出…", action: #selector(openExpo
 
 ---
 
-## 17. Focus 联动 + 全局热键（4.5 / 3.5 / 4.2 / 4.3.2 T18，M2 d 批）
+## 17. 全局热键（3.5 / 4.2 / 4.3.2 T18，M2 d 批）
 
-### 17.1 四个新文件 + `AppDelegate.swift` 的接线
+> **2026-09-08：Focus（专注模式）联动整条删除。** 原来这一节还写着一个只读
+> `~/Library/DoNotDisturb/DB/` 两个 JSON 的探针（`FocusProbe.swift`）、一份
+> `focus.pauseModes` 暂停名单，以及菜单里那个「打开完全磁盘访问设置」的入口。
+> 那两个文件受 TCC 的「完全磁盘访问」保护，本机恒为 `unavailable`，功能从没真跑起来过；
+> 用户决定不要，于是**代码、暂停原因、状态机触发、自检三组、菜单入口一起删干净**
+> （不是像夜间叙述那样留休眠代码）。删掉的东西：`FocusProbe.swift`、
+> `FocusHotKeySelfCheck.swift` 里的前三组、`PauseReason.focus`、
+> `LockTrigger.focusPauseStarted / .focusPauseEnded` 与它们的转移用例、
+> `AppDelegate` 的 `FocusMonitor` 接线与 `openFullDiskAccessSettings()`、
+> 三类 `focus_*` 运行期事件。要恢复只能从 git 历史里捞（`f975ab2` 之前）。
+
+### 17.1 两个新文件 + `AppDelegate.swift` 的接线
 
 | 文件 | 干什么 |
 |---|---|
-| `Sources/brosis/FocusProbe.swift` | Focus 状态探针（读两个 JSON、宽容解析）、暂停名单匹配、`FocusMonitor` 轮询器 |
 | `Sources/brosis/HotKeys.swift` | `RegisterEventHotKey` 的登记处、键位字符串解析（纯函数 + 向量） |
-| `Sources/brosis/FocusHotKeySelfCheck.swift` | 自检第 12 组（7 项） |
+| `Sources/brosis/HotKeySelfCheck.swift` | 自检第 12 组（4 项） |
 | `Sources/brosis/HardConstraintSelfCheck.swift` | 自检第 13 组（3 项，补 2.2 硬约束里能自动化的部分） |
 
-改到的现成文件只有两处，都是追加：`LockController.swift`（`PauseReason.focus`、
-两个 `LockTrigger`、三条转移用例）与 `SelfCheck.swift`（两行 `failures += …`）。
+改到的现成文件只有 `SelfCheck.swift`（两行 `failures += …`）。
 
-**已经接上**（写这一节时留给主会话，现已在 `AppDelegate.applicationDidFinishLaunching(_:)` 里、
-`lock` 建好之后）：
+接线在 `AppDelegate.applicationDidFinishLaunching(_:)` 里、`lock` 建好之后：
 
 ```swift
-// Focus 联动（默认关：启动时探一次，之后 focus.pauseModes 为空就零 syscall）
-let focus = FocusMonitor()
-focus.install(lock: lock, recorder: recorder)
-self.focus = focus
-
 // 全局热键：处理器只发通知，动作走既有的 togglePause / lockNow
 _ = HotKeys.shared.install(recorder: recorder,
                            onPause: { [weak lock] in lock?.togglePause() },
                            onLock:  { [weak lock] in lock?.lockNow() })
 ```
 
-菜单里两行状态显示（`menuWillOpen` 的 `refreshMenu()` 里，权限那两行下面）：
+菜单里一行状态显示（`menuWillOpen` 的 `refreshMenu()` 里，权限那两行下面）：
 
 ```swift
-menu.addItem(disabledItem(focus?.menuDescription ?? "Focus 联动：未启动"))
 menu.addItem(disabledItem(HotKeys.shared.menuDescription))
 ```
 
-`AppDelegate` 里存了一个 `private var focus: FocusMonitor?`；
 `applicationWillTerminate` 里调 `HotKeys.shared.uninstall()`（不调也不会漏到别的进程）。
 
-### 17.2 Focus 探针：读两个文件，读不到就说读不到
-
-macOS **没有**公开 API 报告"当前生效的 Focus 是哪个"。系统把它写在：
-
-| 文件（相对主目录） | 内容 |
-|---|---|
-| `Library/DoNotDisturb/DB/Assertions.json` | 当前生效的断言，里面有 `assertionDetailsModeIdentifier` |
-| `Library/DoNotDisturb/DB/ModeConfigurations.json` | 模式 id → 显示名 |
-
-两个文件受 TCC 的**完全磁盘访问**保护。三条口径：
-
-1. **只读这两个文件，不碰任何会弹窗的接口**（不用 EventKit、不用通知中心、不发 Apple 事件、
-   不 spawn 子进程）。`open(2)` 被拒就是 `EPERM`，**系统不会为这一类权限弹窗**——
-   只能用户自己去「系统设置 → 隐私与安全性 → 完全磁盘访问」把 brosis 勾上。
-2. **`stat(2)` 成功不代表读得到。** TCC 拦的是 `open`，不是 `stat`；所以探针一定要真开一次文件，
-   不能用"文件存在"当可用性判据。
-3. **「读不到」≠「没开 Focus」。** 探针的三个结果是
-   `unavailable(原因)` / `inactive`（可读、当前没有 Focus） / `active([模式])`，
-   解析失败也算 `unavailable`。不可用时**不暂停**（不猜），菜单显示
-   `Focus 联动不可用（原因）`。
-
-**本机实测（M4 Air / macOS 26.6，2026-09-08，屏幕锁定态）**：两个文件 `stat` 成功、
-`open` 回 `EPERM`（0.011–0.057 ms 返回，不阻塞、不弹窗）→ 这台机器上 Focus 联动**恒为不可用**，
-菜单会把原因写出来。数字见 `tools/bench/results/m2_d_focus_hotkey_2026-09-08.md`。
-
-解析写成"在整棵 JSON 树里找这几个键"的宽容遍历（深度上限 32），而不是照某一版结构逐层下钻；
-文件格式没有公开契约，系统换一层包装不至于直接失效。
-
-### 17.3 暂停名单与联动路径
-
-设置里一份"这些 Focus 生效时暂停采集"的名单，`UserDefaults` 键 `focus.pauseModes`（字符串数组），
-**默认空 = 不联动**：`FocusMonitor.start()` 启动时探一次（`poll(force: true)`，好让菜单
-第一次打开就能说清"可不可用、为什么"），此后空名单的每一轮轮询都**零 syscall**。
-
-```bash
-# 工作模式与勿扰生效时暂停采集
-defaults write com.brosis.app focus.pauseModes -array 工作 勿扰模式
-# 任何 Focus 生效都暂停
-defaults write com.brosis.app focus.pauseModes -array '*'
-# 关掉联动
-defaults delete com.brosis.app focus.pauseModes
-```
-
-名单项**三种写法都认**：显示名（`工作`）、完整模式 id（`com.apple.focus.work`）、
-id 末段（`work`）；比较时去空白、大小写折叠。中文名随系统语言变，换语言要重配——这是如实的局限。
-
-命中之后走的是**现成那条暂停路径**，与安全输入 / 锁屏 / 屏保 / 私密浏览同一个集合：
-`LockController.apply(.focusPauseStarted)` → `pauseReasons` 加一条 `.focus` →
-`snapshot.isRecording == false` → 采集停、MCP 拒绝、库**保持打开**（夜间任务照跑）。
-恢复走 `.focusPauseEnded`，只删 `.focus` 这一条——屏幕还锁着时那条 `.screenLocked` 留着，
-不会在锁屏状态下把采集恢复回来（有专门的转移用例）。
-
-事件（`jobs` 表的运行期事件）：
-
-| kind | 什么时候 | detail |
-|---|---|---|
-| `focus_probe` | 可用性变化时（含首次探测） | `focus=…`、轮询间隔 |
-| `focus_pause` | 名单命中，进 `paused` | 命中的模式名与 id |
-| `focus_resume` | 退出名单 / 名单被清空 | 原因 |
-
-**轮询间隔与 `CaptureController` 的定时兜底同一个值**：默认 **12 s**，
-键 `capture.periodicInterval`（下限 3 s）。不另设一个键——多一个节奏就多一份要解释的东西，
-而 Focus 的变化频率远低于 12 s。
-
-### 17.4 全局热键
+### 17.2 全局热键
 
 | 动作 | 默认组合 | UserDefaults 键 | 走哪条路 |
 |---|---|---|---|
@@ -1958,25 +1896,18 @@ id 末段（`work`）；比较时去空白、大小写折叠。中文名随系�
 3. **键盘布局无关的是键码，不是字符。** Dvorak / 法语布局下 `kVK_ANSI_P` 还是那个物理键位，
    但键帽上的字母会变。
 
-### 17.5 自检（`--self-check` 的第 12 / 13 组，10 项）
+### 17.3 自检（`--self-check` 的第 12 / 13 组，7 项）
 
-第 12 组（`FocusHotKeySelfCheck`，7 项）：
+第 12 组（`HotKeySelfCheck`，4 项）：
 
-1. **Focus 探针（本机实测，如实报可用性）**——真读一次那两个文件，把结论与原因原样打出来。
-   判定的是"给出了一个能解释的结论"，不是"这台机器一定读得到"：本机是 TCC 拒绝，
-   那是既定事实，不该让自检变红，但**原因必须写得出来**。
-2. **Focus 解析向量 7 条**（开 / 关 / 多个同时生效并去重 / 名字表读不到时退回 id 末段 /
-   兜底形状 / 坏 JSON / EPERM）——合成样本，纯函数，断"读不到"与"没开"始终分得清。
-3. **Focus 暂停名单匹配 10 条**（显示名 / 完整 id / id 末段 / 通配符 / 不命中 / 名单空 /
-   不可用时不猜 / 空白项忽略）。
-4. **热键注册 · 暂停**、5. **热键注册 · 锁定**——**真的调 `RegisterEventHotKey`**，
+1. **热键注册 · 暂停**、2. **热键注册 · 锁定**——**真的调 `RegisterEventHotKey`**，
    把 `OSStatus`、`registered`、原因、`UnregisterEventHotKey` 的返回值全打出来；
    判定的是**一致性**（`registered == (status == noErr)`）与**注册成功的必须能注销**。
-6. **热键注销干净**——**装 → 卸 → 再装 → 再卸，两轮 `OSStatus` 必须相同**。
+3. **热键注销干净**——**装 → 卸 → 再装 → 再卸，两轮 `OSStatus` 必须相同**。
    只看 `UnregisterEventHotKey` 的返回值是不够的（把它换成常量 `noErr` 也全绿）；
    真漏注销时 Carbon 会在第二轮回 `eventHotKeyExistsErr (-9878)`。
    自检因此不会给正在运行的那个 brosis 留下一个抢着的组合。
-7. **键位解析 14 条**（单词 / 符号 / 别名 / 重复修饰键 / 三种拒绝）。
+4. **键位解析 14 条**（单词 / 符号 / 别名 / 重复修饰键 / 三种拒绝）。
 
 第 13 组（`HardConstraintSelfCheck`，3 项）是做 2.2 对照表时补的：
 
@@ -1990,11 +1921,8 @@ id 末段（`work`）；比较时去空白、大小写折叠。中文名随系�
 3. **硬约束 6**：`SUEnableAutomaticChecks` / `SUAutomaticallyUpdate` 都是 `false`、
    `SUFeedURL` 是 https——更新检查也是一次出网，默认必须关。
 
-### 17.6 本轮不做
+### 17.4 本轮不做
 
-- **界面**：暂停名单与热键都只有 `UserDefaults`，没有设置面板。产品化时进「设置」窗口。
+- **界面**：热键只有 `UserDefaults`，没有设置面板。产品化时进「设置」窗口。
 - **按下热键的端到端验证**：不能在无人值守的会话里模拟按键（要么用 `CGEvent` 合成——
   那正是我们不想申请的那类权限；要么真人按）。留给你在 GUI 里试。
-- **Focus 联动的真机验证**：本机没授予完全磁盘访问，探针恒为 `unavailable`。
-  要验证联动，需要你手动把 brosis 加进「完全磁盘访问」，再开一个 Focus。
-- **按 Focus 分档采集**（例如"工作模式只记事件"）：本轮只有"暂停 / 不暂停"两态。

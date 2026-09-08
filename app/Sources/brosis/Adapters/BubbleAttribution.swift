@@ -170,6 +170,9 @@ enum ChatTitle {
     static func memberCount(in line: String) -> Int? {
         let scalars = Array(line.trimmingCharacters(in: .whitespaces).unicodeScalars)
         guard !scalars.isEmpty else { return nil }
+        // 这里**故意**比 `isWordScalar` 宽（用 alphanumerics，含带圈数字那类 N）：
+        // 判错方向不对称——把单聊误判成群聊会让昵称提取乱抓一通，把群聊误判成单聊
+        // 只是退回「对方」。所以数字前面只要有一点像文字，就不当人数后缀。
         func isWord(_ s: Unicode.Scalar) -> Bool {
             CharacterSet.alphanumerics.contains(s) || s.properties.isIdeographic
         }
@@ -202,38 +205,33 @@ enum ChatTitle {
         return Resolved(display: display, isGroup: count != nil)
     }
 
-    /// 去掉行首图标残渣（OCR 把头像 / 图标认成 `◎` `④` `白` 这类字）、行尾的人数后缀与标点。
+    /// 一个标量能不能当会话名的开头 / 结尾。
+    ///
+    /// 用 `letters ∪ decimalDigits ∪ 表意文字`，**不能**用 `alphanumerics`：后者含整个 N 类，
+    /// 而 OCR 把头像和图标恰恰认成 `④`（U+2463，类别 No）这种带圈数字，用 alphanumerics
+    /// 判就把它当成正文留下了。
+    static func isWordScalar(_ s: Unicode.Scalar) -> Bool {
+        CharacterSet.letters.contains(s) || CharacterSet.decimalDigits.contains(s)
+            || s.properties.isIdeographic
+    }
+
+    /// 去掉行首图标残渣（OCR 把头像 / 图标认成 `◎` `④` 这类字）、行尾的人数后缀与标点。
     static func cleaned(_ line: String, droppingMemberCount: Bool) -> String? {
         var scalars = Array(line.unicodeScalars)
         if droppingMemberCount {
-            // 砍掉最后一个非文字符号（左括号）及其之后的全部内容。
-            var cut: Int? = nil
-            var index = scalars.count - 1
-            while index >= 0 {
-                if CharacterSet.decimalDigits.contains(scalars[index]) { index -= 1; continue }
-                if cut == nil, !CharacterSet.alphanumerics.contains(scalars[index]),
-                   !scalars[index].properties.isIdeographic, !scalars[index].properties.isWhitespace {
-                    cut = index
-                    index -= 1
-                    continue
-                }
-                break
-            }
-            if let cut { scalars = Array(scalars[0..<cut]) }
+            // 从右往左：先跳过收尾符号（`）`），再跳过数字，落到**左**括号上，从那里截断。
+            var index = scalars.count
+            while index > 0, !CharacterSet.decimalDigits.contains(scalars[index - 1]) { index -= 1 }
+            while index > 0, CharacterSet.decimalDigits.contains(scalars[index - 1]) { index -= 1 }
+            if index > 0 { scalars = Array(scalars[0..<(index - 1)]) }
         }
-        // 行首：丢掉开头连续的非文字符号（含空白）。
+        // 行首 / 行尾：丢掉连续的非文字符号（含空白与图标残渣）。
         var start = 0
-        while start < scalars.count,
-              !CharacterSet.alphanumerics.contains(scalars[start]),
-              !scalars[start].properties.isIdeographic { start += 1 }
-        // 行尾：同样丢掉结尾连续的非文字符号。
+        while start < scalars.count, !isWordScalar(scalars[start]) { start += 1 }
         var end = scalars.count
-        while end > start,
-              !CharacterSet.alphanumerics.contains(scalars[end - 1]),
-              !scalars[end - 1].properties.isIdeographic { end -= 1 }
+        while end > start, !isWordScalar(scalars[end - 1]) { end -= 1 }
         guard start < end else { return nil }
         let text = String(String.UnicodeScalarView(scalars[start..<end]))
-            .trimmingCharacters(in: .whitespaces)
         guard !text.isEmpty, text.count <= maxTitleCharacters else { return nil }
         return text
     }
