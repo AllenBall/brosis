@@ -131,3 +131,110 @@ struct BubbleLayoutFixture: Codable, Sendable {
         }
     }
 }
+
+// MARK: - 会话名与群聊判定
+
+/// 从 OCR 出来的标题条里认出「干净的会话名」与「这是不是群聊」。
+///
+/// 为什么必须从这里认：微信的 AX 正文是空的（M0 实测 0 字符），主窗口标题恒为「微信」——
+/// 标题条 OCR 是**唯一**能拿到会话身份的通道。M2 之前 `BubbleAttribution.attribute` 的
+/// `group` 参数被写死成 `false`，于是群聊昵称那一支永远不执行：昵称行没被认成昵称，
+/// 反而被当成一条独立消息入库（`对方：才剑锋`），发送者一律是「对方」。
+///
+/// 判定只碰字符串，不碰图像也不碰 AX，所以能脱离屏幕单独测（`AdapterVectors.chatTitleCases`）。
+enum ChatTitle {
+
+    /// 一条认出来的会话身份。
+    struct Resolved: Sendable, Equatable {
+        /// 去掉图标残渣与人数后缀之后的会话名，写进 `windows.title`。
+        var display: String
+        /// 是不是群聊。
+        var isGroup: Bool
+    }
+
+    /// 会话名最长认到这么多字符。再长基本是把会话列表也框进来了，不当会话名用——
+    /// `windows` 表按 (app, title) 唯一，放进去一条噪声就永久多一行。
+    static let maxTitleCharacters = 40
+
+    /// 人数后缀最多允许后面再跟几个字符（`（29）` 后面常有 OCR 认出来的图标残渣）。
+    static let maxTrailingNoise = 3
+
+    /// 群人数的合理区间。微信群至少 3 人，这里放宽到 2，上限按微信的 500 人群再留一倍余量。
+    static let memberCountRange = 2...1000
+
+    /// 认出这一行结尾的群人数后缀，形如「省省吧（29）」。
+    ///
+    /// 不用正则：OCR 对括号非常不稳（`（` `(` `〔` `【` 与全半角混排都见过），
+    /// 与其枚举括号，不如只要求**结构**：结尾附近有一段数字，数字前面紧挨着一个非文字符号。
+    /// 「2026年7月C端APP日活查询」这种数字在词中间的不会命中（数字前是汉字）。
+    static func memberCount(in line: String) -> Int? {
+        let scalars = Array(line.trimmingCharacters(in: .whitespaces).unicodeScalars)
+        guard !scalars.isEmpty else { return nil }
+        func isWord(_ s: Unicode.Scalar) -> Bool {
+            CharacterSet.alphanumerics.contains(s) || s.properties.isIdeographic
+        }
+        // 从结尾往回找数字段，中间只允许隔着很少几个收尾符号。
+        var end = scalars.count
+        while end > 0, !CharacterSet.decimalDigits.contains(scalars[end - 1]) { end -= 1 }
+        guard end > 0, scalars.count - end <= maxTrailingNoise else { return nil }
+        var start = end
+        while start > 0, CharacterSet.decimalDigits.contains(scalars[start - 1]) { start -= 1 }
+        // 数字前面必须是一个**非文字**符号（括号），否则「第2组」「2026年」也会命中。
+        guard start > 0, !isWord(scalars[start - 1]) else { return nil }
+        guard let count = Int(String(String.UnicodeScalarView(scalars[start..<end]))),
+              memberCountRange.contains(count) else { return nil }
+        return count
+    }
+
+    /// 把标题条的整块 OCR 文本认成一条会话身份；认不出来返回 nil。
+    ///
+    /// 认不出来时**什么都不改**（观察照旧用窗口标题「微信」）：宁可少一条身份，
+    /// 也不要让 OCR 噪声在 `windows` 表里堆出一堆一次性的假标题。
+    static func resolve(_ raw: String) -> Resolved? {
+        let lines = raw.split(whereSeparator: \.isNewline)
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+        guard !lines.isEmpty else { return nil }
+        // 带人数后缀的那一行最像会话名（群聊）；没有就用第一行（单聊）。
+        let line = lines.first { memberCount(in: $0) != nil } ?? lines[0]
+        let count = memberCount(in: line)
+        guard let display = cleaned(line, droppingMemberCount: count != nil) else { return nil }
+        return Resolved(display: display, isGroup: count != nil)
+    }
+
+    /// 去掉行首图标残渣（OCR 把头像 / 图标认成 `◎` `④` `白` 这类字）、行尾的人数后缀与标点。
+    static func cleaned(_ line: String, droppingMemberCount: Bool) -> String? {
+        var scalars = Array(line.unicodeScalars)
+        if droppingMemberCount {
+            // 砍掉最后一个非文字符号（左括号）及其之后的全部内容。
+            var cut: Int? = nil
+            var index = scalars.count - 1
+            while index >= 0 {
+                if CharacterSet.decimalDigits.contains(scalars[index]) { index -= 1; continue }
+                if cut == nil, !CharacterSet.alphanumerics.contains(scalars[index]),
+                   !scalars[index].properties.isIdeographic, !scalars[index].properties.isWhitespace {
+                    cut = index
+                    index -= 1
+                    continue
+                }
+                break
+            }
+            if let cut { scalars = Array(scalars[0..<cut]) }
+        }
+        // 行首：丢掉开头连续的非文字符号（含空白）。
+        var start = 0
+        while start < scalars.count,
+              !CharacterSet.alphanumerics.contains(scalars[start]),
+              !scalars[start].properties.isIdeographic { start += 1 }
+        // 行尾：同样丢掉结尾连续的非文字符号。
+        var end = scalars.count
+        while end > start,
+              !CharacterSet.alphanumerics.contains(scalars[end - 1]),
+              !scalars[end - 1].properties.isIdeographic { end -= 1 }
+        guard start < end else { return nil }
+        let text = String(String.UnicodeScalarView(scalars[start..<end]))
+            .trimmingCharacters(in: .whitespaces)
+        guard !text.isEmpty, text.count <= maxTitleCharacters else { return nil }
+        return text
+    }
+}

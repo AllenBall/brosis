@@ -27,6 +27,49 @@ struct RelativeRect: Sendable, Equatable {
     }
 }
 
+/// 窗口内按**点数**从边缘内缩得到的矩形。
+///
+/// 为什么不都用 `RelativeRect`：三栏布局的应用（微信、飞书）左侧功能栏与会话列表是
+/// **固定点宽**，不随窗口放大按比例伸缩；顶部标题条与底部输入框同理。用比例切分在一种
+/// 窗口尺寸上调准了，换一台屏就整体偏。
+///
+/// M2 实测（库里 evidence 4260）：微信窗口宽约 1085 pt 时，`x = 0.22` 落在 239 pt 处，
+/// 而实际侧栏约 340 pt——于是半个会话列表被当成聊天面板 OCR 了，记录里全是**别的会话**
+/// 的摘要行（"用户交流群 |官方 外部 17:55"），而且左右分栏的基准跟着偏，把对方的消息
+/// 判成了自己发的。
+///
+/// 内缩后尺寸不够（窄窗口、分屏）就退回 `fallback` 的比例切分：定点值只是对"常见布局"
+/// 的描述，描述不适用时宁可用旧的粗略切法，也不要交出一个空的或倒过来的矩形。
+struct WindowInset: Sendable, Equatable {
+    var left: Double = 0
+    var top: Double = 0
+    var right: Double = 0
+    var bottom: Double = 0
+    /// 内缩之后再把高度截到这么多点（从内缩后的顶边往下量）。nil = 不截。
+    /// 用来表达"顶部那一条"：`top = 0, bottom = 0, maxHeight = 60`。
+    var maxHeight: Double?
+    /// 内缩后至少要剩下的宽 / 高，不够就用 `fallback`。
+    var minWidth: Double = 240
+    var minHeight: Double = 48
+    /// 定点值不适用时的兜底比例矩形。
+    var fallback: RelativeRect
+
+    /// 落到 AX 坐标系的绝对矩形。
+    func resolve(in window: CGRect) -> CGRect {
+        let width = window.width - left - right
+        var height = window.height - top - bottom
+        if let maxHeight { height = min(height, maxHeight) }
+        guard width >= minWidth, height >= minHeight else { return fallback.resolve(in: window) }
+        return CGRect(x: window.minX + left, y: window.minY + top, width: width, height: height)
+    }
+
+    var label: String {
+        String(format: "inset l=%.0f t=%.0f r=%.0f b=%.0f", left, top, right, bottom)
+            + (maxHeight.map { String(format: " h<=%.0f", $0) } ?? "")
+            + " fallback=\(fallback.label)"
+    }
+}
+
 /// 怎么在 AX 树里找到这个区域。
 enum ElementLocator: Sendable, Equatable {
     /// 角色等于（第一个命中的节点）。
@@ -39,6 +82,9 @@ enum ElementLocator: Sendable, Equatable {
     case rolePath([String])
     /// 不找 AX 节点，直接用窗口内的相对矩形（只能 OCR）。
     case relativeRect(RelativeRect)
+    /// 不找 AX 节点，直接用从窗口边缘按点数内缩的矩形（只能 OCR）。固定宽度的侧栏 /
+    /// 标题条 / 输入框用这个，别用比例（见 `WindowInset`）。
+    case insetRect(WindowInset)
     /// 整个焦点窗口。
     case wholeWindow
 
@@ -49,6 +95,7 @@ enum ElementLocator: Sendable, Equatable {
         case .identifier(let id): return "identifier=\(id)"
         case .rolePath(let path): return "path=" + path.joined(separator: "/")
         case .relativeRect(let rect): return "rect=\(rect.label)"
+        case .insetRect(let inset): return "rect=\(inset.label)"
         case .wholeWindow: return "window"
         }
     }

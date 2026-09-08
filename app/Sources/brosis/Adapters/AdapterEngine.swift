@@ -150,6 +150,9 @@ enum AdapterEngine {
             case .relativeRect(let relative):
                 located = nil
                 result.rect = windowFrame.map { relative.resolve(in: $0) }
+            case .insetRect(let inset):
+                located = nil
+                result.rect = windowFrame.map { inset.resolve(in: $0) }
             case .wholeWindow:
                 located = window
                 result.rect = windowFrame

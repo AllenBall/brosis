@@ -84,6 +84,9 @@ final class CaptureCoordinator: @unchecked Sendable {
     /// 文本一个字都没变就不再写第二条观察（计划 3.3「新鲜度判定」此前只在 AX 侧实现，
     /// 于是微信静止在前台时每 12 s 一条内容完全相同的 ocr 观察，约 300 条/小时）。
     private var lastOCRTexts: [String: String] = [:]
+    /// 上一次从标题条认出来的会话身份，按 bundle id 存。
+    /// 标题区域被限流挡掉的那些帧要靠它保住群聊判定与 `window_title`（M2）。
+    private var lastConversationTitles: [String: ChatTitle.Resolved] = [:]
 
     let trigger: OCRTriggerGate
     let auditEvery: Int
@@ -219,10 +222,24 @@ final class CaptureCoordinator: @unchecked Sendable {
         var regionsRun = 0
 
         // —— 1. 待办 OCR ——
+        //
+        // **分两趟**（M2 修正）：先把所有区域认完，再成文。
+        // 原因是气泡归属需要先知道「这是不是群聊」，而这个信号只能从**另一个区域**
+        // （标题条的人数后缀）拿到——微信的 AX 正文是空的、窗口标题恒为「微信」。
+        // 一趟循环时区域按规则顺序处理，聊天面板排在会话名前面，拿不到这个信号，
+        // 于是 `group` 只能写死成 false，群聊昵称永远认不出来。
         var fragments: [TextFragment] = []
         var lowConfidence = false
         var missingRegions = 0
         let now = Date().timeIntervalSince1970
+
+        /// 认完但还没成文的一块区域。
+        struct Recognized {
+            var request: OCRRequest
+            var result: ViewportOCR.Result
+        }
+        var recognized: [Recognized] = []
+
         for request in pending.ocrRequests {
             // 第二类触发条件（帧变化 + AX 未变）只在这一帧真的有变化时才算数。
             //
@@ -259,35 +276,7 @@ final class CaptureCoordinator: @unchecked Sendable {
                     continue
                 }
                 if result.meanConfidence < ViewportOCR.lowConfidenceThreshold { lowConfidence = true }
-
-                // 聊天类区域先做气泡归属，再入库（计划 3.3 微信 / 飞书）。
-                var text = result.text
-                if request.kind == .messageList, let layout = pending.chatLayout {
-                    let bubbles = BubbleAttribution.attribute(
-                        items: result.lines, layout: layout,
-                        group: false, regionHeightPoints: Double(request.rect.height))
-                    if !bubbles.isEmpty { text = BubbleAttribution.text(bubbles) }
-                }
-                // —— 入库前脱敏（2.2 硬约束 2）：OCR 出来的文本走的是同一条脱敏管线 ——
-                let redacted = Redactor.redact(text)
-                // —— OCR 侧的新鲜度判定（3.3）：这块区域的正文与上一次逐字节相同就不再写 ——
-                // 微信这类全 OCR 的规则每 12 s 一帧、过了 5 s 限流就会再认一次，
-                // 屏幕静止时那都是同一段字；不判新鲜度的话一小时能写出约 300 条一模一样的观察。
-                // AX 侧的观察照写（时间线不缺段），这里省掉的只是重复的 ocr 正文。
-                let isFresh: Bool = lock.withLock {
-                    guard lastOCRTexts[key] != redacted.text else { return false }
-                    lastOCRTexts[key] = redacted.text
-                    return true
-                }
-                guard isFresh else {
-                    lock.withLock { stats.ocrUnchanged += 1 }
-                    continue
-                }
-                fragments.append(TextFragment(
-                    text: redacted.text,
-                    region: "ocr:\(pending.ruleID).\(request.regionName)",
-                    confidence: result.meanConfidence,
-                    note: result.note(rect: request.rect)))
+                recognized.append(Recognized(request: request, result: result))
             } catch {
                 lock.withLock { stats.ocrFailures += 1 }
                 recorder.logEvent(kind: "ocr_failed",
@@ -295,6 +284,71 @@ final class CaptureCoordinator: @unchecked Sendable {
                                         + "reason=\(request.reason.rawValue) error=\(error)")
                 missingRegions += 1
             }
+        }
+
+        // —— 第二趟：先定会话身份，再成文 ——
+        //
+        // 会话名这一轮可能没认（限流、或者规则里压根没有标题区域），所以认到了就记住，
+        // 没认到就用上一次记住的：否则每隔几帧就丢一次群聊身份，同一段对话里
+        // 发送者一会儿是昵称一会儿是「对方」。
+        var resolvedTitle: ChatTitle.Resolved?
+        for item in recognized where item.request.kind == .title {
+            if let candidate = ChatTitle.resolve(item.result.text) {
+                resolvedTitle = candidate
+                break
+            }
+        }
+        lock.withLock {
+            if let resolvedTitle {
+                lastConversationTitles[pending.bundleID] = resolvedTitle
+            } else {
+                resolvedTitle = lastConversationTitles[pending.bundleID]
+            }
+        }
+
+        // 会话名排到正文最前（`occurrences.ord = 0`）：它是这段对话的身份，而摘要是从头
+        // 截断的——拼在尾巴上就永远进不了摘要。同一类区域之间保持规则里的原顺序。
+        let ordered = recognized.enumerated().sorted { lhs, rhs in
+            let lhsTitle = lhs.element.request.kind == .title
+            let rhsTitle = rhs.element.request.kind == .title
+            if lhsTitle != rhsTitle { return lhsTitle }
+            return lhs.offset < rhs.offset
+        }.map(\.element)
+
+        for item in ordered {
+            let request = item.request
+            let result = item.result
+            let key = "\(pending.bundleID)|\(request.regionName)"
+
+            // 聊天类区域先做气泡归属，再入库（计划 3.3 微信 / 飞书）。
+            var text = result.text
+            if request.kind == .messageList, let layout = pending.chatLayout {
+                let bubbles = BubbleAttribution.attribute(
+                    items: result.lines, layout: layout,
+                    group: resolvedTitle?.isGroup ?? false,
+                    regionHeightPoints: Double(request.rect.height))
+                if !bubbles.isEmpty { text = BubbleAttribution.text(bubbles) }
+            }
+            // —— 入库前脱敏（2.2 硬约束 2）：OCR 出来的文本走的是同一条脱敏管线 ——
+            let redacted = Redactor.redact(text)
+            // —— OCR 侧的新鲜度判定（3.3）：这块区域的正文与上一次逐字节相同就不再写 ——
+            // 微信这类全 OCR 的规则每 12 s 一帧、过了 5 s 限流就会再认一次，
+            // 屏幕静止时那都是同一段字；不判新鲜度的话一小时能写出约 300 条一模一样的观察。
+            // AX 侧的观察照写（时间线不缺段），这里省掉的只是重复的 ocr 正文。
+            let isFresh: Bool = lock.withLock {
+                guard lastOCRTexts[key] != redacted.text else { return false }
+                lastOCRTexts[key] = redacted.text
+                return true
+            }
+            guard isFresh else {
+                lock.withLock { stats.ocrUnchanged += 1 }
+                continue
+            }
+            fragments.append(TextFragment(
+                text: redacted.text,
+                region: "ocr:\(pending.ruleID).\(request.regionName)",
+                confidence: result.meanConfidence,
+                note: result.note(rect: request.rect)))
         }
 
         if !fragments.isEmpty {
@@ -306,7 +360,10 @@ final class CaptureCoordinator: @unchecked Sendable {
                 ts: Recorder.milliseconds(),
                 displayID: Int64(displayID),
                 app: AppRef(bundleID: pending.bundleID, name: pending.appName),
-                windowTitle: pending.windowTitle,
+                // 会话名优先于窗口标题（M2）：微信的窗口标题恒为「微信」，会话身份只在
+                // 标题条的 OCR 里。写进 `windows.title` 之后，`title:` 前缀能搜到群名，
+                // 摘要第二段也从「微信」变成实际会话名。认不出来时才退回窗口标题。
+                windowTitle: resolvedTitle?.display ?? pending.windowTitle,
                 trigger: .frameDirty,
                 captureMethod: method,
                 completeness: completeness,
@@ -318,7 +375,11 @@ final class CaptureCoordinator: @unchecked Sendable {
             recorder.logEvent(kind: "ocr_regions_captured",
                               detail: "bundle=\(pending.bundleID) rule=\(pending.ruleID) "
                                     + "regions=\(fragments.count) method=\(method.rawValue) "
-                                    + "completeness=\(completeness.rawValue) trigger=\(reason)")
+                                    + "completeness=\(completeness.rawValue) trigger=\(reason) "
+                                    // 会话身份进事件（**只记形状不记会话名**）：真机校准侧栏宽度时
+                                    // 要能看出"标题条到底认出会话了没有、判成群聊了没有"。
+                                    + "title=\(resolvedTitle == nil ? "none" : "ok") "
+                                    + "group=\(resolvedTitle?.isGroup == true ? "yes" : "no")")
         }
 
         // —— 2. 采样审计 ——
@@ -391,6 +452,7 @@ final class CaptureCoordinator: @unchecked Sendable {
         lock.withLock {
             context = nil
             lastOCRTexts.removeAll()
+            lastConversationTitles.removeAll()
             lastRegionTexts.removeAll()
             frameChangedPending.removeAll()
             coverageFailedApps.removeAll()

@@ -34,7 +34,8 @@ PER_DAY="${PER_DAY:-2880}"
 AVG_CHARS="${AVG_CHARS:-500}"
 SEED="${SEED:-20260907}"
 MODEL_ID="${MODEL_ID:-Qwen3-Embedding-4B-4bit-DWQ}"   # D30：多尺寸，用 MODEL_ID 换
-MODEL_SOURCE="${MODEL_SOURCE:-$HOME/Library/Application Support/brosis-m0/models/$MODEL_ID}"
+# D30：模型正本在 app 的模型根目录（brosis-m0 那份已删）。
+MODEL_SOURCE="${MODEL_SOURCE:-$HOME/Library/Application Support/brosis/models/$MODEL_ID}"
 E="$PROJECT/tools/eval"
 PY="env PYTHONDONTWRITEBYTECODE=1 python3"
 

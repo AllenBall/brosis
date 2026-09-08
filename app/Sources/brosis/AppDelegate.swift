@@ -15,8 +15,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var guide: PermissionGuide?
     /// 3.9 跨设备同步（c 批 T13）。挂在锁定状态机上，只在 unlocked 相位跑循环。
     private var sync: SyncController?
-    /// d 批 T18：Focus 联动（只读 DoNotDisturb 状态文件，不可读即"不可用"）。
-    private var focus: FocusMonitor?
     /// d 批 T16：加密导出窗口与配额"先加密导出"联动。
     private var exportController: ExportController?
     /// 最近一次前台的**非本应用**：菜单里「暂停采集当前应用」要用它。
@@ -78,14 +76,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // 将来要恢复：装回生成模型、把清单条目加回 catalog.json、恢复这两行与 narrativeMenuItem()。
 
         // d 批接线（tools/bench/results/m2_d_{export,focus_hotkey}_2026-09-08.md 的「接入方式」）：
-        // 加密导出只存一个 weak recorder；Focus 监视挂到锁定状态机（走现有暂停路径）；
-        // 全局热键 ⌃⌥⌘P 暂停 / 继续、⌃⌥⌘L 锁定，处理器只转发到现有 togglePause / lockNow。
+        // 加密导出只存一个 weak recorder；全局热键 ⌃⌥⌘P 暂停 / 继续、⌃⌥⌘L 锁定，
+        // 处理器只转发到现有 togglePause / lockNow。
+        // 2026-09-08：Focus（专注模式）联动整条删除，这里不再有 FocusMonitor。
         let exportController = ExportController()
         exportController.install(recorder: recorder)
         self.exportController = exportController
-        let focus = FocusMonitor()
-        focus.install(lock: lock, recorder: recorder)
-        self.focus = focus
         _ = HotKeys.shared.install(recorder: recorder,
                                    onPause: { [weak lock] in lock?.togglePause() },
                                    onLock: { [weak lock] in lock?.lockNow() })
@@ -360,16 +356,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(disabledItem("写入：\(recorder.stats.summary)"))
         menu.addItem(disabledItem("屏幕录制：\(permissions.screenRecording ? "已授权" : "未授权")"))
         menu.addItem(disabledItem("辅助功能：\(permissions.accessibility ? "已授权" : "未授权")"))
-        if let focus, focus.needsFullDiskAccess {
-            // TCC 不会为「完全磁盘访问」弹窗，只能用户自己去勾——给一个一键直达设置页的入口。
-            let item = NSMenuItem(title: "Focus 联动不可用：点此打开「完全磁盘访问」设置，勾上 brosis…",
-                                  action: #selector(openFullDiskAccessSettings), keyEquivalent: "")
-            item.target = self
-            item.toolTip = focus.menuDescription
-            menu.addItem(item)
-        } else {
-            menu.addItem(disabledItem(focus?.menuDescription ?? "Focus 联动：未启动"))
-        }
         menu.addItem(disabledItem(HotKeys.shared.menuDescription))
         if let capture, capture.isRunning, let displayID = capture.currentDisplayID {
             let stats = capture.currentStats
@@ -575,17 +561,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         CapturePolicyStore.shared.clearNewAppNotice(bundleID: bundleID)
         PoliciesWindowController.shared.present(select: bundleID)
         refreshMenu()
-    }
-
-    /// 打开「系统设置 → 隐私与安全性 → 完全磁盘访问」。勾上之后不用重启：FocusMonitor 每次轮询都重新 open 文件。
-    @objc private func openFullDiskAccessSettings() {
-        NSWorkspace.shared.open(FocusMonitor.fullDiskAccessSettingsURL)
-        recorder.logEvent(kind: "focus_fda_settings_opened")
-        // 给用户几秒去勾选，然后主动探一次，菜单下次打开就是新状态。
-        DispatchQueue.main.asyncAfter(deadline: .now() + 15) { [weak self] in
-            self?.focus?.poll(force: true)
-            self?.refreshMenu()
-        }
     }
 
     @objc private func requestPermissions() {

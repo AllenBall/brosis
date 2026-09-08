@@ -85,12 +85,37 @@ enum AdapterRegistry {
 
     // MARK: - 微信（原生但 AX 空）
 
+    /// 微信左侧「竖排功能栏 + 会话列表」的总宽（点）。默认 340 ≈ 功能栏 60 + 会话列表 280。
+    ///
+    /// **这是定点值不是比例**：会话列表宽度不随窗口放大而变，用比例切一定会偏（见 `WindowInset`
+    /// 的头注释与 M2 实测）。用户拖过会话列表分隔线就得校准，不用重新编译：
+    /// `defaults write com.brosis.app adapter.wechat.sidebarWidth -float 380`
+    static let wechatSidebarKey = "adapter.wechat.sidebarWidth"
+    static let wechatSidebarDefault: Double = 340
+    /// 会话标题条高（点）。
+    static let wechatTitleBarKey = "adapter.wechat.titleBarHeight"
+    static let wechatTitleBarDefault: Double = 60
+    /// 底部输入框（含工具条）高（点）。
+    static let wechatComposerKey = "adapter.wechat.composerHeight"
+    static let wechatComposerDefault: Double = 180
+
+    /// 读一个"点数"参数。非法值（≤ 0 / NaN / 大得不像话）一律退回默认值——
+    /// 这些数会直接变成截图裁剪的边界，宁可用默认的也不能让它变成负宽度。
+    static func resolvePoints(_ key: String, default fallback: Double, maximum: Double,
+                              _ defaults: UserDefaults = .standard) -> Double {
+        guard defaults.object(forKey: key) != nil else { return fallback }
+        let raw = defaults.double(forKey: key)
+        guard raw.isFinite, raw > 0, raw <= maximum else { return fallback }
+        return raw
+    }
+
     /// 微信：原生应用，AX 为空且超时多（M0：6 条观察 0 字符、2 条超时）。
     /// 规则直接走视口 OCR：聊天面板一块、顶部会话名一块（主窗口标题恒为"微信"，
-    /// 会话级排除必须从这里拿到会话名，计划 3.3）。
+    /// 会话名与群聊判定都只能从这里拿，计划 3.3）。
     ///
-    /// 相对矩形是按微信 Mac 版的三栏布局取的：左侧会话列表约占 0.22 宽，
-    /// 顶部标题条约占 0.08 高，底部输入框约占 0.22 高——聊天面板取中间那块。
+    /// 区域按**点数**从窗口边缘内缩（M2 修正，原来用的是比例，见 `WindowInset`）：
+    /// 左边让开侧栏、上边让开标题条、下边让开输入框，剩下的就是聊天面板；
+    /// 会话名是顶部那一条，同样让开侧栏。
     static let wechat = AdapterRule(
         id: "wechat",
         name: "微信",
@@ -98,21 +123,38 @@ enum AdapterRegistry {
         electron: false,
         regions: [
             RegionRule(name: "chat_panel", kind: .messageList,
-                       locator: .relativeRect(RelativeRect(x: 0.22, y: 0.08,
-                                                           width: 0.78, height: 0.70)),
+                       locator: .insetRect(WindowInset(
+                           left: resolvePoints(wechatSidebarKey,
+                                               default: wechatSidebarDefault, maximum: 900),
+                           top: resolvePoints(wechatTitleBarKey,
+                                              default: wechatTitleBarDefault, maximum: 200),
+                           bottom: resolvePoints(wechatComposerKey,
+                                                 default: wechatComposerDefault, maximum: 500),
+                           minWidth: 240, minHeight: 120,
+                           fallback: RelativeRect(x: 0.22, y: 0.08,
+                                                  width: 0.78, height: 0.70))),
                        read: .ocr, ocrFallback: false, required: true, clipToViewport: true),
             RegionRule(name: "conversation_title", kind: .title,
-                       locator: .relativeRect(RelativeRect(x: 0.22, y: 0.0,
-                                                           width: 0.78, height: 0.08)),
+                       locator: .insetRect(WindowInset(
+                           left: resolvePoints(wechatSidebarKey,
+                                               default: wechatSidebarDefault, maximum: 900),
+                           maxHeight: resolvePoints(wechatTitleBarKey,
+                                                    default: wechatTitleBarDefault, maximum: 200),
+                           minWidth: 240, minHeight: 24,
+                           fallback: RelativeRect(x: 0.22, y: 0.0,
+                                                  width: 0.78, height: 0.08))),
                        read: .ocr, ocrFallback: false, required: false, clipToViewport: true,
                        maxChars: 256),
         ],
         chatLayout: ChatLayout(),
         limits: AX.BFSLimits(maxNodes: 300, maxDepth: 6),
         notes: "原生应用但 AX 正文为空（M0：0 字符、6 条里 2 条超时），所以 AX 一路都不走。"
-             + "气泡归属按坐标：单聊左 = 对方、右 = 自己；群聊取气泡上方昵称。"
+             + "区域按点数内缩（侧栏 340 / 标题条 60 / 输入框 180，均可用 defaults 校准）；"
+             + "M2 之前用的是比例，在 1085 pt 宽的窗口上把半个会话列表当成了聊天面板。"
+             + "气泡归属按坐标：单聊左 = 对方、右 = 自己；群聊取气泡上方昵称，"
+             + "是不是群聊由会话名的人数后缀「（29）」判定（AX 与窗口标题都给不出这个信号）。"
              + "语音只记 [语音]；图片、表情、视频、小程序只记画面上显示的文字。"
-             + "相对矩形是按三栏布局估的，用户改了窗口比例或开了免打扰浮层会偏；"
+             + "用户拖过会话列表分隔线、或开了免打扰浮层，仍需重新校准侧栏宽度；"
              + "支付 / 转账 / 红包界面与聊天一起记录，不特殊处理（D14 已定）。")
 
     // MARK: - 兜底
