@@ -356,7 +356,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(disabledItem("写入：\(recorder.stats.summary)"))
         menu.addItem(disabledItem("屏幕录制：\(permissions.screenRecording ? "已授权" : "未授权")"))
         menu.addItem(disabledItem("辅助功能：\(permissions.accessibility ? "已授权" : "未授权")"))
-        menu.addItem(disabledItem(focus?.menuDescription ?? "Focus 联动：未启动"))
+        if let focus, focus.needsFullDiskAccess {
+            // TCC 不会为「完全磁盘访问」弹窗，只能用户自己去勾——给一个一键直达设置页的入口。
+            let item = NSMenuItem(title: "Focus 联动不可用：点此打开「完全磁盘访问」设置，勾上 brosis…",
+                                  action: #selector(openFullDiskAccessSettings), keyEquivalent: "")
+            item.target = self
+            item.toolTip = focus.menuDescription
+            menu.addItem(item)
+        } else {
+            menu.addItem(disabledItem(focus?.menuDescription ?? "Focus 联动：未启动"))
+        }
         menu.addItem(disabledItem(HotKeys.shared.menuDescription))
         if let capture, capture.isRunning, let displayID = capture.currentDisplayID {
             let stats = capture.currentStats
@@ -562,6 +571,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         CapturePolicyStore.shared.clearNewAppNotice(bundleID: bundleID)
         PoliciesWindowController.shared.present(select: bundleID)
         refreshMenu()
+    }
+
+    /// 打开「系统设置 → 隐私与安全性 → 完全磁盘访问」。勾上之后不用重启：FocusMonitor 每次轮询都重新 open 文件。
+    @objc private func openFullDiskAccessSettings() {
+        NSWorkspace.shared.open(FocusMonitor.fullDiskAccessSettingsURL)
+        recorder.logEvent(kind: "focus_fda_settings_opened")
+        // 给用户几秒去勾选，然后主动探一次，菜单下次打开就是新状态。
+        DispatchQueue.main.asyncAfter(deadline: .now() + 15) { [weak self] in
+            self?.focus?.poll(force: true)
+            self?.refreshMenu()
+        }
     }
 
     @objc private func requestPermissions() {
