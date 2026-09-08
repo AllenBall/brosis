@@ -65,7 +65,8 @@ enum MCPIntegrationCLI {
         }
         do {
             // store 传 nil：grant 不在这里发，交给 brosis-mcp（它经 IPC 连正在跑的 app）。
-            let outcome = try MCPIntegration.setEnabled(enabled, harness: harness, store: nil)
+            let outcome = try MCPIntegration.setEnabled(enabled, harness: harness, store: nil,
+                                                        grantHandledExternally: true)
             print("配置：\(outcome.summary)")
             if let snippet = outcome.manualSnippet {
                 print("写不了，请手动加：\n\(snippet)")

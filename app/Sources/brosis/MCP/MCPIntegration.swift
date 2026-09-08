@@ -97,7 +97,10 @@ enum MCPIntegration {
 
     /// 打开 / 关闭一个 harness 的集成。
     /// 顺序：先动配置（失败就整个不做），再动 grant——反过来会留下"有授权没入口"的悬空状态。
-    static func setEnabled(_ enabled: Bool, harness: Harness, store: Store?) throws -> Outcome {
+    /// `grantHandledExternally`：命令行入口把 grant 交给 `brosis-mcp admin grant`（经 IPC 连
+    /// 正在跑的 app），所以那边传 `store: nil` 不代表"库没开"，不该提示用户解锁后重来。
+    static func setEnabled(_ enabled: Bool, harness: Harness, store: Store?,
+                           grantHandledExternally: Bool = false) throws -> Outcome {
         let command = HarnessCatalog.serverCommand()
         let entry = MCPConfigWriter.Entry(name: HarnessCatalog.serverName, command: command,
                                           includeStdioType: harness.format == .mcpServersJSON
@@ -134,7 +137,7 @@ enum MCPIntegration {
             } else if try store.removeGrant(clientID: harness.id) {
                 notes.append("已撤销 grant（client=\(harness.id)）")
             }
-        } else {
+        } else if !grantHandledExternally {
             notes.append("库没开，grant 没动——解锁后再开一次")
         }
         return Outcome(summary: notes.joined(separator: "；"), manualSnippet: snippet)
