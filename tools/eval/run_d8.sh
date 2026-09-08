@@ -18,7 +18,8 @@
 # 所以比较仍然成立；绝对值会比满档语料乐观（干扰项少了约 3 倍），结果文件里写明了这一点。
 #
 # 需要：Xcode（core 与 app 都是 SwiftPM 包）+ Metal Toolchain（app 要现编 mlx.metallib）
-#      + 已安装的 Qwen3-Embedding-0.6B-8bit（脚本会从 --model-source 目录导入并重新校验 sha256）。
+#      + 已安装的嵌入模型（D30 起默认 Qwen3-Embedding-4B-4bit-DWQ；
+#        脚本会从 --model-source 目录导入并重新校验 sha256）。
 set -e
 
 PROJECT="${PROJECT:-$(cd "$(dirname "$0")/../.." && pwd)}"
@@ -32,7 +33,7 @@ DAYS="${DAYS:-30}"
 PER_DAY="${PER_DAY:-2880}"
 AVG_CHARS="${AVG_CHARS:-500}"
 SEED="${SEED:-20260907}"
-MODEL_ID="${MODEL_ID:-Qwen3-Embedding-0.6B-8bit}"
+MODEL_ID="${MODEL_ID:-Qwen3-Embedding-4B-4bit-DWQ}"   # D30：多尺寸，用 MODEL_ID 换
 MODEL_SOURCE="${MODEL_SOURCE:-$HOME/Library/Application Support/brosis-m0/models/$MODEL_ID}"
 E="$PROJECT/tools/eval"
 PY="env PYTHONDONTWRITEBYTECODE=1 python3"

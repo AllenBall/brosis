@@ -1396,7 +1396,9 @@ public protocol EmbeddingProvider: AnyObject, Sendable {
 
 **维度 512、元素 int8、距离 cosine**，理由分别是：
 
-* **512**：E9 实测 Qwen3-Embedding-0.6B 的 MRL 截断保真——原生 1024 维，截到 512 维
+* **1024**（D30，schema v9 从 512 改上来）：清单里是 Qwen3-Embedding 4B（原生 2560）与 8B（原生 4096），
+  两者都 MRL 截到同一个维度，换模型只需重建向量、不用改表。512 是 0.6B 时代的选择——
+  E9 实测 Qwen3-Embedding-0.6B 原生 1024 维，截到 512 维
   Recall@10 = 0.925、256 维 0.90（`tools/bench/results/e9_runtime_2026-09-07.md`、
   报告 11.2 第 7 条）。512 在几乎不掉保真的前提下把向量体积减半。
   截断口径 = 取前 512 维再重新 L2 归一化。

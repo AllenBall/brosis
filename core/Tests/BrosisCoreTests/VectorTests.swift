@@ -78,7 +78,7 @@ final class VectorTests: XCTestCase {
         let status = try fixture.store.vectorStatus()
         XCTAssertTrue(status.tablePresent, "vec_chunks 必须建出来")
         XCTAssertTrue(status.extensionRegistered, "sqlite-vec 必须注册成功")
-        XCTAssertEqual(status.dimension, 512)
+        XCTAssertEqual(status.dimension, SchemaV4.dimension, "D30：统一维度，改常数要同时加迁移")
         XCTAssertEqual(status.elementType, "int8")
         XCTAssertEqual(status.sqliteVecVersion, "v0.1.9")
         XCTAssertNil(status.model, "没跑过嵌入任务时 model 必须是 nil（＝功能未启用）")
@@ -457,7 +457,7 @@ final class VectorTests: XCTestCase {
         // 人为造两种坏状态：孤儿向量行 + 标了已嵌入却没有向量行
         // 注意：SQLite 的 subtype 不跨子查询传播，所以不能 `SELECT vec_int8(embedding) FROM …`
         // 再插回去（实测报 "expected int8, but float32 was provided"）。
-        // 直接在 VALUES 里现造一条 512 字节的 int8 全零向量即可。
+        // 直接在 VALUES 里现造一条 SchemaV4.dimension 字节的 int8 全零向量即可。
         try store.rawExecForTests(
             "INSERT INTO vec_chunks(chunk_rowid, embedding) "
             + "VALUES (999999, vec_int8(zeroblob(\(SchemaV4.dimension))));")

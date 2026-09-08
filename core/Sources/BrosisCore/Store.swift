@@ -260,6 +260,9 @@ public final class Store: @unchecked Sendable {
             try conn.exec(SchemaV8.createAllForNewDatabase)
             try conn.run("INSERT INTO migrations(version, applied_at, note) VALUES (?,?,?);",
                          [.int(8), .int(now), .text(SchemaV8.note)])
+            // v9（D30）：新库的 vec_chunks 上面已经按新维度建好了，这里只补审计行。
+            try conn.run("INSERT INTO migrations(version, applied_at, note) VALUES (?,?,?);",
+                         [.int(9), .int(now), .text(SchemaV9.note)])
         }
     }
 
@@ -384,6 +387,22 @@ public final class Store: @unchecked Sendable {
                            + "ON CONFLICT(version) DO UPDATE "
                            + "SET applied_at = excluded.applied_at, note = excluded.note;",
                              [.int(8), .int(now), .text(SchemaV8.note + "，由 v\(found) 就地迁移")])
+            }
+        }
+        // v9（D30）：向量维度 512 → 1024。vec0 虚拟表的维度写死在建表语句里，只能 drop 重建；
+        // chunks 与 embed_* meta 一起清掉，夜间嵌入任务下次从头跑。派生数据，证据不受影响。
+        if found < 9 {
+            try conn.transaction {
+                try conn.exec(SchemaV9.dropVecChunks)
+                try conn.exec(SchemaV4.createVecChunks)
+                try conn.exec(SchemaV9.clearChunks)
+                let keys = SchemaV9.metaKeysToClear
+                try conn.run("DELETE FROM meta WHERE key IN (?,?,?,?);", keys.map { .text($0) })
+                try conn.run("UPDATE meta SET value = '9' WHERE key = 'schema_version';")
+                try conn.run("INSERT INTO migrations(version, applied_at, note) VALUES (?,?,?) "
+                           + "ON CONFLICT(version) DO UPDATE "
+                           + "SET applied_at = excluded.applied_at, note = excluded.note;",
+                             [.int(9), .int(now), .text(SchemaV9.note + "，由 v\(found) 就地迁移")])
             }
         }
     }

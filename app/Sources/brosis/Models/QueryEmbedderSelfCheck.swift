@@ -254,7 +254,7 @@ enum QueryEmbedderSelfCheck {
                   overnight.usedToday(now: day.addingTimeInterval(86_400 * 2)) == 0)
         }
 
-        print("      查询嵌入器：模型 \(Catalog.embeddingModelID)、批构造固定 1、"
+        print("      查询嵌入器：模型 \(QueryEmbedderService.shared.currentModelDescription)、批构造固定 1、"
               + "空闲 \(Int(QueryEmbedderPolicy.idleUnloadSeconds)) s 卸载、"
               + "cacheLimit \(MLXMemoryPolicy.defaultCacheLimitMiB) MiB（D27）；"
               + "开关键 \(QueryEmbedderService.vectorsEnabledKey)；"

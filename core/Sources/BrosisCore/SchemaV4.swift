@@ -11,24 +11,29 @@ import Foundation
 /// 没有嵌入模型时 `chunks` 里一行都不会有，检索也一次向量调用都不会发（3.11 的「未安装时显示未启用」）。
 public enum SchemaV4 {
 
-    /// 向量维度：**512**。
+    /// 向量维度：**1024**（2026-09-08 / D30 从 512 改上来，schema v9）。
     ///
-    /// 依据是 E9 在本机实测的 MRL（Matryoshka）截断保真
-    /// （`tools/bench/results/e9_runtime_2026-09-07.md`，报告 v1.1 11.2 第 7 条）：
-    /// Qwen3-Embedding-0.6B 原生 1024 维，截到 **512 维 Recall@10 = 0.925**、256 维 0.90。
-    /// 512 维在保真几乎不掉的前提下把向量体积减半，所以取 512 而不是 1024 / 256。
-    /// 截断口径 = 取前 512 维再重新 L2 归一化（`EmbeddingVector.truncateNormalize`）。
-    public static let dimension = 512
+    /// 口径：**所有尺寸的嵌入模型都截到同一个维度**，这样换模型只需要重建向量、不用改表。
+    /// D30 去掉 0.6B（原生 1024）之后清单里是 4B（原生 2560）与 8B（原生 4096），
+    /// 两者都能 MRL 截到 1024；再往上取（1536 / 2560）就会把将来 1024 维的模型挡在外面。
+    /// 512 是 0.6B 时代的选择（E9 实测截到 512 维 Recall@10 = 0.925、256 维 0.90，
+    /// `tools/bench/results/e9_runtime_2026-09-07.md`）——换成大模型后再砍到 512
+    /// 等于把升级的收益丢掉一半，所以取 1024。存储代价 1 KiB/块（int8），是 512 的两倍。
+    /// 截断口径 = 取前 1024 维再重新 L2 归一化（`EmbeddingVector.truncateNormalize`）。
+    ///
+    /// **改这个常数必须同时加一版 schema 迁移**：`vec_chunks` 的维度写死在建表语句里，
+    /// 老库要 drop 掉重建并清空 `chunks`（见 `Store.migrateIfNeeded` 的 v9）。
+    public static let dimension = 1024
 
     /// 元素类型：**int8**（`vec0` 的 `int8[512]`），距离度量 **cosine**。
     ///
-    /// - 为什么 int8 而不是 float32：512 维 float32 = 2 KiB/块，int8 = 512 B/块。
-    ///   1 个月合成库约 10 万个块，两者是 200 MiB 与 50 MiB 的差别，
+    /// - 为什么 int8 而不是 float32：1024 维 float32 = 4 KiB/块，int8 = 1 KiB/块。
+    ///   1 个月合成库约 10 万个块，两者是 400 MiB 与 100 MiB 的差别，
     ///   直接影响 D21 的 0.6 GiB/月目标。
     /// - 为什么量化不会破坏结果：`vec0` 的 `distance_cosine_int8` 是
     ///   `1 - dot/(|a||b|)`，**对整体缩放不敏感**，所以每条向量可以各自用
     ///   `s = 127 / max|v_i|` 缩放到满量程再取整（见 `EmbeddingVector.quantizeInt8`）。
-    ///   固定用 127 会很糟：L2 归一化的 512 维向量分量典型只有 ±0.04，
+    ///   固定用 127 会很糟：L2 归一化的 1024 维向量分量典型只有 ±0.03，
     ///   乘 127 之后只剩十来个量化档。
     /// - sqlite-vec v0.1.9 只支持 float32 / int8 / bit 三种元素类型，**没有 float16**。
     public static let elementType = "int8"

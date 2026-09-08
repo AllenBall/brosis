@@ -55,9 +55,9 @@ public struct CatalogModel: Codable, Sendable {
     }
 
     /// 这一项是不是本项目**已批准**的模型。
-    /// 计划 3.11 允许"高级入口手填任意 HF 仓库 id"，但那条路标记为未验证；
-    /// 本轮（M2 c）只放行清单里这两项，界面上其余项一律置灰。
-    public var isApproved: Bool { Catalog.approvedIDs.contains(id) }
+    /// 计划 3.11 允许"高级入口手填任意 HF 仓库 id"，但那条路标记为未验证。
+    /// D30 起批准的是**整个 Qwen3-Embedding 家族**（多个尺寸可下载、可切换），不再是写死的两个 id。
+    public var isApproved: Bool { Catalog.isApprovedID(id) }
 }
 
 public struct Catalog: Codable, Sendable {
@@ -66,13 +66,14 @@ public struct Catalog: Codable, Sendable {
     public let note: String?
     public let models: [CatalogModel]
 
-    /// 用户已批准、已下载的模型。
-    /// 2026-09-08 起只剩嵌入模型：用户决定不要叙述功能，生成模型（D19 的 Qwen3.5-4B）
-    /// 连同清单条目一起去掉，`Catalog.generationModelID` 只留给休眠的叙述代码引用。
-    public static let approvedIDs: Set<String> = ["Qwen3-Embedding-0.6B-8bit"]
+    /// 用户已批准的模型家族（D30，2026-09-08）：**Qwen3-Embedding 全系列**，
+    /// 允许联网下载、允许在面板里切换尺寸。0.6B 由用户决定去掉（太小），清单里不再列。
+    /// D29 之后清单里没有生成模型；`Catalog.generationModelID` 只留给休眠的叙述代码引用。
+    public static let approvedPrefixes: [String] = ["Qwen3-Embedding-"]
 
-    /// 嵌入模型的固定 id（3.4「模型固定为 Qwen3-Embedding-0.6B」）。
-    public static let embeddingModelID = "Qwen3-Embedding-0.6B-8bit"
+    public static func isApprovedID(_ id: String) -> Bool {
+        approvedPrefixes.contains { id.hasPrefix($0) }
+    }
 
     public static func load() throws -> Catalog {
         guard let url = ModelResources.url(named: "catalog.json") else {
@@ -90,8 +91,50 @@ public struct Catalog: Codable, Sendable {
         return m
     }
 
-    public var embeddingModel: CatalogModel? {
-        models.first { $0.id == Catalog.embeddingModelID }
+    /// 清单里的全部嵌入模型，按清单顺序（面板按这个顺序显示；小的排前面）。
+    public var embeddingModels: [CatalogModel] { models.filter { $0.purpose == "embedding" } }
+
+    /// 兜底用的"默认嵌入模型"＝清单里第一个。真正生效的是 `EmbeddingSelection.effectiveID`。
+    public var embeddingModel: CatalogModel? { embeddingModels.first }
+}
+
+/// 当前生效的嵌入模型（D30：清单里有多个尺寸，用户可以在面板里切换）。
+///
+/// **向量不能跨模型比较**：换模型等于整个向量索引作废，所以切换动作必须伴随一次
+/// `Store.rebuildEmbeddings()`（面板负责问一句再做）。库里的 `meta.embed_model`
+/// 记着索引是用哪个模型建的，检索侧据此判断索引是不是过期。
+public enum EmbeddingSelection {
+
+    /// UserDefaults 键，写模型 id。没写过就按"第一个装着的"推断。
+    public static let defaultsKey = "models.embedding.current"
+
+    public static func selectedID(_ defaults: UserDefaults = .standard) -> String? {
+        let v = defaults.string(forKey: defaultsKey)?.trimmingCharacters(in: .whitespaces)
+        return (v?.isEmpty == false) ? v : nil
+    }
+
+    public static func select(_ id: String?, defaults: UserDefaults = .standard) {
+        if let id, !id.isEmpty { defaults.set(id, forKey: defaultsKey) }
+        else { defaults.removeObject(forKey: defaultsKey) }
+    }
+
+    /// 装着（或关联着）的嵌入模型 id：清单里的 + 关联进来的清单外的。
+    public static func installedIDs(catalog: Catalog?, root: URL?) -> [String] {
+        guard let root else { return [] }
+        let catalogIDs = (catalog?.embeddingModels.map(\.id)) ?? []
+        let onDisk = ModelStore.installedIDs(root: root)
+        // 清单顺序优先，清单外的按名字排在后面。
+        return catalogIDs.filter(onDisk.contains) + onDisk.filter { !catalogIDs.contains($0) }
+    }
+
+    /// 实际生效的模型 id。顺序：用户选过且它还装着 → 第一个装着的 → 用户选过的（还没装）→ 清单第一个。
+    /// 返回 nil 表示一个嵌入模型都没有（向量检索显示未启用，3.11 降级表）。
+    public static func effectiveID(catalog: Catalog?, root: URL?,
+                                   defaults: UserDefaults = .standard) -> String? {
+        let installed = installedIDs(catalog: catalog, root: root)
+        if let chosen = selectedID(defaults), installed.contains(chosen) { return chosen }
+        if let first = installed.first { return first }
+        return selectedID(defaults) ?? catalog?.embeddingModel?.id
     }
 }
 

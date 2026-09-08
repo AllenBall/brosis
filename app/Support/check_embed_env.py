@@ -31,13 +31,14 @@ def main() -> int:
         problems.append("sqlite-vec 没注册成功")
     # 2026-09-08（D29）：叙述下架后清单里只剩嵌入模型，判据从"至少 2 项"改成
     # "嵌入模型必须在、生成模型必须不在"——这才是闸门真正要守的东西。
+    # D30：嵌入模型改成多尺寸（Qwen3-Embedding 系列）可切换，所以按前缀判，不写死某个 id。
     models = data.get("catalog_models") or []
-    if "Qwen3-Embedding-0.6B-8bit" not in models:
-        problems.append("模型清单里没有嵌入模型：%r" % (models,))
+    if not any(m.startswith("Qwen3-Embedding-") for m in models):
+        problems.append("模型清单里没有 Qwen3-Embedding 系列的嵌入模型：%r" % (models,))
     if any("Qwen3.5" in m or "gemma" in m for m in models):
         problems.append("模型清单里还有生成模型（叙述已下架，D29）：%r" % (models,))
-    if data.get("vector_dimension") != 512:
-        problems.append("向量维度不是 512：%r" % data.get("vector_dimension"))
+    if data.get("vector_dimension") != 1024:
+        problems.append("向量维度不是 1024（D30 统一维度）：%r" % data.get("vector_dimension"))
 
     if problems:
         for line in problems:

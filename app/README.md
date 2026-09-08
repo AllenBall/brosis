@@ -1386,10 +1386,33 @@ menu.addItem(ModelsMenu.menuItem())
 
 ### 13.2 默认零模型，未安装时功能显示为「未启用」（3.11）
 
-app **不内置、不自动下载**任何模型。清单 `catalog.json` 随包，**运行时不联网拉清单**；
-**2026-09-08（D29）叙述下架后清单里只剩一项**：`Qwen3-Embedding-0.6B-8bit`（嵌入，619.02 MiB，
-最低 8 GiB）。原来的两个生成模型（`Qwen3.5-4B-MLX-4bit`、`gemma-4-26B-A4B-it-QAT-MLX-4bit`）
-连同「夜间叙述」菜单入口一起去掉了，第 14 节的代码仍在但不接线。
+app **不内置、不自动下载**任何模型。清单 `catalog.json` 随包，**运行时不联网拉清单**。
+D29 叙述下架后清单里没有生成模型；**D30（2026-09-08）起嵌入模型是多尺寸、可切换**：
+
+| 清单项 | 体积 | 原生维度 | 最低内存 | 说明 |
+|---|---|---|---|---|
+| `Qwen3-Embedding-4B-4bit-DWQ` | 2.12 GiB | 2560 | 8 GiB | 日常首选；Air 上可用 |
+| `Qwen3-Embedding-8B-4bit-DWQ` | 3.98 GiB | 4096 | 16 GiB | 质量最好、最慢，建议大内存机器 |
+
+0.6B 按用户决定去掉了。两者都 **MRL 截断到统一的 1024 维**（`SchemaV4.dimension`，schema v9
+从 512 改上来）——所有尺寸落到同一维度，换模型只要重建向量、不用改表。
+
+**模型从哪来（三条路）**：
+1. **下载**：面板里的「下载」按钮，或 `brosis-embed models --download --id <清单 id>`。
+   走 `HFDownloader`：探测直连与 hf-mirror 选快的、HTTP Range 断点续传、逐文件 sha256、
+   全部通过后整目录原子提交。只放行已批准家族 `Qwen3-Embedding-*` 的清单项（`Catalog.isApprovedID`）。
+2. **从本地目录导入**：复制进模型目录，逐文件 sha256（老路，没变）。
+3. **关联外部目录（D30 新增）**：`ModelStore.linkExternal`，**一个字节都不复制**，
+   模型根目录下只放一个含 `installed.json` 的标记目录，`linkedPath` 指向真实位置
+   （例如 LM Studio 的 `~/.lmstudio/models/mlx-community/…`）。外部目录的量化版本和文件集
+   跟清单不一样，所以校验不是 sha256 而是**结构校验**：`config.json` 的 `model_type`、
+   `hidden_size ≥ 1024`、有 `.safetensors`、有分词器；**GGUF 会明确报错**（mlx 只吃 safetensors）。
+   每次列清单都复查一遍，外部目录被删 / 体积变了就显示「关联失效」，向量检索按 3.11 降级；
+   「移除」只删标记目录，**绝不动外部目录**。
+
+**切换模型**：面板里选中一行点「设为当前模型」（`models.embedding.current`）。
+向量不能跨模型比较，所以库里已经有别的模型建的向量时会先问一句，确认后清空索引重建。
+加载路径一律走 `ModelStore.weightsDirectory(root:id:)`（关联的模型指向外部目录）。
 
 面板里能做四件事：**从本地目录导入**（复制进来 + 逐文件校验 sha256，只复制不引用）、
 **重新校验**、**移除**、**现在跑一次嵌入任务**。
@@ -1442,6 +1465,7 @@ app **不内置、不自动下载**任何模型。清单 `catalog.json` 随包�
 | `embedding.overnightGPUSecondsUsed` / `embedding.overnightGPUSecondsDay` | — | **整晚建索引单独的一本账**（M2 d / T15，不占上面那 600 s 预算） |
 | `retrieval.vectorsEnabled` | false | 检索里用不用向量。**M2 d / T15 起解锁时会从这里恢复到 `store.retrieval`**（模型没装则强制关，3.11） |
 | `models.directory` | — | 模型根目录（不设就是数据目录里的 `models/`） |
+| `models.embedding.current` | — | 当前生效的嵌入模型 id（D30；不设就取第一个装着的） |
 | `models.allowDownload` | false | 面板里是否显示下载入口 |
 
 ### 13.5 打包（`build_app.sh` 新增的三件事）
@@ -1465,7 +1489,7 @@ APP=~/Library/Caches/brosis-build/<你的 scratch>/brosis.app
 "$APP/Contents/MacOS/brosis-embed" env
 "$APP/Contents/MacOS/brosis-embed" models --dir <数据目录> --list
 "$APP/Contents/MacOS/brosis-embed" models --dir <数据目录> --import \
-    --id Qwen3-Embedding-0.6B-8bit --from <已下载好的模型目录>
+    --id Qwen3-Embedding-4B-4bit-DWQ --from <已下载好的模型目录>
 "$APP/Contents/MacOS/brosis-embed" embed --dir <数据目录> --key-file <密钥> --batch 16
 "$APP/Contents/MacOS/brosis-embed" queries --file <[{"id","q"}…]> --out <向量表.json> \
     --models-dir <模型目录>
@@ -1484,7 +1508,7 @@ core 的 `swift test` 一条都不碰模型（那边用确定性伪嵌入），�
 ```
 
 **十一条**断言（前六条 M2 c / T11，后五条 M2 d / T15），本机
-（Qwen3-Embedding-0.6B-8bit）实测全过：
+（D30 之前是 Qwen3-Embedding-0.6B-8bit）实测全过：
 
 | 断言 | 实测 |
 |---|---|

@@ -26,19 +26,21 @@ enum ModelsSelfCheck {
             let catalog = try Catalog.load()
             check("模型清单随包读得到", !catalog.models.isEmpty,
                   "\(catalog.models.count) 项，schemaVersion \(catalog.schemaVersion)")
-            // 2026-09-08：用户决定不要叙述，生成模型连同清单条目一起去掉，
-            // 清单里只剩嵌入模型（叙述代码留在 core 里休眠，不接线、不列清单）。
+            // D29：叙述下架，清单里没有生成模型。
+            // D30：嵌入模型多尺寸可切换，已批准的是整个 Qwen3-Embedding 家族。
             let approved = catalog.models.filter(\.isApproved)
-            check("清单里只有嵌入模型这一个已批准项", approved.map(\.id) == [Catalog.embeddingModelID],
-                  approved.isEmpty ? "一个都没有" : approved.map(\.id).joined(separator: " "))
+            check("清单里的每一项都是已批准的 Qwen3-Embedding（D30）",
+                  !catalog.models.isEmpty && approved.count == catalog.models.count,
+                  catalog.models.map { "\($0.id)\($0.isApproved ? "" : "(未批准)")" }
+                      .joined(separator: " "))
             check("清单里不再有生成模型（叙述已下架）",
                   !catalog.models.contains { $0.purpose == "generation" },
                   catalog.models.map { "\($0.id)(\($0.purpose))" }.joined(separator: " "))
-            let embedding = catalog.embeddingModel
-            check("嵌入模型固定为 \(Catalog.embeddingModelID)（3.4）",
-                  embedding?.id == Catalog.embeddingModelID && embedding?.purpose == "embedding",
-                  embedding.map { "\($0.id)，\($0.files.count) 个文件，"
-                                  + ModelBytes.human($0.totalBytes ?? 0) } ?? "缺失")
+            let embeddings = catalog.embeddingModels
+            check("嵌入模型有多个尺寸可选（D30：面板里切换，向量维度统一 \(SchemaV4.dimension)）",
+                  embeddings.count >= 2 && embeddings.allSatisfy { !$0.files.isEmpty },
+                  embeddings.map { "\($0.id) \(ModelBytes.human($0.totalBytes ?? 0))" }
+                      .joined(separator: "；"))
             // 内存不够的项必须置灰并说明原因（3.11「不符合本机内存的项置灰并说明原因」）
             let tooBig = catalog.models.filter { !$0.fitsThisMachine }
             check("内存不够的清单项置灰并给出原因",
@@ -87,10 +89,48 @@ enum ModelsSelfCheck {
               legacyLeftovers.isEmpty
                   ? "旧目录不在了或已空"
                   : "还剩 \(legacyLeftovers.joined(separator: " "))，app 下次解锁时搬（有 installed.json 的才搬）")
-        let installed = ModelStore.isInstalled(root: resolved.url, id: Catalog.embeddingModelID)
+        // D30：当前生效的模型由「用户选过的 → 第一个装着的」决定，这里把解析结果打出来。
+        let catalogForSelection = try? Catalog.load()
+        let effective = EmbeddingSelection.effectiveID(catalog: catalogForSelection, root: resolved.url)
+        let installedIDs = EmbeddingSelection.installedIDs(catalog: catalogForSelection,
+                                                          root: resolved.url)
+        let installed = effective.map { ModelStore.isInstalled(root: resolved.url, id: $0) } ?? false
         check("未安装嵌入模型时功能显示为「未启用」（3.11 降级表）", true,
-              installed ? "本机已装 \(Catalog.embeddingModelID)"
+              installed ? "本机已装 \(installedIDs.joined(separator: " "))，当前生效 \(effective ?? "?")"
                         : "本机未装嵌入模型 ⇒ 向量检索显示未启用，精确字段与 FTS 不受影响")
+        // 选择规则（D30）：在**临时模型根目录 + 临时 UserDefaults 域**上跑三条对照，
+        // 造两个假的"已装"模型（只要有 installed.json 就算装着），不碰真实设置与真实权重。
+        let selectionSuite = "brosis-selcheck-\(ProcessInfo.processInfo.processIdentifier)"
+        if let suite = UserDefaults(suiteName: selectionSuite), let catalogForSelection {
+            let fakeRoot = FileManager.default.temporaryDirectory
+                .appending(path: selectionSuite, directoryHint: .isDirectory)
+            defer {
+                try? FileManager.default.removeItem(at: fakeRoot)
+                UserDefaults().removePersistentDomain(forName: selectionSuite)
+            }
+            var ok = true
+            for id in ["fake-A", "fake-B"] {
+                let dir = fakeRoot.appending(path: id, directoryHint: .isDirectory)
+                do {
+                    try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+                    try Data("{}".utf8).write(to: dir.appending(path: "installed.json"))
+                } catch { ok = false }
+            }
+            func effective() -> String? {
+                EmbeddingSelection.effectiveID(catalog: catalogForSelection, root: fakeRoot,
+                                               defaults: suite)
+            }
+            EmbeddingSelection.select("fake-B", defaults: suite)
+            let chosenAndInstalled = effective()
+            EmbeddingSelection.select("模型-并不存在", defaults: suite)
+            let chosenButMissing = effective()
+            EmbeddingSelection.select(nil, defaults: suite)
+            let neverChosen = effective()
+            check("选择规则三条：选过且装着 ⇒ 用它；选过没装 ⇒ 退回第一个装着的；没选过 ⇒ 第一个装着的（D30）",
+                  ok && chosenAndInstalled == "fake-B" && chosenButMissing == "fake-A"
+                     && neverChosen == "fake-A",
+                  "\(chosenAndInstalled ?? "nil") / \(chosenButMissing ?? "nil") / \(neverChosen ?? "nil")")
+        }
 
         // ------------------------------------------------------------ 3. 向量索引往返（v4）
         let workspace = FileManager.default.temporaryDirectory

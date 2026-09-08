@@ -9,10 +9,10 @@ import Foundation
 // 三条口径写在最前面：
 // 1. **默认零模型**（3.11）：app 不内置、不自动下载任何模型。这个面板打开之前，
 //    向量检索一律显示"未启用"，其余功能完全不受影响。
-// 2. **本轮只放行本地导入**：清单里的条目是用户已批准并下载好的模型（2026-09-08 起只剩嵌入模型，D29）；
-//    下载器代码在 `BrosisModels/Downloader.swift`（E9 实测过），但这个面板里的
-//    「下载」按钮**默认禁用**，要在设置里显式打开 `models.allowDownload`——
-//    本轮的硬约束是「不下载未批准的模型」。
+// 2. **三条来源（D30）**：清单里的条目可联网下载（下载器在 `BrosisModels/Downloader.swift`，
+//    E9 实测过；默认允许，把 `models.allowDownload` 设成 false 可彻底禁网），
+//    也可以从本地目录导入（复制）或关联外部目录（不复制，例如 LM Studio 的 MLX 模型目录）。
+//    只放行已批准家族 `Qwen3-Embedding-*` 的清单项；清单外的目录只能"关联"，标记为未验证。
 // 3. **不改 AppDelegate**：菜单项由 `ModelsMenu.menuItem()` 造好，
 //    由主会话在 `refreshMenu()` 里插一行。接入方式见
 //    tools/bench/results/m2_c_vectors_2026-09-08.md。
@@ -49,8 +49,12 @@ final class ModelsWindowController: NSObject, NSWindowDelegate,
 
     static let shared = ModelsWindowController()
 
-    /// 允许在面板里下载（默认关，本轮硬约束「不下载未批准的模型」）。
+    /// 允许在面板里联网下载。**D30 起默认开**：用户批准了 Qwen3-Embedding 全系列可下载；
+    /// 想彻底禁掉联网下载就把这个键设成 false（清单外的模型仍然一律不下）。
     static let allowDownloadKey = "models.allowDownload"
+    static var allowDownload: Bool {
+        UserDefaults.standard.object(forKey: allowDownloadKey) as? Bool ?? true
+    }
 
     private var recorder: Recorder?
     private var lockSnapshot: (@Sendable () -> LockSnapshot)?
@@ -85,6 +89,8 @@ final class ModelsWindowController: NSObject, NSWindowDelegate,
     struct PanelState {
         var modelsRoot: URL?
         var modelsRootSource: String = "default"
+        /// D30：当前生效的嵌入模型 id（用户选过的 → 第一个装着的）。nil = 一个都没装。
+        var currentModelID: String?
         var entries: [ModelStore.Entry] = []
         var vector: VectorStatus?
         var gate: EmbeddingGateDecision = .skip("not_configured")
@@ -104,7 +110,9 @@ final class ModelsWindowController: NSObject, NSWindowDelegate,
         do {
             let catalog = try Catalog.load()
             if let root = state.modelsRoot {
-                state.entries = ModelStore.entries(catalog: catalog, root: root)
+                state.entries = ModelStore.entries(catalog: catalog, root: root,
+                                                   minimumDimension: SchemaV4.dimension)
+                state.currentModelID = EmbeddingSelection.effectiveID(catalog: catalog, root: root)
             }
         } catch {
             state.catalogError = "\(error)"
@@ -118,8 +126,11 @@ final class ModelsWindowController: NSObject, NSWindowDelegate,
     func shortStatusText() -> String {
         let state = currentState()
         guard state.storeAvailable else { return "库未打开" }
-        let installed = state.entries.first { $0.id == Catalog.embeddingModelID }?.installed ?? false
-        guard installed else { return "未启用：未安装嵌入模型" }
+        // D30：装了哪个尺寸都算，取当前生效的那个。
+        guard let current = state.currentModelID,
+              state.entries.first(where: { $0.id == current })?.usable == true else {
+            return "未启用：未安装嵌入模型"
+        }
         guard let vector = state.vector else { return "未启用" }
         if vector.embeddedChunks == 0 { return "已装模型，尚未建索引" }
         return vector.retrievalEnabled
@@ -136,6 +147,11 @@ final class ModelsWindowController: NSObject, NSWindowDelegate,
     private var nightlySwitch: NSButton?
     /// M2 d / T15：「现在开始建索引」按钮（跑起来之后变成「取消」）。
     private var overnightButton: NSButton?
+    /// D30 新增的三个入口。
+    private var downloadButton: NSButton?
+    private var selectButton: NSButton?
+    private var downloading = false
+    private var downloadCancel: CancelFlag?
     private var noteLabel: NSTextField?
     private var entries: [ModelStore.Entry] = []
     private var lastAction: String?
@@ -151,7 +167,7 @@ final class ModelsWindowController: NSObject, NSWindowDelegate,
     }
 
     private func buildWindow() {
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 860, height: 520),
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 860, height: 560),
                               styleMask: [.titled, .closable, .miniaturizable, .resizable],
                               backing: .buffered, defer: false)
         window.title = "模型与向量检索"
@@ -164,7 +180,7 @@ final class ModelsWindowController: NSObject, NSWindowDelegate,
         content.autoresizingMask = [.width, .height]
 
         let status = NSTextField(labelWithString: "")
-        status.frame = NSRect(x: 16, y: 470, width: 828, height: 34)
+        status.frame = NSRect(x: 16, y: 510, width: 828, height: 34)
         status.autoresizingMask = [.width, .minYMargin]
         status.lineBreakMode = .byWordWrapping
         status.maximumNumberOfLines = 2
@@ -182,52 +198,74 @@ final class ModelsWindowController: NSObject, NSWindowDelegate,
             column.width = spec.width
             table.addTableColumn(column)
         }
-        let scroll = NSScrollView(frame: NSRect(x: 16, y: 120, width: 828, height: 340))
+        let scroll = NSScrollView(frame: NSRect(x: 16, y: 150, width: 828, height: 350))
         scroll.autoresizingMask = [.width, .height]
         scroll.hasVerticalScroller = true
         scroll.documentView = table
         content.addSubview(scroll)
         tableView = table
 
+        // 第一行：模型本身怎么来、用哪一个（D30）。
+        let downloadButton = NSButton(title: "下载", target: self,
+                                      action: #selector(downloadClicked(_:)))
+        downloadButton.frame = NSRect(x: 16, y: 112, width: 72, height: 28)
+        downloadButton.autoresizingMask = [.maxXMargin, .minYMargin]
+        content.addSubview(downloadButton)
+        self.downloadButton = downloadButton
+
         let importButton = NSButton(title: "从本地目录导入…", target: self,
                                     action: #selector(importClicked(_:)))
-        importButton.frame = NSRect(x: 16, y: 82, width: 160, height: 28)
+        importButton.frame = NSRect(x: 96, y: 112, width: 152, height: 28)
         importButton.autoresizingMask = [.maxXMargin, .minYMargin]
         content.addSubview(importButton)
 
+        let linkButton = NSButton(title: "关联外部目录…", target: self,
+                                  action: #selector(linkClicked(_:)))
+        linkButton.frame = NSRect(x: 256, y: 112, width: 140, height: 28)
+        linkButton.autoresizingMask = [.maxXMargin, .minYMargin]
+        content.addSubview(linkButton)
+
+        let selectButton = NSButton(title: "设为当前模型", target: self,
+                                    action: #selector(selectClicked(_:)))
+        selectButton.frame = NSRect(x: 404, y: 112, width: 128, height: 28)
+        selectButton.autoresizingMask = [.maxXMargin, .minYMargin]
+        content.addSubview(selectButton)
+        self.selectButton = selectButton
+
         let verifyButton = NSButton(title: "重新校验", target: self,
                                     action: #selector(verifyClicked(_:)))
-        verifyButton.frame = NSRect(x: 184, y: 82, width: 96, height: 28)
+        verifyButton.frame = NSRect(x: 540, y: 112, width: 96, height: 28)
         verifyButton.autoresizingMask = [.maxXMargin, .minYMargin]
         content.addSubview(verifyButton)
 
         let removeButton = NSButton(title: "移除", target: self, action: #selector(removeClicked(_:)))
-        removeButton.frame = NSRect(x: 288, y: 82, width: 72, height: 28)
+        removeButton.frame = NSRect(x: 644, y: 112, width: 72, height: 28)
         removeButton.autoresizingMask = [.maxXMargin, .minYMargin]
         content.addSubview(removeButton)
 
+        // 第二行：索引怎么建。
         let runNow = NSButton(title: "现在跑一次嵌入任务", target: self,
                               action: #selector(runNowClicked(_:)))
-        runNow.frame = NSRect(x: 368, y: 82, width: 180, height: 28)
+        runNow.frame = NSRect(x: 16, y: 78, width: 180, height: 28)
         runNow.autoresizingMask = [.maxXMargin, .minYMargin]
         content.addSubview(runNow)
 
         let rebuild = NSButton(title: "重建索引", target: self, action: #selector(rebuildClicked(_:)))
-        rebuild.frame = NSRect(x: 556, y: 82, width: 96, height: 28)
+        rebuild.frame = NSRect(x: 204, y: 78, width: 96, height: 28)
         rebuild.autoresizingMask = [.maxXMargin, .minYMargin]
         content.addSubview(rebuild)
 
         // M2 d / T15：首次全量建索引的一次性动作（D8 的条件 3）。
         let overnight = NSButton(title: "现在开始建索引（连续跑到完成或取消）", target: self,
                                  action: #selector(overnightClicked(_:)))
-        overnight.frame = NSRect(x: 660, y: 82, width: 184, height: 28)
-        overnight.autoresizingMask = [.minXMargin, .minYMargin]
+        overnight.frame = NSRect(x: 308, y: 78, width: 300, height: 28)
+        overnight.autoresizingMask = [.maxXMargin, .minYMargin]
         content.addSubview(overnight)
         overnightButton = overnight
 
         let vectorToggle = NSButton(checkboxWithTitle: "在检索里使用向量（未装模型时强制关）",
                                     target: self, action: #selector(vectorToggled(_:)))
-        vectorToggle.frame = NSRect(x: 16, y: 52, width: 400, height: 22)
+        vectorToggle.frame = NSRect(x: 16, y: 50, width: 400, height: 22)
         vectorToggle.autoresizingMask = [.maxXMargin, .minYMargin]
         content.addSubview(vectorToggle)
         vectorSwitch = vectorToggle
@@ -235,7 +273,7 @@ final class ModelsWindowController: NSObject, NSWindowDelegate,
         let nightlyToggle = NSButton(
             checkboxWithTitle: "夜间自动建索引（接电 + 空闲 5 分钟 + 温度正常，日均 GPU 预算 10 分钟）",
             target: self, action: #selector(nightlyToggled(_:)))
-        nightlyToggle.frame = NSRect(x: 16, y: 28, width: 600, height: 22)
+        nightlyToggle.frame = NSRect(x: 16, y: 26, width: 600, height: 22)
         nightlyToggle.autoresizingMask = [.maxXMargin, .minYMargin]
         content.addSubview(nightlyToggle)
         nightlySwitch = nightlyToggle
@@ -254,11 +292,12 @@ final class ModelsWindowController: NSObject, NSWindowDelegate,
 
     private struct ColumnSpec { var id: String; var title: String; var width: CGFloat }
     private static let columns: [ColumnSpec] = [
-        ColumnSpec(id: "id", title: "模型", width: 250),
-        ColumnSpec(id: "purpose", title: "用途", width: 80),
-        ColumnSpec(id: "size", title: "体积", width: 100),
-        ColumnSpec(id: "state", title: "状态", width: 150),
-        ColumnSpec(id: "note", title: "说明", width: 240),
+        ColumnSpec(id: "current", title: "当前", width: 40),
+        ColumnSpec(id: "id", title: "模型", width: 240),
+        ColumnSpec(id: "purpose", title: "用途", width: 60),
+        ColumnSpec(id: "size", title: "体积", width: 90),
+        ColumnSpec(id: "state", title: "状态", width: 170),
+        ColumnSpec(id: "note", title: "说明", width: 220),
     ]
 
     private func reload() {
@@ -290,7 +329,8 @@ final class ModelsWindowController: NSObject, NSWindowDelegate,
             + " · 模型目录 \(state.modelsRoot?.lastPathComponent ?? "?")（来源 \(state.modelsRootSource)）"
             + (lastAction.map { " · " + $0 } ?? "")
 
-        let installed = entries.first { $0.id == Catalog.embeddingModelID }?.installed ?? false
+        let current = currentState().currentModelID
+        let installed = current.flatMap { id in entries.first { $0.id == id }?.usable } ?? false
         vectorSwitch?.state = (state.vector?.retrievalEnabled ?? false) ? .on : .off
         vectorSwitch?.isEnabled = installed && (state.vector?.embeddedChunks ?? 0) > 0
         nightlySwitch?.state = EmbeddingScheduler.shared.isEnabled ? .on : .off
@@ -349,6 +389,165 @@ final class ModelsWindowController: NSObject, NSWindowDelegate,
         } catch {
             lastAction = "导入失败：\(error)"
         }
+        reload()
+    }
+
+    // ---- D30：联网下载 / 关联外部目录 / 切换当前模型
+
+    @objc private func downloadClicked(_ sender: Any?) {
+        if downloading {
+            downloadCancel?.set()
+            lastAction = "正在取消下载（已下好的部分留着，下次接着下）…"
+            reload()
+            return
+        }
+        guard let entry = selectedEntry else {
+            presentAlert(title: "先选一个模型", body: "在上面的清单里选一行，再点下载。")
+            return
+        }
+        guard let root = currentState().modelsRoot else { return }
+        guard Self.allowDownload else {
+            presentAlert(title: "联网下载被关掉了",
+                         body: "\(Self.allowDownloadKey) 设成了 false。"
+                             + "可以改用「从本地目录导入」或「关联外部目录」。")
+            return
+        }
+        do {
+            let catalog = try Catalog.load()
+            let model = try catalog.model(id: entry.id)
+            let alert = NSAlert()
+            alert.messageText = "下载 \(model.id)？"
+            alert.informativeText =
+                "从 \(model.repoId) 下载 \(ModelBytes.human(model.totalBytes ?? 0))"
+                + "（\(model.files.count) 个文件）。会先探测直连与镜像选快的那个，"
+                + "断了可以接着下，全部文件 sha256 校验通过后才算装好。"
+            alert.addButton(withTitle: "下载")
+            alert.addButton(withTitle: "取消")
+            guard alert.runModal() == .alertFirstButtonReturn else { return }
+
+            let flag = CancelFlag()
+            downloadCancel = flag
+            downloading = true
+            downloadButton?.title = "取消下载"
+            lastAction = "下载 \(model.id)：正在探测源…"
+            reload()
+            let schema = catalog.schemaVersion
+            Task { [weak self] in
+                do {
+                    let report = try await ModelStore.downloadModel(
+                        model, root: root, schemaVersion: schema,
+                        isCancelled: { flag.isSet },
+                        onFileStart: { file, bytes, index, totalFiles in
+                            // 大文件（权重）中途没有细粒度进度，所以先把"正在下哪个、多大"显出来。
+                            let text = "下载 \(index)/\(totalFiles)：正在下 \(file)"
+                                     + "（\(ModelBytes.human(bytes))）…"
+                            Task { @MainActor in self?.setDownloadProgress(text) }
+                        },
+                        onProgress: { file, doneFiles, totalFiles, doneBytes, totalBytes in
+                            let text = "下载 \(doneFiles)/\(totalFiles)："
+                                     + "\(ModelBytes.human(doneBytes)) / \(ModelBytes.human(totalBytes))"
+                                     + "（刚下完 \(file)）"
+                            Task { @MainActor in self?.setDownloadProgress(text) }
+                        })
+                    await MainActor.run {
+                        self?.finishDownload(
+                            "已下载 \(model.id)：\(report.files.count) 个文件、"
+                            + "\(ModelBytes.human(report.totalBytes))，源 \(report.baseUsed)，"
+                            + String(format: "%.0f s，sha256 全部通过", report.totalSeconds))
+                    }
+                } catch {
+                    await MainActor.run { self?.finishDownload("下载失败：\(error)") }
+                }
+            }
+        } catch {
+            lastAction = "下载没开始：\(error)"
+            reload()
+        }
+    }
+
+    private func setDownloadProgress(_ text: String) {
+        lastAction = text
+        reload()
+    }
+
+    private func finishDownload(_ text: String) {
+        downloading = false
+        downloadCancel = nil
+        downloadButton?.title = "下载"
+        lastAction = text
+        recorder?.logEvent(kind: "model_download_finished", detail: String(text.prefix(160)))
+        reload()
+    }
+
+    @objc private func linkClicked(_ sender: Any?) {
+        guard let root = currentState().modelsRoot else { return }
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.allowsMultipleSelection = false
+        panel.prompt = "关联"
+        panel.message = "选一个 MLX 格式的模型目录（例如 LM Studio 下的 mlx-community/…）。"
+                      + "权重不会被复制，brosis 只记住路径。"
+        guard panel.runModal() == .OK, let from = panel.url else { return }
+        do {
+            let catalog = try Catalog.load()
+            let id = from.lastPathComponent
+            let info = try ModelStore.linkExternal(
+                id: id, from: from, root: root,
+                minimumDimension: SchemaV4.dimension,
+                schemaVersion: catalog.schemaVersion)
+            lastAction = "已关联 \(id)：\(info.modelType)、原生 \(info.hiddenSize) 维"
+                       + "（截到 \(SchemaV4.dimension) 维用）、\(info.fileCount) 个文件、"
+                       + "\(ModelBytes.human(info.totalBytes))，权重留在原处"
+            recorder?.logEvent(kind: "model_linked",
+                               detail: "id=\(id) hidden=\(info.hiddenSize) type=\(info.modelType)")
+        } catch {
+            lastAction = "关联失败：\(error)"
+        }
+        reload()
+    }
+
+    @objc private func selectClicked(_ sender: Any?) {
+        guard let entry = selectedEntry else {
+            presentAlert(title: "先选一个模型", body: "在上面的清单里选一行，再设为当前模型。")
+            return
+        }
+        guard entry.purpose == "embedding" else {
+            presentAlert(title: "只能选嵌入模型", body: "向量检索用的是嵌入模型。")
+            return
+        }
+        guard entry.usable else {
+            presentAlert(title: "这个模型还不能用",
+                         body: entry.linkProblem ?? "还没装：先「下载」、「从本地目录导入」或「关联外部目录」。")
+            return
+        }
+        let status = recorder?.withStore { try? $0.vectorStatus() } ?? nil
+        let indexedModel = status?.model
+        let embedded = status?.embeddedChunks ?? 0
+        var rebuild = false
+        if let indexedModel, indexedModel != entry.id, embedded > 0 {
+            // 向量不能跨模型比较：旧索引留着只会给出错的结果。
+            let alert = NSAlert()
+            alert.messageText = "换成 \(entry.id)？"
+            alert.informativeText =
+                "现在的 \(embedded) 块向量是用 \(indexedModel) 建的。不同模型的向量不能互相比较，"
+                + "换模型必须重建索引（证据、台账、全文检索都不受影响，只是要重新跑一遍嵌入任务）。"
+            alert.addButton(withTitle: "换并重建索引")
+            alert.addButton(withTitle: "取消")
+            guard alert.runModal() == .alertFirstButtonReturn else { return }
+            rebuild = true
+        }
+        EmbeddingSelection.select(entry.id)
+        var text = "当前模型已设为 \(entry.id)"
+        if rebuild {
+            let removed = recorder?.withStore { try $0.rebuildEmbeddings() } ?? nil
+            text += "，索引已清空（\(removed ?? 0) 块），下次嵌入任务从头建"
+        }
+        QueryEmbedderService.shared.modelSelectionChanged(
+            store: recorder?.withStore { $0 } ?? nil)
+        recorder?.logEvent(kind: "embedding_model_selected",
+                           detail: "id=\(entry.id) rebuilt=\(rebuild)")
+        lastAction = text
         reload()
     }
 
@@ -490,6 +689,7 @@ final class ModelsWindowController: NSObject, NSWindowDelegate,
         let entry = entries[row]
         let text: String
         switch column {
+        case "current": text = entry.id == currentState().currentModelID ? "●" : ""
         case "id": text = entry.id
         case "purpose": text = entry.purpose == "embedding" ? "嵌入" : "生成"
         case "size":
@@ -497,11 +697,14 @@ final class ModelsWindowController: NSObject, NSWindowDelegate,
                 ? ModelBytes.human(entry.diskBytes)
                 : (entry.sizeBytes > 0 ? ModelBytes.human(entry.sizeBytes) : "—")
         case "state":
-            if entry.installed { text = "已安装" }
+            if let problem = entry.linkProblem { text = problem }
+            else if entry.isLinked { text = "已关联（不占本地空间）" }
+            else if entry.installed { text = "已安装" }
             else if entry.unavailableReason != nil { text = "不可用（置灰）" }
-            else if entry.approved { text = "未安装" }
+            else if entry.approved { text = "未安装（可下载）" }
             else { text = "未验证（高级入口）" }
-        case "note": text = entry.unavailableReason ?? (entry.note ?? "")
+        case "note":
+            text = entry.linkProblem ?? entry.unavailableReason ?? (entry.note ?? "")
         default: text = ""
         }
         let label = NSTextField(labelWithString: text)
@@ -510,4 +713,12 @@ final class ModelsWindowController: NSObject, NSWindowDelegate,
         if entry.unavailableReason != nil { label.textColor = .disabledControlTextColor }
         return label
     }
+}
+
+/// 下载取消旗标：下载跑在后台 Task 里，取消由主线程按钮设置，所以要能跨线程读。
+final class CancelFlag: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value = false
+    var isSet: Bool { lock.lock(); defer { lock.unlock() }; return value }
+    func set() { lock.lock(); value = true; lock.unlock() }
 }

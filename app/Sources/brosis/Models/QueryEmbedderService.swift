@@ -48,7 +48,9 @@ final class QueryEmbedderService: @unchecked Sendable {
     /// 「未安装模型时强制关」：模型不在就不恢复，`search` 继续走 `disabled`。
     func attach(recorder: Recorder, store: Store) {
         let root = ModelStore.resolveRoot(dataDirectory: store.directory).url
-        let installed = ModelStore.isInstalled(root: root, id: Catalog.embeddingModelID)
+        // D30：装了哪个尺寸由面板的当前选择决定，这里只问"有没有一个能用的"。
+        let modelID = EmbeddingSelection.effectiveID(catalog: try? Catalog.load(), root: root)
+        let installed = modelID.map { ModelStore.isInstalled(root: root, id: $0) } ?? false
         let wanted = UserDefaults.standard.bool(forKey: Self.vectorsEnabledKey)
         store.retrieval.vectorsEnabled = wanted && installed
 
@@ -63,7 +65,7 @@ final class QueryEmbedderService: @unchecked Sendable {
         recorder.logEvent(
             kind: "query_embedder_attached",
             detail: "vectors_enabled=\(store.retrieval.vectorsEnabled) model_installed=\(installed) "
-                  + "model=\(Catalog.embeddingModelID) "
+                  + "model=\(modelID ?? "(未选定)") "
                   + "idle_unload_s=\(Int(QueryEmbedderPolicy.idleUnloadSeconds)) "
                   + "cache_limit_mib=\(MLXMemoryPolicy.defaultCacheLimitMiB)")
     }
@@ -104,6 +106,20 @@ final class QueryEmbedderService: @unchecked Sendable {
     // MARK: - 显示
 
     /// 菜单 / 面板里那一行。
+    /// D30：当前生效的嵌入模型（自检与状态行打印用）。
+    var currentModelDescription: String {
+        let id = embedder.modelID
+        return id.isEmpty ? "（未选定）" : id
+    }
+
+    /// 用户在面板里换了模型：把权重扔掉，按新选择重新挂上。
+    /// 向量索引是否重建由面板负责问（向量不能跨模型比较）。
+    func modelSelectionChanged(store: Store?) {
+        embedder.disable(event: .disabledByUser)
+        guard let store else { return }
+        embedder.enable(modelsRoot: ModelStore.resolveRoot(dataDirectory: store.directory).url)
+    }
+
     var statusDescription: String {
         let stats = embedder.currentStats
         guard stats.enabled else { return "查询嵌入器：未启用" }

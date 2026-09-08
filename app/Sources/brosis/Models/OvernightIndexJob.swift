@@ -231,6 +231,19 @@ final class OvernightIndexJob: @unchecked Sendable {
     private var isCancelled: Bool { lock.lock(); defer { lock.unlock() }; return cancelled }
 
     private func run(modelsRoot: URL, scheduler: EmbeddingScheduler, recorder: Recorder?) {
+        // D30：用面板当前选中的嵌入模型；没有可用的就直接不跑（3.11 降级表）。
+        guard let modelID = scheduler.currentModelID(modelsRoot: modelsRoot) else {
+            _ = recorder?.withStore {
+                try $0.recordRuntimeEvent(kind: "overnight_index_failed",
+                                          detail: "{\"error\":\"没有可用的嵌入模型\"}")
+            }
+            lock.lock()
+            _lastSummary = "没跑：没有可用的嵌入模型（3.11：向量检索显示未启用）"
+            _lastPauseReason = nil
+            running = false
+            lock.unlock()
+            return
+        }
         let startedAt = Date()
         let ledger = OvernightGPULedger()
         var embedded = 0
@@ -242,7 +255,7 @@ final class OvernightIndexJob: @unchecked Sendable {
         _ = recorder?.withStore {
             try $0.recordRuntimeEvent(
                 kind: "overnight_index_started",
-                detail: "{\"pending_chunks\":\(remaining),\"model\":\"\(Catalog.embeddingModelID)\","
+                detail: "{\"pending_chunks\":\(remaining),\"model\":\"\(modelID)\","
                       + "\"thermal\":\"\(ModelProc.thermalState)\","
                       + "\"gates\":\"ac_power+thermal+unlocked（放开：空闲、日预算、夜间开关）\"}")
         }
@@ -273,9 +286,8 @@ final class OvernightIndexJob: @unchecked Sendable {
             if provider == nil {
                 do {
                     provider = try MLXEmbeddingProvider.load(
-                        directory: ModelStore.directory(root: modelsRoot,
-                                                        id: Catalog.embeddingModelID),
-                        modelID: Catalog.embeddingModelID)
+                        directory: ModelStore.weightsDirectory(root: modelsRoot, id: modelID),
+                        modelID: modelID)
                 } catch {
                     stopReason = "load_failed"
                     _ = recorder?.withStore {

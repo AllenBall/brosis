@@ -102,13 +102,39 @@ func openStore(_ args: Args) throws -> Store {
     return try Store.open(directory: dir, keyProvider: provider, options: options)
 }
 
+/// 用哪个模型：`--model-id` 给了就用给的；否则用当前选择（D30：清单里有多个尺寸，
+/// app 的面板里可切换，命令行读同一个 UserDefaults 键）。都没有就报错。
+func resolveModelID(_ args: Args, root: URL?) throws -> String {
+    if let id = args.string("model-id") { return id }
+    guard let id = EmbeddingSelection.effectiveID(catalog: try? Catalog.load(), root: root) else {
+        throw EmbedError("没有可用的嵌入模型：模型根目录里一个都没装，命令行也没给 --model-id")
+    }
+    return id
+}
+
+/// 顶层脚本是同步的，下载是 async，用信号量等一下（只在命令行里用，app 侧走 Task）。
+func runBlocking<T: Sendable>(_ body: @escaping @Sendable () async throws -> T) throws -> T {
+    let semaphore = DispatchSemaphore(value: 0)
+    nonisolated(unsafe) var outcome: Result<T, Error>?
+    Task {
+        do { outcome = .success(try await body()) } catch { outcome = .failure(error) }
+        semaphore.signal()
+    }
+    semaphore.wait()
+    return try outcome!.get()
+}
+
 func loadEmbedder(_ args: Args) throws -> MLXEmbeddingProvider {
-    let id = args.string("model-id") ?? Catalog.embeddingModelID
     let directory: URL
+    let id: String
     if let explicit = args.string("model-dir") {
         directory = URL(filePath: (explicit as NSString).expandingTildeInPath)
+        id = args.string("model-id") ?? directory.lastPathComponent
     } else {
-        directory = ModelStore.directory(root: try modelsRoot(args), id: id)
+        let root = try modelsRoot(args)
+        id = try resolveModelID(args, root: root)
+        // D30：关联进来的模型权重在外部目录。
+        directory = ModelStore.weightsDirectory(root: root, id: id)
     }
     guard FileManager.default.fileExists(atPath: directory.path) else {
         throw EmbedError("模型未安装：\(id)（找的是 \(directory.lastPathComponent)）。"
@@ -158,6 +184,9 @@ brosis-embed —— 嵌入任务与查询向量（M2 c / T11，计划 3.4 / 3.11
                     --dir <数据目录> --key-file <密钥> [--model-id] [--batch 16]
                     [--max-chunks N] [--max-seconds S] [--cache-limit-mib 256]
                     [--require-nominal 只在 thermalState=nominal 时跑]
+  models --download --id <清单 id>      联网下载（D30，Qwen3-Embedding 系列；镜像与断点续传自动）
+  models --link --from <目录> [--id x]  关联外部目录（如 LM Studio 的 MLX 模型目录），不复制权重
+  models --select --id <清单 id>        切换当前生效的嵌入模型（换完要 rebuild 再 embed）
   queries           把一份查询集的检索串批量嵌成向量表（D8 实验用）
                     --file <[{"id":…,"q":…}, …]> --out <{"id": [数字…]}> [--model-id]
   rebuild           清掉全部 chunks / vec_chunks，下次 embed 从头再来（--dir --key-file）
@@ -174,7 +203,7 @@ brosis-embed —— 嵌入任务与查询向量（M2 c / T11，计划 3.4 / 3.11
   --key-file        32 字节原始密钥文件
   --models-dir      模型根目录（默认 <数据目录>/../models，D18：不加密、不进 iCloud）
   --model-dir       直接指定某个模型的目录（跳过模型根目录与 id）
-  --model-id        清单 id，默认 \(Catalog.embeddingModelID)
+  --model-id        清单 id，默认取当前选择（D30：面板里选哪个就是哪个，键 models.embedding.current）
   --cache-limit-mib 加载模型**之前**设的 MLX 缓冲池上限，默认 \(MLXMemoryPolicy.defaultCacheLimitMiB)（D27）
   --out             结果另存为 JSON
 """
@@ -263,8 +292,74 @@ do {
             try ModelStore.remove(root: root, id: id)
             emit(["command": "models", "action": "remove", "id": id,
                   "installed": ModelStore.isInstalled(root: root, id: id)])
+        } else if args.has("download") {
+            // D30：联网下载清单里的模型（Qwen3-Embedding 系列）。
+            let model = try catalog.model(id: try args.require("id"))
+            let schema = catalog.schemaVersion
+            let quiet = args.has("quiet")
+            let report = try runBlocking {
+                try await ModelStore.downloadModel(
+                    model, root: root, schemaVersion: schema,
+                    primary: args.string("primary") ?? HFDownloader.defaultPrimary,
+                    mirror: args.string("mirror") ?? HFDownloader.defaultMirror,
+                    forcedBase: args.string("force-base"),
+                    onFileStart: { file, bytes, index, totalFiles in
+                        guard !quiet else { return }
+                        FileHandle.standardError.write(Data(
+                            "  ↓ \(file)  \(index)/\(totalFiles)  \(ModelBytes.human(bytes))\n".utf8))
+                    },
+                    onProgress: { file, doneFiles, totalFiles, doneBytes, totalBytes in
+                        guard !quiet else { return }
+                        FileHandle.standardError.write(Data(
+                            "  ✓ \(file)  \(doneFiles)/\(totalFiles)  "
+                            .utf8))
+                        FileHandle.standardError.write(Data(
+                            (ModelBytes.human(doneBytes) + " / " + ModelBytes.human(totalBytes) + "\n")
+                            .utf8))
+                    })
+            }
+            emit(["command": "models", "action": "download", "id": model.id,
+                  "base_used": report.baseUsed,
+                  "probes": report.probes.map { ["base": $0.base, "ok": $0.ok,
+                                                 "seconds": $0.seconds, "note": $0.note] },
+                  "file_count": report.files.count,
+                  "total_mib": Double(report.totalBytes) / ModelBytes.mib,
+                  "seconds": report.totalSeconds,
+                  "resumed_files": report.files.filter { $0.resumedFromBytes > 0 }.count,
+                  "peak_footprint_mib": Double(ModelProc.peakFootprintBytes()) / ModelBytes.mib])
+        } else if args.has("link") {
+            // D30：关联外部目录（例如 LM Studio 的模型目录），一个字节都不复制。
+            let from = URL(filePath: (try args.require("from") as NSString).expandingTildeInPath,
+                           directoryHint: .isDirectory)
+            let id = args.string("id") ?? from.lastPathComponent
+            let info = try ModelStore.linkExternal(
+                id: id, from: from, root: root,
+                minimumDimension: SchemaV4.dimension,
+                schemaVersion: catalog.schemaVersion,
+                repoId: args.string("repo-id"))
+            emit(["command": "models", "action": "link", "id": id, "path": from.path,
+                  "model_type": info.modelType, "hidden_size": info.hiddenSize,
+                  "quantization_bits": jsonValue(info.quantizationBits),
+                  "file_count": info.fileCount, "weight_files": info.weightFiles,
+                  "total_mib": Double(info.totalBytes) / ModelBytes.mib,
+                  "vector_dimension": SchemaV4.dimension,
+                  "in_catalog": catalog.models.contains { $0.id == id }])
+        } else if args.has("select") {
+            // D30：切换当前生效的嵌入模型。**换模型 = 向量索引作废**，这里只改选择，
+            // 重建由调用方决定（app 面板会问一句；命令行用 brosis-embed rebuild）。
+            let id = try args.require("id")
+            guard ModelStore.isInstalled(root: root, id: id) else {
+                throw EmbedError("\(id) 还没装 / 没关联，先 --download 或 --link")
+            }
+            let before = EmbeddingSelection.effectiveID(catalog: catalog, root: root)
+            EmbeddingSelection.select(id)
+            emit(["command": "models", "action": "select", "id": id,
+                  "previous": jsonValue(before),
+                  "defaults_key": EmbeddingSelection.defaultsKey,
+                  "note": "换模型后向量索引作废，跑 brosis-embed rebuild 再重新 embed"])
         } else {
-            throw EmbedError("models 要 --list / --import / --verify / --remove 之一")
+            throw EmbedError("models 要 --list / --import / --download / --link / --select "
+                           + "/ --verify / --remove 之一")
         }
 
     // ---------------------------------------------------------------- embed
@@ -366,10 +461,10 @@ do {
     // core 的 `swift test` 不碰模型（那边用确定性伪嵌入），所以「真实模型到底对不对」
     // 只能在这里验。**模型没装时不算失败**：打印 skipped 并 exit 0，CI 上没有模型。
     case "selftest":
-        let id = args.string("model-id") ?? Catalog.embeddingModelID
         let root = try? modelsRoot(args)
+        let id = (try? resolveModelID(args, root: root)) ?? (args.string("model-id") ?? "(未选定)")
         let directory: URL? = args.string("model-dir").map { URL(filePath: ($0 as NSString).expandingTildeInPath) }
-            ?? root.map { ModelStore.directory(root: $0, id: id) }
+            ?? root.map { ModelStore.weightsDirectory(root: $0, id: id) }
         guard let directory, FileManager.default.fileExists(atPath: directory.path) else {
             emit(["command": "selftest", "status": "skipped", "model": id,
                   "reason": "模型未安装（本机没有这个模型目录）；"
@@ -401,14 +496,17 @@ do {
                             norms.map { String(format: "%.6f", $0) }.joined(separator: " ")))
         checks.append(check("同一批构造下两次嵌入逐位相同（确定性）", single1[0] == single2[0],
                             single1[0] == single2[0] ? "逐位相同" : "不同"))
-        // E9 已知限制：**换批大小会改变向量数值**（4.04×10⁻⁴ 量级），
+        // E9 已知限制：换批大小**可能**改变向量数值（0.6B 上实测 4.04×10⁻⁴ 量级），
         // 所以比较向量要用余弦阈值而不是字节相等，入库时固定批构造。
-        // 这一条不是 bug，是把那条已知限制钉住，免得将来有人改批大小时以为出问题了。
+        // **2026-09-08（D30）修正**：这条原来写成"必须不同"，在 Qwen3-Embedding-4B-4bit-DWQ 上
+        // 批 1 与批 3 逐位相同，反而被判失败。要守的性质是"最多 1e-3 量级"——
+        // 逐位相同是更好的结果，不该算回归。
         let batchShapeCosine = EmbeddingVector.cosine(single1[0], vectors[0])
-        checks.append(check("换批大小只改动 1e-3 量级（E9 已知限制，不是 bug）",
-                            single1[0] != vectors[0] && batchShapeCosine > 0.999,
+        let bitIdentical = single1[0] == vectors[0]
+        checks.append(check("换批大小最多改动 1e-3 量级（逐位相同更好；E9 在 0.6B 上实测 4.04e-4）",
+                            batchShapeCosine > 0.999,
                             String(format: "批 1 vs 批 3 的余弦 %.6f，逐位相同 = %@",
-                                   batchShapeCosine, single1[0] == vectors[0] ? "是" : "否")))
+                                   batchShapeCosine, bitIdentical ? "是（比 0.6B 更稳）" : "否")))
         let nearCosine = EmbeddingVector.cosine(vectors[0], vectors[1])
         let farCosine = EmbeddingVector.cosine(vectors[0], vectors[2])
         checks.append(check("近义句余弦 > 无关句余弦 + 0.2", nearCosine > farCosine + 0.2,
@@ -516,7 +614,7 @@ do {
         if let v = args.double("vector-weight") { store.retrieval.vectorWeight = v }
 
         let embedder = MLXQueryEmbedder(
-            modelID: args.string("model-id") ?? Catalog.embeddingModelID,
+            modelID: args.string("model-id"),   // nil = 跟随当前选择（D30）
             cacheLimitMiB: args.int("cache-limit-mib") ?? MLXMemoryPolicy.defaultCacheLimitMiB,
             idleUnloadSeconds: args.double("idle-unload-seconds")
                 ?? QueryEmbedderPolicy.idleUnloadSeconds)

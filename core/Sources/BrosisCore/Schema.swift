@@ -27,14 +27,14 @@ public enum Schema {
     ///   一张新表，记这个库导入过哪些归档——恢复模式写回的是源 id，逐条判据认不出重复，
     ///   所以再加一层归档粒度的幂等。SQL 与口径见 `SchemaV8`。纯新增，老库就地补建。
     ///   （v7 是 M2 d 批留给 T15 的号；T15 没有用到就空着，`migrations` 表里也不会有那一行。）
-    public static let version = 8
+    public static let version = 9
 
     /// `migrations` 表里**实际会出现**的版本号，升序。
     ///
     /// 它不一定连续：M2 d 批把 v7 / v8 / v9 分给三个并行任务，"用不到就不占"，
     /// 于是没被认领的号会留成空洞（当前 v7 空着——它是留给 T15 的）。
     /// 建库与迁移各写各的审计行，这里是唯一一份清单，测试按它断言。
-    public static let migrationVersions = [1, 2, 3, 4, 5, 6, 8]
+    public static let migrationVersions = [1, 2, 3, 4, 5, 6, 8, 9]
 
     /// 页大小（D23：16384，比 4096 省约 10%）。加密库用 `cipher_page_size`。
     public static let pageSize = 16384

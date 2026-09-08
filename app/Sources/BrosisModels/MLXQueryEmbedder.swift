@@ -55,7 +55,10 @@ public final class MLXQueryEmbedder: QueryEmbedder, @unchecked Sendable {
         }
     }
 
-    public let modelID: String
+    /// init 钉死的模型 id；nil = 跟随当前选择。
+    public let pinnedModelID: String?
+    /// 当前生效的模型 id。空串表示一个嵌入模型都没装（`queryVector` 一律返回 nil）。
+    public private(set) var modelID: String
     public let cacheLimitMiB: Int
     public let idleUnloadSeconds: Double
     /// 每条查询串最多几个 token（超出截断）。查询串本来就短，1024 用不满。
@@ -69,11 +72,14 @@ public final class MLXQueryEmbedder: QueryEmbedder, @unchecked Sendable {
     private var timer: DispatchSourceTimer?
     private let queue = DispatchQueue(label: "com.brosis.query-embedder", qos: .userInitiated)
 
-    public init(modelID: String = Catalog.embeddingModelID,
+    /// `modelID` 传 nil = **跟随面板里的当前选择**（D30 多尺寸可切换）；
+    /// 传具体 id 就钉死（CLI 与验收脚本要可复现）。
+    public init(modelID: String? = nil,
                 cacheLimitMiB: Int = MLXMemoryPolicy.defaultCacheLimitMiB,
                 idleUnloadSeconds: Double = QueryEmbedderPolicy.idleUnloadSeconds,
                 maxTokensPerText: Int = 1024) {
-        self.modelID = modelID
+        self.pinnedModelID = modelID
+        self.modelID = modelID ?? ""
         self.cacheLimitMiB = cacheLimitMiB
         self.idleUnloadSeconds = idleUnloadSeconds
         self.maxTokensPerText = maxTokensPerText
@@ -88,6 +94,16 @@ public final class MLXQueryEmbedder: QueryEmbedder, @unchecked Sendable {
     public func enable(modelsRoot: URL) {
         lock.lock()
         self.modelsRoot = modelsRoot
+        // D30：每次 enable 都重新解析当前选择——用户在面板里换了模型之后，
+        // 服务层会 disable + enable 走一遍，这里就把新模型接上。
+        let resolved = pinnedModelID
+            ?? EmbeddingSelection.effectiveID(catalog: try? Catalog.load(), root: modelsRoot)
+            ?? ""
+        if resolved != modelID {
+            // 换模型 = 旧权重立刻扔掉。向量不能跨模型比较，索引由面板提示重建。
+            provider = nil
+            modelID = resolved
+        }
         stats.enabled = true
         lock.unlock()
     }
@@ -141,7 +157,7 @@ public final class MLXQueryEmbedder: QueryEmbedder, @unchecked Sendable {
     /// 模型装了没（`queryVector` 返回 nil 的头号原因）。
     public var modelInstalled: Bool {
         lock.lock(); defer { lock.unlock() }
-        guard let root = modelsRoot else { return false }
+        guard let root = modelsRoot, !modelID.isEmpty else { return false }
         return ModelStore.isInstalled(root: root, id: modelID)
     }
 
@@ -161,7 +177,8 @@ public final class MLXQueryEmbedder: QueryEmbedder, @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
         guard stats.enabled, let root = modelsRoot else { return nil }
-        let directory = ModelStore.directory(root: root, id: modelID)
+        guard !modelID.isEmpty else { return nil }
+        let directory = ModelStore.weightsDirectory(root: root, id: modelID)
         guard ModelStore.isInstalled(root: root, id: modelID) else { return nil }
 
         let step = QueryEmbedderPolicy.next(state, on: .query(at: Date().timeIntervalSince1970),

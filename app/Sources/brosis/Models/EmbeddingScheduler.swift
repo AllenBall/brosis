@@ -222,12 +222,22 @@ final class EmbeddingScheduler: @unchecked Sendable {
         timer = nil
     }
 
+    /// 当前生效的嵌入模型 id（D30：清单里有多个尺寸，面板里可切换）。
+    /// 返回 nil = 没有可用的模型（没装，或关联的外部目录失效），向量检索按 3.11 显示未启用。
+    func currentModelID(modelsRoot: URL?) -> String? {
+        guard let modelsRoot else { return nil }
+        guard let id = EmbeddingSelection.effectiveID(catalog: try? Catalog.load(), root: modelsRoot),
+              ModelStore.isInstalled(root: modelsRoot, id: id),
+              ModelStore.linkedProblem(root: modelsRoot, id: id,
+                                       minimumDimension: SchemaV4.dimension) == nil
+        else { return nil }
+        return id
+    }
+
     /// 采集一次真实环境。界面与自检都用它。
     func currentInput(modelsRoot: URL?) -> EmbeddingGateInput {
         let snapshot = lockSnapshot?() ?? LockSnapshot()
-        let installed = modelsRoot.map {
-            ModelStore.isInstalled(root: $0, id: Catalog.embeddingModelID)
-        } ?? false
+        let installed = currentModelID(modelsRoot: modelsRoot) != nil
         let pending = recorder?.withStore { store -> Int in
             (try? store.vectorStatus().pendingChunks) ?? 0
         } ?? 0
@@ -267,7 +277,13 @@ final class EmbeddingScheduler: @unchecked Sendable {
     /// 跑一次（手动触发与定时器共用）。返回一行给界面显示的摘要。
     @discardableResult
     func runOnce(modelsRoot: URL, budget: GPUBudgetLedger) -> String {
-        let directory = ModelStore.directory(root: modelsRoot, id: Catalog.embeddingModelID)
+        guard let modelID = currentModelID(modelsRoot: modelsRoot) else {
+            let text = "没有可用的嵌入模型（3.11：向量检索显示未启用）"
+            lastRunSummary = text
+            return text
+        }
+        // D30：关联进来的模型权重在外部目录，一律走 weightsDirectory。
+        let directory = ModelStore.weightsDirectory(root: modelsRoot, id: modelID)
         let remaining = budget.remaining()
         guard remaining > 1 else {
             let text = "今日 GPU 预算已用完（\(Int(budget.budgetSeconds)) s）"
@@ -278,7 +294,7 @@ final class EmbeddingScheduler: @unchecked Sendable {
         }
         do {
             let provider = try MLXEmbeddingProvider.load(
-                directory: directory, modelID: Catalog.embeddingModelID)
+                directory: directory, modelID: modelID)
             let configuredBatch = UserDefaults.standard.integer(forKey: EmbeddingGatePolicy.batchKey)
             // 批 16 是 D27 在 Air 上实测过的档（峰值 footprint 1.61 GiB、零 swap）。
             var options = EmbeddingJobOptions(batchSize: configuredBatch > 0 ? configuredBatch : 16,
