@@ -473,7 +473,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(.separator())
         menu.addItem(ModelsMenu.menuItem())
         menu.addItem(MCPIntegrationWindowController.menuItem())
-        menu.addItem(SettingsWindowController.menuItem())
         let syncItem = NSMenuItem(title: "跨设备同步…（\(sync?.status.enabled == true ? "已开启" : "未开启")）",
                                   action: #selector(openSyncWindow), keyEquivalent: "")
         syncItem.target = self
@@ -481,6 +480,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let exportItem = NSMenuItem(title: "加密导出…", action: #selector(openExport), keyEquivalent: "")
         exportItem.target = self
         menu.addItem(exportItem)
+        // 设置排在加密导出下面（用户 2026-09-08 指定的顺序）。
+        menu.addItem(SettingsWindowController.menuItem())
 
         menu.addItem(.separator())
         let quit = NSMenuItem(title: "退出 brosis", action: #selector(quit), keyEquivalent: "q")

@@ -43,53 +43,24 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     }
 
     // MARK: - 窗口
+    //
+    // 用 NSGridView + NSBox 排版，不再手工算坐标：上一版每行固定 28pt、而"当前用量"是个
+    // 32pt 的两行字段，直接压到上一行去了（截图上看得很清楚）。网格自己对齐标签列与控件列，
+    // 分组框给出原生的视觉分区，窗口高度由内容撑出来。
 
     private func buildWindow() {
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 560, height: 430),
-                              styleMask: [.titled, .closable, .miniaturizable],
-                              backing: .buffered, defer: false)
-        window.title = "brosis 设置"
-        window.delegate = self
-        window.center()
-        window.isReleasedWhenClosed = false
+        let stack = NSStackView()
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = 14
+        stack.edgeInsets = NSEdgeInsets(top: 18, left: 18, bottom: 14, right: 18)
+        stack.translatesAutoresizingMaskIntoConstraints = false
 
-        let content = NSView(frame: window.contentLayoutRect)
-        content.autoresizingMask = [.width, .height]
-        var y = 386.0
-
-        func section(_ title: String) {
-            let label = NSTextField(labelWithString: title)
-            label.font = .boldSystemFont(ofSize: 13)
-            label.frame = NSRect(x: 20, y: y, width: 520, height: 18)
-            content.addSubview(label)
-            y -= 26
-        }
-        func row(_ title: String, _ control: NSView, note: String? = nil) {
-            let label = NSTextField(labelWithString: title)
-            label.alignment = .right
-            label.frame = NSRect(x: 20, y: y + 2, width: 170, height: 18)
-            content.addSubview(label)
-            control.frame.origin = CGPoint(x: 200, y: y)
-            content.addSubview(control)
-            if let note {
-                let hint = NSTextField(labelWithString: note)
-                hint.textColor = .secondaryLabelColor
-                hint.font = .systemFont(ofSize: 11)
-                hint.frame = NSRect(x: 200 + control.frame.width + 8, y: y + 2,
-                                    width: 540 - (200 + control.frame.width + 8), height: 16)
-                content.addSubview(hint)
-            }
-            y -= 28
-        }
-
-        // ---- 存储
-        section("存储")
-        let quota = NSTextField(frame: NSRect(x: 0, y: 0, width: 80, height: 22))
-        quota.alignment = .right
-        quota.target = self
+        // ---------------------------------------------------------------- 存储
+        let quota = numberField(width: 72)
         quota.action = #selector(quotaChanged)
         quotaField = quota
-        let stepper = NSStepper(frame: NSRect(x: 0, y: 0, width: 16, height: 22))
+        let stepper = NSStepper()
         stepper.minValue = Settings.quotaGiBRange.lowerBound
         stepper.maxValue = Settings.quotaGiBRange.upperBound
         stepper.increment = 1
@@ -97,86 +68,173 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         stepper.target = self
         stepper.action = #selector(quotaStepped)
         quotaStepper = stepper
-        let quotaBox = NSView(frame: NSRect(x: 0, y: 0, width: 104, height: 22))
-        quotaBox.addSubview(quota)
-        stepper.frame.origin = CGPoint(x: 84, y: 0)
-        quotaBox.addSubview(stepper)
-        row("最多占用磁盘", quotaBox, note: "GiB · 指原文净载荷，不含索引与 WAL")
+        let quotaRow = NSStackView(views: [quota, stepper, unit("GiB")])
+        quotaRow.orientation = .horizontal
+        quotaRow.spacing = 6
+        quotaRow.alignment = .centerY
 
-        let usage = NSTextField(labelWithString: "")
-        usage.frame = NSRect(x: 0, y: 0, width: 340, height: 32)
-        usage.lineBreakMode = .byWordWrapping
-        usage.maximumNumberOfLines = 2
+        let usage = NSTextField(wrappingLabelWithString: "")
         usage.font = .systemFont(ofSize: 11)
         usage.textColor = .secondaryLabelColor
+        usage.preferredMaxLayoutWidth = 330
         usageLabel = usage
-        row("当前用量", usage)
-        y -= 6
 
         let autoExpire = NSButton(checkboxWithTitle: "到线后自动清理最旧的原文（关掉就只提示不删）",
                                   target: self, action: #selector(autoExpireToggled))
-        autoExpire.frame = NSRect(x: 0, y: 0, width: 340, height: 20)
         autoExpireSwitch = autoExpire
-        row("", autoExpire)
-
         let checkNow = NSButton(title: "现在检查并清理", target: self, action: #selector(checkNowClicked))
-        checkNow.frame = NSRect(x: 0, y: 0, width: 130, height: 24)
-        row("", checkNow)
+        checkNow.bezelStyle = .rounded
 
-        // ---- 采集
-        section("采集")
-        let periodic = NSTextField(frame: NSRect(x: 0, y: 0, width: 80, height: 22))
-        periodic.alignment = .right
-        periodic.target = self
+        stack.addArrangedSubview(section("存储", rows: [
+            Row(label: "最多占用磁盘", control: quotaRow,
+                hint: "口径是原文净载荷——FTS 索引、向量、WAL 都不算在内，所以磁盘上的文件会比这个数大"),
+            Row(label: "当前用量", control: usage),
+            Row(label: nil, control: autoExpire),
+            Row(label: nil, control: checkNow),
+        ]))
+
+        // ---------------------------------------------------------------- 采集
+        let periodic = numberField(width: 72)
         periodic.action = #selector(periodicChanged)
         periodicField = periodic
-        row("定时兜底截图", periodic, note: "秒 · 3–120，事件触发之外的保底")
+        let periodicRow = NSStackView(views: [periodic, unit("秒")])
+        periodicRow.orientation = .horizontal
+        periodicRow.spacing = 6
+        periodicRow.alignment = .centerY
 
         let strict = NSButton(checkboxWithTitle: "锁屏时直接关库（不只是暂停采集）",
                               target: self, action: #selector(strictLockToggled))
-        strict.frame = NSRect(x: 0, y: 0, width: 320, height: 20)
         strictLockSwitch = strict
-        row("", strict)
 
-        // ---- 索引与检索
-        section("索引与检索")
+        stack.addArrangedSubview(section("采集", rows: [
+            Row(label: "定时兜底截图", control: periodicRow,
+                hint: "3–120 秒。事件触发之外的保底，间隔越短越费电"),
+            Row(label: nil, control: strict),
+        ]))
+
+        // ---------------------------------------------------------------- 索引与检索
         let vectors = NSButton(checkboxWithTitle: "在检索里使用向量（没装模型时强制关）",
                                target: self, action: #selector(vectorsToggled))
-        vectors.frame = NSRect(x: 0, y: 0, width: 330, height: 20)
         vectorsSwitch = vectors
-        row("", vectors)
-
         let autoIndex = NSButton(checkboxWithTitle: "打开时与每隔一段时间自动建索引",
                                  target: self, action: #selector(autoIndexToggled))
-        autoIndex.frame = NSRect(x: 0, y: 0, width: 330, height: 20)
         autoIndexSwitch = autoIndex
-        row("", autoIndex)
 
-        let interval = NSTextField(frame: NSRect(x: 0, y: 0, width: 80, height: 22))
-        interval.alignment = .right
-        interval.target = self
+        let interval = numberField(width: 72)
         interval.action = #selector(intervalChanged)
         intervalField = interval
-        row("自动建索引间隔", interval, note: "分钟 · 下限 5")
+        let intervalRow = NSStackView(views: [interval, unit("分钟")])
+        intervalRow.orientation = .horizontal
+        intervalRow.spacing = 6
+        intervalRow.alignment = .centerY
 
-        let gpu = NSTextField(frame: NSRect(x: 0, y: 0, width: 80, height: 22))
-        gpu.alignment = .right
-        gpu.target = self
+        let gpu = numberField(width: 72)
         gpu.action = #selector(gpuChanged)
         gpuField = gpu
-        row("日均 GPU 预算", gpu, note: "秒 · 夜间增量任务用，整晚建索引另算")
+        let gpuRow = NSStackView(views: [gpu, unit("秒")])
+        gpuRow.orientation = .horizontal
+        gpuRow.spacing = 6
+        gpuRow.alignment = .centerY
 
-        let note = NSTextField(labelWithString: "")
-        note.frame = NSRect(x: 20, y: 12, width: 520, height: 32)
-        note.textColor = .secondaryLabelColor
+        stack.addArrangedSubview(section("索引与检索", rows: [
+            Row(label: nil, control: vectors),
+            Row(label: nil, control: autoIndex),
+            Row(label: "自动建索引间隔", control: intervalRow, hint: "下限 5 分钟"),
+            Row(label: "日均 GPU 预算", control: gpuRow, hint: "夜间增量任务用；「现在开始建索引」另有一本账"),
+        ]))
+
+        // ---------------------------------------------------------------- 底部状态
+        let note = NSTextField(wrappingLabelWithString: "")
         note.font = .systemFont(ofSize: 11)
-        note.lineBreakMode = .byWordWrapping
-        note.maximumNumberOfLines = 2
-        content.addSubview(note)
+        note.textColor = .secondaryLabelColor
+        note.preferredMaxLayoutWidth = 500
         noteLabel = note
+        stack.addArrangedSubview(note)
 
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 560, height: 520),
+                              styleMask: [.titled, .closable, .miniaturizable],
+                              backing: .buffered, defer: false)
+        window.title = "brosis 设置"
+        window.delegate = self
+        window.isReleasedWhenClosed = false
+        let content = NSView()
+        content.addSubview(stack)
+        NSLayoutConstraint.activate([
+            stack.leadingAnchor.constraint(equalTo: content.leadingAnchor),
+            stack.trailingAnchor.constraint(equalTo: content.trailingAnchor),
+            stack.topAnchor.constraint(equalTo: content.topAnchor),
+            stack.bottomAnchor.constraint(equalTo: content.bottomAnchor),
+        ])
         window.contentView = content
+        window.setContentSize(stack.fittingSize)
+        window.center()
         self.window = window
+    }
+
+    /// 一行：标签（可空，空的话控件从控件列开始）、控件、可选的灰色说明。
+    private struct Row {
+        var label: String?
+        var control: NSView
+        var hint: String?
+    }
+
+    /// 一个分组：标题 + 网格。网格负责把标签列右对齐、控件列左对齐。
+    private func section(_ title: String, rows: [Row]) -> NSView {
+        let box = NSBox()
+        box.title = title
+        box.titlePosition = .atTop
+        box.boxType = .primary
+        box.translatesAutoresizingMaskIntoConstraints = false
+
+        let grid = NSGridView(numberOfColumns: 2, rows: 0)
+        grid.translatesAutoresizingMaskIntoConstraints = false
+        grid.rowSpacing = 8
+        grid.columnSpacing = 10
+        grid.column(at: 0).xPlacement = .trailing
+        grid.column(at: 1).xPlacement = .leading
+        grid.rowAlignment = .firstBaseline
+
+        for row in rows {
+            let label = NSTextField(labelWithString: row.label.map { $0 + "：" } ?? "")
+            let gridRow = grid.addRow(with: [label, row.control])
+            gridRow.yPlacement = .center
+            if let hint = row.hint {
+                let hintLabel = NSTextField(wrappingLabelWithString: hint)
+                hintLabel.font = .systemFont(ofSize: 11)
+                hintLabel.textColor = .secondaryLabelColor
+                hintLabel.preferredMaxLayoutWidth = 330
+                let hintRow = grid.addRow(with: [NSGridCell.emptyContentView, hintLabel])
+                hintRow.topPadding = -2
+                hintRow.bottomPadding = 2
+            }
+        }
+
+        let container = NSView()
+        container.translatesAutoresizingMaskIntoConstraints = false
+        container.addSubview(grid)
+        NSLayoutConstraint.activate([
+            grid.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 12),
+            grid.trailingAnchor.constraint(lessThanOrEqualTo: container.trailingAnchor, constant: -12),
+            grid.topAnchor.constraint(equalTo: container.topAnchor, constant: 10),
+            grid.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -12),
+        ])
+        box.contentView = container
+        return box
+    }
+
+    private func numberField(width: CGFloat) -> NSTextField {
+        let field = NSTextField()
+        field.alignment = .right
+        field.target = self
+        field.translatesAutoresizingMaskIntoConstraints = false
+        field.widthAnchor.constraint(equalToConstant: width).isActive = true
+        return field
+    }
+
+    private func unit(_ text: String) -> NSTextField {
+        let label = NSTextField(labelWithString: text)
+        label.textColor = .secondaryLabelColor
+        return label
     }
 
     // MARK: - 读写
