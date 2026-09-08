@@ -315,7 +315,12 @@ def generate(args) -> dict:
     day_s = 86400
     step_ms = int(day_s * 1000 / args.per_day)
     # 最后一天的 24:00 = anchor；第 0 条落在 anchor - days 天。
+    # `--anchor YYYY-MM-DD`（M2 d / T17 加的，缺省就是原来的 2026-09-07）让规模压测
+    # 能按月分文件生成 12 段互不重叠的时间区间——不给它的话每段都落在同一个月上。
     anchor = datetime(2026, 9, 7, 0, 0, 0, tzinfo=timezone.utc)
+    if getattr(args, "anchor", None):
+        y, m, d = (int(x) for x in args.anchor.split("-"))
+        anchor = datetime(y, m, d, 0, 0, 0, tzinfo=timezone.utc)
     start_ms = int((anchor - timedelta(days=args.days)).timestamp() * 1000)
     end_ms = int(anchor.timestamp() * 1000)
 
@@ -730,6 +735,8 @@ def main(argv=None):
     g.add_argument("--per-day", type=int, default=8640)
     g.add_argument("--avg-chars", type=int, default=1500)
     g.add_argument("--seed", type=int, default=20260907)
+    g.add_argument("--anchor", default=None,
+                   help="语料区间的右端点 YYYY-MM-DD（UTC，半开）；缺省 2026-09-07")
 
     e = sub.add_parser("eval", help="跑检索评估")
     e.add_argument("--queries", required=True)

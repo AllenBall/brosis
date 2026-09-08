@@ -66,6 +66,12 @@ core/
 │   │   ├── MCPGate.swift         T5：3.5 相位门（locked / paused 拒绝 + 审计补写）
 │   │   ├── Store+MCPAudit.swift  T5：mcp_audit 读写、grant 列举与删除
 │   │   ├── Store+Integrity.swift 13 项悬空引用检查 + integrity_check + FTS integrity-check
+│   │   ├── Store+Export.swift    T16：3.8 加密导出（分段读）/ 导入（恢复与合并两种模式）
+│   │   │                         + D7 配额通知（quotaAction / expireAfterNotice）
+│   │   ├── ExportTypes.swift     T16：归档清单、行记录、范围、错误（没有加密、没有 SQL）
+│   │   ├── ExportKeyring.swift   T16：**独立口令** → PBKDF2 600k → HKDF 三把子密钥 + 强度门槛
+│   │   ├── ExportArchive.swift   T16：归档目录布局、块的封装 / 打开、manifest 读写与校验
+│   │   ├── SchemaV8.swift        T16：export_imports（归档粒度幂等）+ meta 里的配额通知键
 │   │   ├── Schema.swift          schema v1（3.2 全部表）
 │   │   ├── KeyProvider.swift     三个 KeyProvider 实现
 │   │   ├── SecureKey.swift       可清零的 256 位原始密钥
@@ -78,9 +84,9 @@ core/
 │   └── brosis-mcp/main.swift     T5：stdio 上的 MCP + admin 子命令（只链接 BrosisIPC）
 └── Tests/
     ├── mcp_client.py             T5：只用标准库的 MCP 客户端（端到端测试与手跑都用它）
-    └── BrosisCoreTests/          **209 个用例**（M1 的 132 + M2 c 批新增：T11 向量 19、
-                                  T13 同步 15、T12 叙述 24、T14 周台账 / 模式 / 最近活动 18，
-                                  外加既有套件里补的用例）
+    └── BrosisCoreTests/          **229 个用例**（M1 的 132 + M2 c 批：T11 向量 19、
+                                  T13 同步 15、T12 叙述 24、T14 周台账 / 模式 / 最近活动 18
+                                  + M2 d 批：T16 加密导出 12，外加既有套件里补的用例）
 ```
 
 **项目目录里没有任何构建产物**：SQLCipher 的 9.30 MiB amalgamation 与 sqlite-vec 都在
@@ -716,6 +722,14 @@ brosis.app 里的 MCPIPCService   ← 产品路径；LockController 持有 Store
 | 工具 | 时间窗 | 应用白名单 `apps != ["*"]` 时 | `fields = summary` 时 |
 |---|---|---|---|
 | `search` | `start` 被抬到窗口起点（结果里的 `appliedStart` 就是实际用的下界） | 内部多取 5 倍候选，按白名单过滤后再截到 `limit`；`grant.droppedByGrant` 报被滤掉几条 | 摘要本来就是 ≤ 100 token，不额外裁 |
+
+> **M2 d / T15**：`search` 的结果多一个 `queryEmbed`（`{source, elapsedMS, dimension}`），
+> 说明这次的查询向量是**服务端自己算的**、还是根本没算（开关关 / 没注入 / 字段前缀）。
+> 注入点与四道门见「MCP 的 `search` 怎么拿到查询向量」。**时间窗有一个副作用要知道**：
+> grant 的窗口是硬下界，所以经 MCP 的 `search` **一定带 `start`**，
+> 于是 `RetrievalOptions` 走的是"带过滤"的那套候选窗口
+> （`filteredFTSCandidateLimit` 2000、`filteredVectorK` 1000），比不带 `start` 直接调
+> `Store.search` 的候选窗更大、更慢。要与直接调用逐题对照时，两边都要传同一个 `start`。
 | `get_evidence` | core 的 `getEvidence` 按窗口挡下，进 `deniedByGrant`；**出现上下文（`before` / `after`）也按窗口起点截**，窗口之前的相邻观察一条都不给 | 白名单外的 id 进 `deniedByGrant`；**`before` / `after` 里白名单外的相邻观察逐条丢掉**（它们带 bundle id 与窗口标题），被丢掉的条数计进 `grant.droppedByGrant`，丢掉的行不占 `neighbors` 的名额（内部多取 8 倍候选再截；这条规则由 `MCPServiceTests.testDroppedNeighborsDoNotConsumeTheNeighborQuota` 钉住） | **不回 `text`、不回逐片段正文**，`redactedByGrant = true` |
 | `get_context` | `hours` 被窗口封顶，`hoursClampedByGrant` 报是否截过 | 过滤 apps / sessions / snippets，并**按裁剪后的片段重拼 `text`** | 每条片段截到 ≤ 100 token，再重拼 `text` |
 | `get_timeline` | `start` 被抬到窗口起点；整段落在窗口外报 `denied_by_grant` | 每个桶的应用分布过滤后，桶的 dwell / active / unknown / 观察数 / 切换数**按留下的应用重算**；`onlineUnionS` 算不回来，置 0 并列进 `droppedFields` | — |
@@ -1469,8 +1483,8 @@ w = 1.0（精确字段 / 1–2 字扫描 / FTS）   w = 0.5（向量，vectorWei
   它是**要随语料规模复核的常量**，不是一劳永逸的分界线。
 * **逐条命中的距离**写在 `SearchHit.vectorDistance` 上（语义是「向量通道也找到了它，距离是这么多」，
   与 `channel` 标了哪条无关）。`StoreMCPService` 直接把 `SearchResult` 与 `[SearchHit]` 编码出去，
-  所以这个字段**自动随 MCP 的 `search` 返回**——等 app 侧的 IPC 服务端能算查询向量之后
-  （见结果文件第 9 节第 1 条），MCP 客户端不用改协议就能拿到可信度信号。
+  所以这个字段**自动随 MCP 的 `search` 返回**。M2 d / T15 把查询向量接上之后
+  （见下一节），MCP 客户端不用改协议就已经能拿到这个可信度信号。
 * **向量通道按文本版本轮转**：一个版本平均被 2–3 条观察引用，直接按名次排会让前 10 条
   被 3 个版本吃光；轮转之后前 10 条来自 10 个不同版本，实测改写题 Recall@10 从 0.170 升到 0.214。
   FTS 通道不这么做——它是精确子串语义，同一段正文的多次出现本身就是证据。
@@ -1494,6 +1508,52 @@ w = 1.0（精确字段 / 1–2 字扫描 / FTS）   w = 0.5（向量，vectorWei
 `integrityReport()` 从 13 项加到 **16 项**，新增：
 「chunk 指向不存在的 text_version」「向量行没有对应的 chunk」「标了已嵌入却没有向量行的 chunk」。
 `maintenance()` 相应多做两件事：删孤儿向量行、把「标了已嵌入却没有向量行」的块改回待办。
+
+### MCP 的 `search` 怎么拿到查询向量（M2 d 批 / T15）
+
+c 批留了一个洞：`SearchRequest.queryVector` 要**调用方**算好塞进来，而
+`StoreMCPService.search` 只有一个查询串，于是经 `brosis-mcp` 过来的查询一律
+`no_query_vector`。T15 在服务端挂了一个**可注入**的钩子（`QueryEmbedder.swift`）：
+
+```swift
+public protocol QueryEmbedder: AnyObject, Sendable {
+    func queryVector(for text: String) throws -> [Float]?   // nil = 这次不算，按 no_query_vector 降级
+}
+
+// 注入点（app 侧在库解锁时调；`brosis-store serve` 不注入，行为与 c 批逐位相同）
+let service = StoreMCPService(store: store, queryEmbedder: embedder)
+service.setQueryEmbedder(nil)      // 摘掉
+```
+
+**core 仍然不加载任何模型**：实现在 app 包的 `BrosisModels.MLXQueryEmbedder`，
+core 只带 `ProviderQueryEmbedder`（把任意 `EmbeddingProvider` 包一层，测试用伪嵌入）。
+
+四道门，**顺序有意义**，前三道任意一道命中就一次模型调用都不发：
+
+| `queryEmbed.source` | 什么时候 | 会调模型吗 |
+|---|---|---|
+| `disabled` | `retrieval.vectorsEnabled == false`（产品默认） | **不会** |
+| `no_embedder` | 没注入（`brosis-store serve`、模型没装时 app 也可以不注入） | **不会** |
+| `field_prefix` | 查询带 `app:` / `host:` / … 前缀，本来就不走向量通道 | **不会** |
+| `unavailable` | 注入了但这次返回 nil（模型没装 / 正在卸载） | 问了一句，没加载 |
+| `embedder` | 真算了，`elapsedMS` / `dimension` 一起返回 | 会 |
+| `error:<原因>` | 算失败：**不算检索失败**，前三条通道照常返回 | 试过 |
+
+「库锁着」那一道不在这张表里：`MCPGate` 在 `locked` / `paused` 时根本不把调用交到这一层
+（3.5），所以锁着的时候连 `runSearch` 都进不来。
+
+**耗时随结果返回**：`search` 的结果对象多一个 `queryEmbed`
+（`{source, elapsedMS, dimension}`），审计的 `note` 里也有一份（`qvec=embedder embed_ms=18.5`）。
+3.4 的分层目标按它对：**查询嵌入热延迟 ≤ 150 ms**（`QueryEmbedTiming.hotBudgetMS`）。
+
+**不许持库锁调用它**：`runSearch` 是在 `store.search`（那里面才 `withLock`）之前算的向量。
+算一条查询向量在 Air 上是十几到几十毫秒的 GPU 活，持锁调用会把采集线程一起卡住。
+`QueryEmbedderTests.testQueryVectorIsComputedWithoutHoldingTheStoreLock`
+在嵌入器里再去读一次库来钉这条（持锁就会超时）。
+
+**常驻 + 空闲卸载的规矩也在 core**（`QueryEmbedderPolicy`，纯函数）：
+首次用时加载 → 空闲 **10 分钟**卸载 → 锁屏 / 关库 / 用户关开关**立刻**卸载。
+放在 core 是为了让 `swift test` 能把它钉住；真正持有权重的类在 app 侧。
 
 ---
 
@@ -1565,3 +1625,204 @@ D19 那句「解决了锁屏切换漏事件的问题」同时命中「锁屏」�
 
 长度按**汉字数**在代码里截断（默认 150，优先切在句末符号上），
 不只写在提示词里——D19 结论 5 说得很清楚，只靠提示词管不住。
+
+---
+
+## 加密导出与导入（3.8 / D7，M2 d 批 / T16）
+
+3.8 的「备份：加密导出另有独立口令；删除不能覆盖已导出的副本，需要在 UI 里如实提示」
+与 D7 的「满后最旧先删且删前通知并可先加密导出」。
+
+### 分层
+
+| 层 | 位置 | 管什么 | 不管什么 |
+|---|---|---|---|
+| 类型 | `ExportTypes.swift` | 清单、行记录、范围、错误、配额通知的结构 | 加密、文件、SQL |
+| 密钥 | `ExportKeyring.swift` | 口令强度、PBKDF2 → HKDF、manifest 的 HMAC | 文件、SQL |
+| 文件 | `ExportArchive.swift` | 目录布局、块的封装 / 打开、清单读写与三层校验 | 一行 SQL 都没有 |
+| 库 | `Store+Export.swift` | 分段取数、两种模式落库、配额通知 | 一个字节的密文都不碰 |
+
+**为什么没有像 D17 那样单开一个 target**：同步那一套要管目录扫描、iCloud 占位符下载、
+ack 与清理、两个后台循环，值得单列；导出只有"读库 → 加密 → 写文件"一条直线，
+跨 target 反而要把流式接口拆成两半。四个文件都在 `BrosisCore` 里，互相之间的边界靠上表。
+
+### 归档格式：**目录**，不是单文件容器
+
+```text
+<归档目录>/
+├── manifest.json                 明文清单（格式版本、时刻、来源 device_id、范围、加密参数、
+│                                 每块校验、总校验、清单 HMAC；**没有一个字节的正文**）
+└── blocks/000000.blk             每块 ≤ 8 MiB 明文，AES-256-GCM
+    blocks/000001.blk
+```
+
+块文件的字节布局：
+
+```text
+0..5   magic "BRSEXP"
+6      块格式版本（1）
+7      保留，恒 0
+8..    AES-GCM combined（12 字节 nonce + 密文 + 16 字节 tag）
+```
+
+明文是 JSON Lines，行首 `k` 是类型：`h` 块头、`t` 正文、`o` 观察（含它的 occurrence）、
+`d` 删除审计、`s` 会话、`l` 台账、`p` 采集策略、`e` 运行期事件。
+
+选目录不选单文件容器的四条理由：导出端一次只攒一块明文（8 MiB）就落盘、导入端一次只解一块，
+内存有上界；坏一块能说清是**哪一块**；不输口令就能看清单（面对一堆归档不用一个个试口令）；
+要单文件时 Finder 右键压缩就是一个文件，反过来把容器拆成可校验的块还得写解包器。
+代价：归档是一个目录（拷贝时不能只拖一个文件），清单明文暴露了时间范围与 bundid 名单
+（应用标识，不是内容）。
+
+### 密钥：第四把，与前三把没有任何共同输入
+
+| | 是什么 | 存在哪 | 用途 |
+|---|---|---|---|
+| 库密钥 | 256 位随机 | data-protection 钥匙串 | SQLCipher 开库 |
+| 同步密钥 | 256 位随机 | 加密库里（`sync_state`） | 只封同步段文件 |
+| 配对口令 | 24 字符 / 120 bit | 哪都不存 | 解开 `keyring/*.wrapped` |
+| **导出口令** | 用户自己想的 | **哪都不存**——不进钥匙串、不进库、不进清单、不进日志、不进事件、**不走命令行参数** | 只封归档 |
+
+派生链：
+
+```text
+PBKDF2-HMAC-SHA256(口令, 16 字节随机盐, 600,000 次) → 32 字节 PRK
+  ├─ HKDF-SHA256(PRK, "brosis-export/1 data")     → 数据密钥（封每一块）
+  ├─ HKDF-SHA256(PRK, "brosis-export/1 manifest") → 清单的 HMAC 密钥
+  └─ HKDF-SHA256(PRK, "brosis-export/1 verify")   → 校验值，清单里只存它的 SHA-256
+```
+
+迭代数与不用 Argon2id 的理由都沿用 3.9（OWASP 2023 建议值；系统里只有 CommonCrypto 的 PBKDF2）。
+`verifier` 让「口令错」能在**碰任何一块之前**判出来，于是错误消息能明确说是口令错而不是
+含糊的解密失败。它确实给离线猜口令提供了一个快速判据——但密文本身（GCM tag）本来就是同样的判据，
+真正的防线是 600,000 次 PBKDF2 与口令强度。
+
+**口令强度门槛**（`ExportKeyring`）：≥ 12 个字符、≥ 2 类字符（小写 / 大写 / 数字 / 符号）、
+不能是同一个字符重复、≤ 1024 字符。不合格**在派生密钥之前**就拒绝（省掉 60 万次 PBKDF2），
+一个字节都不会写出去。导入端**不查强度**：老归档可能是按更早的规则做的，强度是导出时的门槛，
+不是解密的门槛。
+
+### 四层校验，报错要能分辨
+
+| 层 | 查什么 | 要口令吗 | 错误 |
+|---|---|---|---|
+| 1 | 每块密文的 SHA-256 ↔ 清单 | 否 | `blockChecksumMismatch(seq:)` = **文件坏了 / 被改过** |
+| 2 | 全部块校验和拼起来再哈希 ↔ `total_checksum` | 否 | `totalChecksumMismatch` = 少了一整块 / 换了序 |
+| 3 | 清单的 HMAC-SHA256 | 是 | `manifestTampered` = 口令对，但计数 / 范围 / 块列表被动过 |
+| 4 | GCM tag（AAD = 归档身份 + 块位置 + 该块的字节数与行数） | 是 | `blockDecryptFailed(seq:)` = 密钥不对，或块被挪了位置 |
+
+外加两条内容层：解出来的明文字节数与行数要对得上清单（`corruptBlock`），
+以及每段正文的 SHA-256 要与它自己的 `sha` 对得上（改了一个字节又把上面四层都重算过也拦得住）。
+
+口令错走的是 `wrongPassphrase`（比较 `verifier`），**在这四层之前**，一块都没读。
+
+### 导出：分段读 + 起始水位线，不是快照事务
+
+`Store` 是单连接 + 一把锁。导出如果开长读事务，1 个月库要读几十秒，这段时间采集端一条都写不进来。
+所以导出**不开长事务**：开头取一次锁记下 `MAX(observations.id)` 当一致性边界（写进清单的
+`scope.max_observation_id`），之后每批 200 条取一次锁、加密与落盘都在锁外做，只导 `id ≤ 边界` 的行。
+
+于是归档是库的一个**前缀**：导出开始之后写进来的观察不在里面——这是有意的，而且边界写在清单里可核对。
+
+导出：`observations`（含用户删除的墓碑行）、`text_versions`、`occurrences`、`deletions`、
+`sessions`、`ledgers`，可选 `app_policies` 与运行期事件（`jobs` 里 `runtime_event:%` 的行）。
+
+**不导出**，各有各的理由：
+
+| 不导出 | 理由 |
+|---|---|
+| `capture_audit` / `capture_stats` | 本机采集质量的度量，不是证据；恢复到另一台机器上没有意义（3.3） |
+| `mcp_audit` | 授权与访问审计，里面有客户端 id 与对端签名信息。归档是要拿出机器的东西，把访问审计一起带走只扩大敏感面、不增加证据价值（3.6） |
+| `grants` | 3.9 的同一条：各机独立的可变配置 |
+| `sync_state` / `sync_peers` | 同上，而且 `sync_state` 里存着**同步密钥**——它绝不能进一份用另一把口令保护的归档 |
+| `chunks` / `vec_chunks` | 本机派生数据，删了能重建（v4 的口径） |
+| 缩略图文件 | D10 默认关；归档只装库里的行 |
+
+**范围**：时间用半开区间 `[start, end)` 作用在 `observations.ts`；应用用 bundle id 白名单。
+会话按 `start` 落在窗口内过滤，台账按 `period` 与窗口两端换算出的日 / ISO 周标签比较
+（两种标签都是字典序 = 时间序，时区用 `retrieval.timeZone`）。
+**限定应用范围时不导 `deletions` / `sessions` / `ledgers`**：删除审计的目标是观察 id、
+会话与台账是整条时间线，都无法按应用切开——切开就会在导入端删掉或算错范围外的记录。
+这一条会写进清单的 `notes`。
+
+**脱敏**：正文在入库前就已经过 app 的 `Redactor`，库里存的就是脱敏后的那一份，
+归档原样搬——不做二次脱敏、也不还原（3.8 的口径是"导出的是库里那一份"）。
+
+### 导入：恢复与合并两种模式
+
+| | 恢复 `restore` | 合并 `merge` |
+|---|---|---|
+| 触发 | 目标库没有观察 / 正文 / occurrence / 删除审计 / 会话 / 台账 | 其他一切情况 |
+| observation id | **原样写回**源 id，`origin_device` / `origin_id` 照抄 | 走 T13 口径：本机新 id + `(origin_device, origin_id)`；归档来自**本机自己**时按源 id 写回、origin 留 NULL |
+| 幂等 | 归档粒度（`export_imports.archive_id`） | 归档粒度 + 逐条身份判定 |
+| sessions / ledgers | 原样导入（evidence 里的 id 仍然对得上） | **不导**：派生结果各机自算（3.9 的同一条口径） |
+| 运行期事件 | 原样导入 | 不导（`jobs` 没有跨库主键，重复导会翻倍） |
+| `app_policies` | 覆盖式写入 | 只补缺失的，**不覆盖本机策略**（3.12 的档位是这台机器上的用户决定） |
+| 用户删除墓碑 | 原样写审计行（归档里的观察本来就带 `deleted_at`，状态已经对了） | 写审计行**并在本机副本上重放级联**（3.8 的顺序），审计行里的计数按**本机实得**重写 |
+
+一条记录的**全局身份** = `(归档里的 origin_device ?? 清单的 source_device, origin_id ?? 源 id)`。
+
+**不复活已删除的记录**：目标库里已经有这条记录（哪怕只剩墓碑）就跳过，
+计进 `observations_skipped_tombstoned`。3.8 的删除是合规动作，导一份更早的归档不该悄悄撤销它。
+
+**为什么恢复模式还要 `export_imports`**（schema v8）：合并模式的逐条判据是
+`(origin_device, origin_id)`，恢复写回的记录 `origin_device` 是 NULL，看起来就是"本机自己产生的"，
+逐条判定认不出重复，再导一次就会翻倍。所以再加一层归档粒度的幂等：同一个 `archive_id`
+第二次导入整份跳过。它顺带也是审计——这个库里的数据是从哪一份归档恢复来的。
+
+**事务粒度**：一块一个事务。块内失败整块回滚；已提交的块留着，重跑时按逐条幂等继续。
+正文在归档内**全局去重**（不像同步段文件那样每段自包含），并且总排在第一次引用它的观察之前，
+所以后面的块解析时那条正文要么已经在库里（前面的块已提交），要么就在本块里。
+导入收尾会把"插进来却没有任何 occurrence 的正文"扫掉（观察被跳过时会出现），
+`sweepOrphanVersions` 一并清 FTS 行与向量行。
+
+**schema 版本**：v1 的归档只在**同一个 schema 版本**之间导入导出，
+清单里的 `schema_version` 与本版本不同就报 `schemaMismatch`，不猜着读、也不自动迁移。
+归档格式版本（`version`）更新的同样直接拒绝。
+
+### 配额联动（D7 / 3.8）
+
+数据层三个入口，一行 UI 都不画（app 侧接法见 app/README）：
+
+```swift
+let action = try store.quotaAction()          // 等级 / 用量 / 会删掉哪一段 / 建议导出范围 / 一行文案
+try store.acknowledgeQuotaAction(archiveID:)  // 用户确认通知（可附上"我已经先导出了"的归档 id）
+switch try store.expireAfterNotice() {        // 没确认过就 .blocked，**不删**
+case .notNeeded(let a): …
+case .blocked(let a):   …                     // 弹通知，通知里带"先加密导出"
+case .expired(let a, let report): …           // 确认过才真的按最旧先删；删完确认作废
+}
+```
+
+- 等级：`< 80%` ok、`≥ 80%` warning、`> 100%` full（比例按**原文净载荷**算，与 2.4 / `expire()` 同口径）。
+- `wouldDeleteObservations` 是**估算**：按"平均每条观察多少字节原文"倒推要删多少条，
+  不逐条模拟（那要对每条观察查一次共享正文的引用计数）。真正删多少由 `expire()` 当场决定；
+  这个数字只用来写通知与建议导出范围。
+- 事件只在**跨档**时写一条（`runtime_event:quota_warning` / `quota_full`），同一档反复查不会刷爆 `jobs`。
+- `expire()` 本身的语义**没有变**（夜间任务与压测还用它）；`expireAfterNotice()` 是产品路径上多的那一层。
+- 确认**只管一次**：删完就清掉，下次满了要重新确认。
+
+`QuotaAction.message` 是给通知与窗口用的一行中文，满了那一档必然包含
+「先做一次加密导出」与「不会影响已经导出的副本」两句——3.8 要求的如实提示就在这里。
+
+### `brosis-store` 的导出子命令
+
+```bash
+# 口令**不走命令行参数**（ps 看得见）。两条路，按这个顺序取：
+#   1. 环境变量 BROSIS_EXPORT_PASSPHRASE（非空时用它）
+#   2. 标准输入读一行
+printf '%s' "$PASS" | brosis-store export --dir <库> --key-file <钥> --out <归档目录> \
+    [--start <ms>] [--end <ms>] [--apps a,b] [--include-policies] [--include-events] \
+    [--block-bytes 8388608] [--batch 200]
+
+brosis-store export-info    --archive <归档目录>          # 只读清单，**不需要口令**
+printf '%s' "$PASS" | brosis-store export-verify --archive <归档目录>   # 逐块解密并对账，不写库
+printf '%s' "$PASS" | brosis-store import --dir <库> --key-file <钥> --archive <归档目录> \
+    [--mode restore|merge] [--dry-run]
+brosis-store export-imports --dir <库> --key-file <钥> [--limit 20]
+brosis-store quota-action   --dir <库> --key-file <钥> [--acknowledge [--archive-id <id>]] \
+    [--expire [--force]] [--to-bytes N]
+```
+
+`import` 在**目标库还不存在**时按清单里的 `source_device` 建库，于是恢复出来的 `device_id`
+与源库一致、源 id 原样写回、`evidence` 与台账里的 id 全都还对得上。

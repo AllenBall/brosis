@@ -256,6 +256,10 @@ public final class Store: @unchecked Sendable {
             // 新库这里只补审计行。
             try conn.run("INSERT INTO migrations(version, applied_at, note) VALUES (?,?,?);",
                          [.int(6), .int(now), .text(SchemaV6.note)])
+            // v8（M2 d / T16）：加密导出 / 导入的归档粒度幂等表。新库直接建。
+            try conn.exec(SchemaV8.createAllForNewDatabase)
+            try conn.run("INSERT INTO migrations(version, applied_at, note) VALUES (?,?,?);",
+                         [.int(8), .int(now), .text(SchemaV8.note)])
         }
     }
 
@@ -365,6 +369,21 @@ public final class Store: @unchecked Sendable {
                            + "ON CONFLICT(version) DO UPDATE "
                            + "SET applied_at = excluded.applied_at, note = excluded.note;",
                              [.int(6), .int(now), .text(SchemaV6.note + "，由 v\(found) 就地迁移")])
+            }
+        }
+        // v8（M2 d / T16）：export_imports。纯新增一张表 + 一个索引，先查再建，能重跑。
+        if found < 8 {
+            try conn.transaction {
+                let tables = Set(try conn.textColumn(
+                    "SELECT name FROM sqlite_schema WHERE type = 'table';"))
+                if !tables.contains("export_imports") {
+                    try conn.exec(SchemaV8.createAllForNewDatabase)
+                }
+                try conn.run("UPDATE meta SET value = '8' WHERE key = 'schema_version';")
+                try conn.run("INSERT INTO migrations(version, applied_at, note) VALUES (?,?,?) "
+                           + "ON CONFLICT(version) DO UPDATE "
+                           + "SET applied_at = excluded.applied_at, note = excluded.note;",
+                             [.int(8), .int(now), .text(SchemaV8.note + "，由 v\(found) 就地迁移")])
             }
         }
     }

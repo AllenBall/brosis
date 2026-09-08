@@ -17,7 +17,8 @@ D12）。**两者字段完全一样**，脚本不区分来源，只看 `source` 
   "source": "synthetic",
   "generated_at": "2026-09-07T00:00:00Z",
   "seed": 20260907,
-  "quota": {"活动定位": 20, "原文细节": 20, "跨来源": 10, "无答案或已删除": 10},
+  "quota": {"活动定位": 25, "原文细节": 26, "跨来源": 13, "无答案或已删除": 14,
+            "活动模式": 14, "最近活动": 8},
   "corpus": { "...见 §4..." },
   "deletions": [ "...见 §5..." ],
   "scoring": { "...见 §6..." },
@@ -32,7 +33,7 @@ D12）。**两者字段完全一样**，脚本不区分来源，只看 `source` 
 | `source` | 是 | `synthetic`（合成，结论只能证明方法成立）或 `real`（你按真实事件出的题） |
 | `generated_at` | 是 | UTC ISO8601 |
 | `seed` | 合成集必填 | 生成用的随机种子；同 seed 同输入 → 逐字节相同的查询集 |
-| `quota` | 是 | 四类各多少题。脚本会核对实际题数与它一致，不一致报错 |
+| `quota` | 是 | 六类各多少题。脚本会核对实际题数与它一致，不一致报错 |
 | `corpus` | 合成集必填 | 见 §4 |
 | `deletions` | 否 | 建库后要执行的删除操作，用来造「已删除」题；见 §5 |
 | `scoring` | 是 | 评分规则，原样写进两阶段的判题提示；见 §6 |
@@ -70,8 +71,8 @@ D12）。**两者字段完全一样**，脚本不区分来源，只看 `source` 
 | 字段 | 必填 | 说明 |
 |---|---|---|
 | `id` | 是 | 全集唯一。合成集用 `loc-NN` / `det-NN` / `cross-NN` / `none-NN` / `del-NN` |
-| `class` | 是 | 只能是 `活动定位` / `原文细节` / `跨来源` / `无答案或已删除`（草稿的四类；草稿里写作「活动 / 定位」，这里去掉空格便于当键用） |
-| `holdout` | 是 | `true` = 留出题，不参与调参。合成集按类分层取每类第 3、6、9… 题，确定性 |
+| `class` | 是 | 六类之一：`活动定位` / `原文细节` / `跨来源` / `无答案或已删除`（草稿的四类；草稿里写作「活动 / 定位」，这里去掉空格便于当键用）+ M2 d / T17 加的 `活动模式` / `最近活动`（答案是台账 / 模式 / 最近活动这类聚合量） |
+| `holdout` | 是 | `true` = 留出题，不参与调参。合成集分两段取，**都不用随机数**：M1 那 60 题按类分层、每类 id 升序取第 3、6、9… 题（18 道，M2 扩题时原样留着）；M2 新增的 40 题按 id 升序每 10 道取第 3 / 6 / 9 道（12 道）。合计 30 道，与 §7 第 5 条一致 |
 | `q` | 是 | **给 Agent 看的自然语言问题**。第二阶段原样进提示 |
 | `search` | 是 | **第一阶段实际发给 `brosis-store search` 的参数**。`q` 是检索串（可带 `app:` / `host:` / `path:` / `title:` / `url:` 前缀），`start` / `end` 是 Unix 毫秒半开区间 `[start, end)`，`app` 是 bundle_id 等值过滤，`limit` 默认 10。为 `null` 的键不传 |
 | `expect` | 是 | `hit`（可答，必须拿到证据）或 `none`（不可答，必须一条都不返回） |
@@ -84,6 +85,43 @@ D12）。**两者字段完全一样**，脚本不区分来源，只看 `source` 
 | `answer_source` | 是 | 答案哪来的：`合成语料全量重算` / `原始任务` / `人工回忆` / `排除清单` |
 | `authored` | 是 | 出题日期。草稿要求「出题时记录日期」 |
 | `notes` | 否 | 备注 |
+| `difficulty` | M2 起有 | `易` / `中` / `难`。合成集**由规则算出**（`difficulty_of()`），不是手工标的；真实题手填 |
+| `tool` | M2 起有 | 这道题该用哪个工具答：`search`（默认）/ `get_day_ledger` / `get_week_ledger` / `get_patterns` / `get_timeline` / `get_item` / `get_context` / `recent_activity` |
+| `truth_mode` | M2 起有 | `relevant_ids`（有全量真值）或 `evidence_match`（`relevant` 留空，按期望证据判，Recall 记 null） |
+| `tool_call` | `tool != search` 时有 | `{"mcp_tool": "...", "cli": ["ledger", "--date", "2026-08-19", "--tz", "UTC"]}`。`cli` 原样拼到 `brosis-store <cli[0]> --dir … --key-file …` 后面 |
+| `tool_check` | `tool != search` 时有 | 见 §2b：一组能从语料精确算出来的断言，`make_synthetic_queryset.py verify-tools` 真的调 `brosis-store` 逐条核对 |
+
+**向后兼容**：`schema` 仍然是 `brosis/queryset@1`。M2 加的五个字段都是**追加**的，
+M1 的读法（只看 `id` / `class` / `holdout` / `q` / `search` / `expect` / `evidence` /
+`relevant` / `answer_check`）一个字都不用改；没有这些字段的老查询集照样能跑
+（脚本一律用 `q.get("tool", "search")` 这种带缺省的读法）。
+
+## 2b. `tool_check`：工具题的判据（M2 d / T17）
+
+台账 / 活动模式 / 最近活动这类题问的是**聚合量**，不是"某几条观察"。给它们编一份全量
+`relevant` 既臃肿又没意义（前 10 条里随便哪 10 条都算相关）。所以这类题 `relevant` 留空、
+`truth_mode = "evidence_match"`，真正的判据放在 `tool_check` 里：
+
+```json
+"tool_check": [
+  {"path": "observations", "op": "eq", "value": 60476, "note": "整周存活观察数"},
+  {"path": "dayTotals.*.observations", "op": "sum_eq", "value": 60476, "note": "7 天之和 = 周总数"},
+  {"path": "check.week_online_union_s", "op": "eq", "value": "@check.sum_online_union_s",
+   "note": "并集时长：周 = 7 天之和"}
+]
+```
+
+| 键 | 说明 |
+|---|---|
+| `path` | 点号分段取工具输出里的值；数字段是数组下标；`*` 表示"数组的每一个元素"（结果是个列表） |
+| `op` | `eq` 相等 / `len` 列表长度 / `all_eq` 每个元素都等于 / `sum_eq` 元素之和等于 / `all_le` 每个元素 ≤ / `le` ≤ / `ge` ≥（列表则比长度） |
+| `value` | 期望值；写成 `"@另一条 path"` 就是**两条路径互比** |
+| `note` | 人读的一句话，写进核对报告 |
+
+**两条口径**：① 断言只用**条数与结构**，不用 dwell 秒数（合成流里约 10% 的观察
+`source_state` 是 `permission_lost` / `timeout`，按 3.7 不计入 dwell，秒数不是确定量）；
+② 期望值**按 `deletions` 执行之后的库算**——删除在建库之后、评估之前执行，
+和每道题的 `relevant` 已经扣掉被删观察是同一条口径。
 
 ## 3. `evidence`：期望证据
 
@@ -191,4 +229,7 @@ PYTHONDONTWRITEBYTECODE=1 python3 eval_stage1.py --check-corpus …
    第二阶段跟着用同一批 id 判「引用有没有效」（见 §6 的退档表），
    所以 `evidence` 填得越准，两个阶段的判分越靠得住。
 4. 每题填 `authored`；30 题定稿后固定不动，随实现调整的只能是新题。
-5. 留出题：`holdout: true`。M1 是 60 题留 18 题，M2 扩到 100 题时留 30 题。
+5. 留出题：`holdout: true`。M1 是 60 题留 18 题，M2 扩到 100 题时留 30 题
+   （**M1 那 18 道原样留着**，新增的 40 题里再取 12 道）。
+   留出题只在 `monthly_report.py` 里跑：`eval_stage1.py` 默认排除它们，
+   `--include-holdout` 全跑、`--holdout-only` 只跑留出题。

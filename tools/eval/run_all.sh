@@ -1,7 +1,9 @@
 #!/bin/sh
 # brosis M1 / T6：评估与月报一键复现。
 #
-# 建 1 个月合成库 → 造 60 题 → 第一阶段 → 变异检验 → 第二阶段（provider=none）→ 月报。
+# 建 1 个月合成库 → 造 100 题 → 第一阶段（--include-holdout，整套题都跑）→ 变异检验
+# → 第二阶段（provider=none）→ 月报。M2 d / T17 起查询集是 100 题（文件名还叫 queryset_60.json），
+# T17 那条更全的流水线在 run_t17_eval.sh 里。
 # 全部产物落 $SCRATCH（默认 ~/Library/Caches/brosis-build/m1-eval/），**项目目录里不留任何东西**。
 #
 #   sh tools/eval/run_all.sh                    # 实测 124 / 146 / 153 / 153 s（M4 Air，含 release 构建）
@@ -53,7 +55,7 @@ rm -rf "$W/db" "$W/db.key"
 "$BIN" maintenance --dir "$W/db" --key-file "$W/db.key" > "$R/maintenance_1.json"
 "$BIN" stats --dir "$W/db" --key-file "$W/db.key" --detail > "$R/stats_before_delete.json"
 
-echo "== 2. 造 60 题查询集（真值对 JSONL 全量重算）=="
+echo "== 2. 造 100 题查询集（真值对 JSONL 全量重算）=="
 /usr/bin/time -l $PY "$E/make_synthetic_queryset.py" gen \
   --jsonl "$W/synth_1m.jsonl" --corpus "$W/queries_1m.json" \
   --out "$W/queryset_60.json" --seed "$SEED" \
@@ -87,7 +89,9 @@ $PY "$E/make_synthetic_queryset.py" apply-deletions \
 "$BIN" ledger --dir "$W/db" --key-file "$W/db.key" --days --tz UTC > "$R/ledger_days.json"
 
 echo "== 4. 第一阶段：检索能不能拿到证据 =="
-/usr/bin/time -l $PY "$E/eval_stage1.py" \
+# --include-holdout：本脚本要跑**整套题**（第 7 步的判分器自检要给每一道题造答案）。
+# 日常调参用默认口径（留出题排除），月报用 --holdout-only，见 README §2.1b / §2.2。
+/usr/bin/time -l $PY "$E/eval_stage1.py" --include-holdout \
   --queryset "$W/queryset_60.json" --bin "$BIN" \
   --dir "$W/db" --key-file "$W/db.key" --check-corpus \
   --batch-file "$W/stage1_batch.json" \
@@ -98,7 +102,7 @@ echo "== 5. 变异检验：故意造四道注定失败的题，核对失败归�
 $PY "$E/make_synthetic_queryset.py" mutate \
   --queryset "$W/queryset_60.json" --stage1 "$R/stage1.json" \
   --deletions "$R/deletions.json" --out "$W/queryset_mut.json" > "$R/mutate.json"
-$PY "$E/eval_stage1.py" --queryset "$W/queryset_mut.json" --bin "$BIN" \
+$PY "$E/eval_stage1.py" --include-holdout --queryset "$W/queryset_mut.json" --bin "$BIN" \
   --dir "$W/db" --key-file "$W/db.key" --batch-file "$W/stage1_mut_batch.json" \
   --out-json "$R/stage1_mut.json" --out-md "$R/stage1_mut.md" > "$R/stage1_mut_stdout.json"
 $PY "$E/make_synthetic_queryset.py" verify-mutations \
@@ -112,7 +116,9 @@ $PY "$E/eval_stage2.py" \
   --out-json "$R/stage2.json" --out-md "$R/stage2.md" > "$R/stage2_stdout.json"
 
 echo "== 7. 判分器自检：两套「已知答案」+ 真实题路径的引用判据 =="
-# 好答案：抄标准答案 + 引真值 id；坏答案：可答题瞎编、不可答题硬答。全 60 题应当分别全过 / 全挂。
+# 好答案：抄标准答案 + 引真值 id；坏答案：可答题瞎编、不可答题硬答。100 题应当分别全过 / 全挂。
+# 工具题（M2 d / T17）的 relevant 是空的，好答案改引第一阶段判定「满足期望证据」的 id
+# （eval_stage2.py 的 citation_basis 会自动退到 evidence_match 那一档）。
 $PY - "$W/queryset_60.json" "$R/stage1.json" "$W/answers_good.json" "$W/answers_bad.json" <<'PYEOF'
 import json, sys
 qs = json.load(open(sys.argv[1], encoding="utf-8"))
@@ -125,7 +131,9 @@ for q in qs["queries"]:
         bad[q["id"]] = {"answer": "你当时在看一份季度报告。", "unanswerable": False,
                         "cited_evidence_ids": [123]}
     else:
-        cited = [i for i in got if i in set(q["relevant"])][:3]
+        rel = set(q.get("relevant") or [])
+        cited = ([i for i in got if i in rel][:3] if rel
+                 else (st[q["id"]].get("evidence_matched_ids") or [])[:3])
         good[q["id"]] = {"answer": q["answer"], "unanswerable": False,
                          "cited_evidence_ids": cited}
         bad[q["id"]] = {"answer": "没有找到相关内容。", "unanswerable": True,
@@ -149,7 +157,8 @@ $PY "$E/eval_stage2.py" --queryset "$W/queryset_60.json" --stage1 "$R/stage1.jso
 #     构造两套答案：好答案引「满足期望证据」的 id；坏答案引「喂过但不满足期望证据」的 id
 #     （没有这种 id 时退而引一个根本不存在的 id）。坏答案必须一题都不过——
 #     第一次验收指出的「relevant 为空时引什么都算有效」就是在这里回归。
-$PY "$E/eval_stage1.py" --queryset "$E/queryset.example.json" --bin "$BIN" \
+# 也要 --include-holdout：这份真实题样本只有 4 道，下面第 7b 步要给**每一道**造答案
+$PY "$E/eval_stage1.py" --include-holdout --queryset "$E/queryset.example.json" --bin "$BIN" \
   --dir "$W/db" --key-file "$W/db.key" --check-corpus \
   --batch-file "$W/stage1_example_batch.json" \
   --out-json "$R/stage1_example.json" --out-md "$R/stage1_example.md" \

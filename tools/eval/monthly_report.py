@@ -232,6 +232,52 @@ def build(args):
         "overrides": overrides,
         "detail_top": detail_rows(raw)[:12],
     }
+    out["retrieval"] = retrieval_section(args)
+    return out
+
+
+def retrieval_section(args):
+    """月报的**检索回归**：留出题在这里跑，也只在这里跑。
+
+    计划 4.3 要「留出 30 题作独立测试」。`eval_stage1.py` 默认把 `holdout: true` 的题排除，
+    所以平时调参看不到它们；月报接一份 `--stage1`（一般是 `--holdout-only` 跑出来的）
+    和一份 `--triage`（六类归因），把"这个月留出题上还答不出什么"写进同一张报表。
+    两个参数都不给就是「未提供」，月报照常只报存储。
+    """
+    out = {"provided": False, "note": "没给 --stage1，本期只报存储"}
+    if not args.stage1:
+        return out
+    st = json.load(open(os.path.expanduser(args.stage1), encoding="utf-8"))
+    g = st.get("overall") or {}
+    out = {
+        "provided": True,
+        "stage1_file": os.path.basename(os.path.expanduser(args.stage1)),
+        "holdout_mode": st.get("holdout_mode"),
+        "queries": st.get("queries"),
+        "queryset_total_queries": st.get("queryset_total_queries"),
+        "hit_queries": g.get("hit_queries"),
+        "none_queries": g.get("none_queries"),
+        "recall@10": g.get("recall@10"),
+        "precision@10": g.get("precision@10"),
+        "mrr@10": g.get("mrr@10"),
+        "passed": g.get("passed"),
+        "none_with_false_positives": g.get("none_with_false_positives"),
+        "target_recall": 0.90,
+        "meets_target": (st.get("target_2_4") or {}).get("met"),
+        "buckets": st.get("buckets"),
+        "note": ("留出题（holdout）只在月报里跑：`eval_stage1.py --holdout-only`。"
+                 if st.get("holdout_mode") == "only" else
+                 "注意：这份 stage1 的留出题口径是 %r，不是月报建议的 `only`。"
+                 % st.get("holdout_mode")),
+    }
+    if args.triage:
+        tr = json.load(open(os.path.expanduser(args.triage), encoding="utf-8"))
+        out["triage_file"] = os.path.basename(os.path.expanduser(args.triage))
+        out["six_class_counts"] = tr.get("six_class_counts")
+        out["failures"] = tr.get("failures")
+        out["holdout_failures"] = tr.get("holdout_failures")
+        out["annotated"] = len(tr.get("annotated") or [])
+        out["disagreements"] = len(tr.get("disagreements") or [])
     return out
 
 
@@ -326,6 +372,34 @@ def markdown(out):
     L.append("| 原文 b-tree / 原文净载荷（页开销） | %s |"
              % ("未提供" if ra["content_over_payload"] is None
                 else "%.4f×" % ra["content_over_payload"]))
+
+    r = out.get("retrieval") or {}
+    L.append("\n## 检索回归（留出题）\n")
+    if not r.get("provided"):
+        L.append("未提供（%s）。留出题的跑法：`eval_stage1.py --holdout-only`，"
+                 "再把它的 JSON 用 `--stage1` 传进月报。\n" % r.get("note"))
+    else:
+        L.append("| 项 | 值 |")
+        L.append("|---|---|")
+        L.append("| 来源 | `%s`（留出题口径 `%s`，%s / %s 题） |"
+                 % (r["stage1_file"], r["holdout_mode"], r["queries"],
+                    r["queryset_total_queries"]))
+        L.append("| 可答题 / 不可答题 | %s / %s |" % (r["hit_queries"], r["none_queries"]))
+        L.append("| Recall@10 / Precision@10 / MRR@10 | %s / %s / %s |"
+                 % tuple("未提供" if r.get(k) is None else "%.3f" % r[k]
+                         for k in ("recall@10", "precision@10", "mrr@10")))
+        L.append("| 通过 / 负例误报 | %s / %s |" % (r["passed"], r["none_with_false_positives"]))
+        L.append("| 2.4 目标 Recall@10 ≥ 0.90 | %s |"
+                 % ("达标" if r["meets_target"] else "**未达标**"))
+        if r.get("six_class_counts"):
+            L.append("| 4.4 六类归因（`%s`） | %s |"
+                     % (r["triage_file"],
+                        "、".join("%s %d" % (k, v) for k, v in r["six_class_counts"].items())))
+            L.append("| 留出题里没过的 | %s |"
+                     % (", ".join(r.get("holdout_failures") or []) or "无"))
+            L.append("| 人工标注 / 与规则分歧 | %s / %s |"
+                     % (r.get("annotated"), r.get("disagreements")))
+        L.append("\n> %s\n" % r["note"])
     L.append("")
     return "\n".join(L)
 
@@ -343,6 +417,11 @@ def main(argv=None):
     p.add_argument("--thumbs-bytes", type=int, default=None)
     p.add_argument("--models-bytes", type=int, default=None)
     p.add_argument("--temp-bytes", type=int, default=None)
+    p.add_argument("--stage1", default=None,
+                   help="eval_stage1.py 的 JSON（建议用 --holdout-only 跑出来的那份）："
+                        "留出题的检索回归只在月报里做")
+    p.add_argument("--triage", default=None,
+                   help="triage_failures.py 的 JSON：把 4.4 的六类归因一并写进月报")
     p.add_argument("--out-md", default=None)
     p.add_argument("--out-json", default=None)
     args = p.parse_args(argv)

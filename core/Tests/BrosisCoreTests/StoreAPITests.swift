@@ -30,12 +30,14 @@ final class StoreAPITests: XCTestCase {
             try conn.scalarText("SELECT value FROM meta WHERE key = 'schema_version';")
         }
         XCTAssertEqual(version, String(Schema.version))
-        // 新库直接建到最新版，但 migrations 表里每一版各留一行审计（T5 起是 v1 + v2）
-        XCTAssertEqual(try store.count(table: "migrations"), Schema.version)
+        // 新库直接建到最新版，但 migrations 表里每一版各留一行审计。
+        // 版本号**不一定连续**：并行任务预分配了号段，没被认领的号会留空（见 Schema.migrationVersions）。
+        XCTAssertEqual(try store.count(table: "migrations"), Schema.migrationVersions.count)
         let applied = try store.withLock { conn in
             try conn.intColumn("SELECT version FROM migrations ORDER BY version;")
         }
-        XCTAssertEqual(applied, (1...Schema.version).map(Int64.init))
+        XCTAssertEqual(applied, Schema.migrationVersions.map(Int64.init))
+        XCTAssertEqual(applied.last, Int64(Schema.version), "最后一版必须等于 Schema.version")
         XCTAssertFalse(store.deviceID.isEmpty, "D17：每台机器一个 device_id")
 
         // D17：不可变记录的主键都带 device_id

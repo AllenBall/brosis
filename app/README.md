@@ -110,6 +110,10 @@ app/
 │   ├── DHash.swift                   9×8 灰度差分哈希（64 bit）
 │   ├── PermissionGuide.swift         权限引导窗口
 │   ├── StatsExport.swift             「导出存储统计…」：stats() + statsDetail() → 数据目录的 JSON
+│   ├── ExportWindow.swift            **加密导出（3.8 / D7，M2 d / T16）**：ExportController
+│   │                                 （后台队列跑导出、配额通知联动）+ ExportWindowController
+│   │                                 （目标目录 / 范围 / 口令两次输入 / 进度 / 结果与提示文案）
+│   ├── ExportSelfCheck.swift         加密导出的临时库往返冒烟（由 SelfCheck 调一次）
 │   ├── Updater.swift                 Sparkle 2 签名更新：Info.plist 的 SU* 配置检查（纯函数）+
 │   │                                 「检查更新…」菜单入口（默认不联网、fail-closed）
 │   └── SelfCheck.swift               无 GUI / 无 TCC / 不碰钥匙串的自检（90 项）+ --dump-vectors 判定表转储
@@ -333,6 +337,14 @@ Vision 是本地推理、不需要任何授权，所以自检仍然不触发弹�
 | **气泡归属（T8）** | 1 | 2 份**合成布局 JSON**：单聊左 = 对方 / 右 = 自己 + 语音记 `[语音]`；群聊取气泡上方昵称且昵称行不入库成正文 |
 | **视口 OCR（T8）** | 3 | 裁剪坐标（AX → 显示器局部 → 像素，含 2x 与"矩形在另一块屏上就不裁"）；**6 组自绘图像的 Vision 基准**（3 样张 × 2x/1x，标识符召回与中文行 CER）；采样审计的覆盖率口径冒烟 |
 | **端到端（T8）** | 4 | 走产品路径 `CaptureCoordinator.handleFrame`：AX 全空 → 写一条 `capture_method = ocr` 的观察（region 前缀 `ocr:`、confidence 与 note 都在）；**前台已换应用时整帧不处理**（换一张自绘"屏幕"当另一个应用：跑 0 个区域、一个字都不入库，同一张图换回原应用作阳性对照就会入库）；**同一区域正文逐字节未变时不写第二条观察**；轮到采样审计 → 全窗口 OCR 对照 → `capture_audit` 一行（`method` 照抄被审计那条观察的 `capture_method`） |
+
+**上面这张表只覆盖 M1 的那 90 项**。M2 又加了四组，明细各在自己的 `*SelfCheck.swift` 里
+（`SelfCheck.swift` 每组只加一行调用，为的是并行任务不改同一段）：
+第 7 组跨设备同步（T13）、第 8 组模型管理器与向量检索（T11）、第 9 组夜间叙述（T12）、
+**第 10 组 MCP 检索的查询向量与整晚建索引（T15，12 项）**。
+本机在**只含 T15 改动**的树上实测总数 **149 项全过**、退出码 0、
+peak footprint **232.9 MiB**（不加载任何模型）；d 批其余任务各自还会再加几项，
+所以合并后的总数会更大（合并 T16 之后实测 162 项）。
 
 自检的加密库开在 `$TMPDIR/brosis-selfcheck-<pid>/`，**跑完删除**，
 既不碰产品数据目录也不碰 M0 库；跑几次结果都一样。
@@ -649,6 +661,8 @@ locked ──launch / menuUnlock / systemDidWake──▶ unlocking ──取钥
 | 锁屏 | M0 就有 | 两路信号（前台应用 = `loginwindow` + 分布式通知），去重后进 `paused` |
 | **屏保** | **M1 新增** | `com.apple.screensaver.didstart` / `.didstop` 分布式通知 → 进 / 出 `paused` |
 | **私密浏览** | **M1 新增（尽力）** | 见下 |
+| **Focus（专注模式）** | **M2 d 新增（默认关，可能不可用）** | 轮询 `~/Library/DoNotDisturb/DB/` 两个 JSON；命中 `focus.pauseModes` 名单就进 `paused`。详见第 17 节 |
+| **全局热键** | **M2 d 新增** | `RegisterEventHotKey`：⌃⌥⌘P 暂停 / 继续、⌃⌥⌘L 锁定。详见第 17 节 |
 | 视频会议前台 | 不做 | 计划 4.2 已定：改为可选开关，默认关闭 |
 
 **私密浏览是"尽力"，不是保证。** 做法：浏览器窗口标题里出现无痕标记
@@ -1421,7 +1435,8 @@ app **不内置、不自动下载**任何模型。清单 `catalog.json` 随包�
 | `embedding.dailyGPUSeconds` | 600 | 日均 GPU 预算（秒） |
 | `embedding.batchSize` | 16 | 每批块数（D27 实测过的档） |
 | `embedding.gpuSecondsUsed` / `embedding.gpuSecondsDay` | — | 今日 GPU 台账（本机策略，不进库、不同步） |
-| `retrieval.vectorsEnabled` | false | 检索里用不用向量 |
+| `embedding.overnightGPUSecondsUsed` / `embedding.overnightGPUSecondsDay` | — | **整晚建索引单独的一本账**（M2 d / T15，不占上面那 600 s 预算） |
+| `retrieval.vectorsEnabled` | false | 检索里用不用向量。**M2 d / T15 起解锁时会从这里恢复到 `store.retrieval`**（模型没装则强制关，3.11） |
 | `models.directory` | — | 模型根目录（不设就是数据目录旁的 `models/`） |
 | `models.allowDownload` | false | 面板里是否显示下载入口 |
 
@@ -1464,7 +1479,8 @@ core 的 `swift test` 一条都不碰模型（那边用确定性伪嵌入），�
 "$APP/Contents/MacOS/brosis-embed" selftest --models-dir <模型目录>
 ```
 
-六条断言，本机（Qwen3-Embedding-0.6B-8bit）实测全过：
+**十一条**断言（前六条 M2 c / T11，后五条 M2 d / T15），本机
+（Qwen3-Embedding-0.6B-8bit）实测全过：
 
 | 断言 | 实测 |
 |---|---|
@@ -1474,8 +1490,15 @@ core 的 `swift test` 一条都不碰模型（那边用确定性伪嵌入），�
 | **换批大小只改动 1e-3 量级**（E9 已知限制，不是 bug） | 批 1 vs 批 3 的余弦 **0.999997** |
 | 近义句余弦 > 无关句余弦 + 0.2 | **0.8370 vs 0.2920**（E9 在 Max 上是 0.87 / 0.24） |
 | int8 量化后余弦误差 < 0.01 且排序不变 | 0.8370→0.8373、0.2920→0.2918 |
+| **查询嵌入器与索引侧 provider 的向量逐元素相同**（同为批构造 1） | 512 维逐元素相同 |
+| **查询嵌入热延迟 ≤ 150 ms**（3.4 分层目标） | 首次（含加载）**364 ms**、热 **18.3 ms** |
+| 空闲到点后卸载并清 GPU 缓冲池（D27） | 卸载原因 `idle_0s`（把门槛调成 0 秒来测） |
+| 关库时立刻卸载 | `store_closed` |
+| 关库之后不再算查询向量（零模型调用） | 返回 nil，调用方按 `no_query_vector` 降级 |
 
-模型加载 **0.998 s**，单次查询工作负载 peak footprint **799.9 MiB**。
+模型加载 **0.351 s**（M2 c 那次是 0.998 s，同一台机器，差别是页缓存冷热），
+整个 selftest 进程 peak footprint **2,186.7 MiB**（它先后加载了四个嵌入器实例，
+产品路径只有一个；单个嵌入器加载后的 peak 见 15.4 的 **732.0 MiB**）。
 
 ---
 
@@ -1558,3 +1581,386 @@ D27 照旧：加载前 `Memory.cacheLimit = 256 MiB`，任务结束 `clearCache(
 （主程序 41.80 → 47.14、`brosis-embed` 40.23 → 45.52、metallib 2.99 不变）。
 `brosis-embed` 那一份是**可选的**（评估与验收工具，不是产品必需）：
 `build_app.sh` 里拷它那一行去掉，app 回到 54.27 MiB。
+
+---
+
+## 15. MCP 检索的查询向量 + 整晚建索引（3.4 / 3.6 / 4.3.2 T15，M2 d 批）
+
+c 批把向量通道做进了 `Store.search`，但**查询向量要调用方算好**，
+所以经 `brosis-mcp` 过来的查询一律 `no_query_vector`（c 批结果文件第 9 节第 1 条）。
+这一批把那条线接上：**app 侧的 IPC 服务端在收到 `search` 时自己算查询向量**。
+
+### 15.1 四个新文件，`AppDelegate.swift` 一行没改
+
+| 位置 | 是什么 |
+|---|---|
+| `Sources/BrosisModels/MLXQueryEmbedder.swift` | 唯一真的加载权重的地方：懒加载 + 空闲卸载 + D27 缓冲池策略。放在库目标里是因为 **app 与 `brosis-embed serve-search` 要用同一份实现** |
+| `Sources/brosis/Models/QueryEmbedderService.swift` | 产品路径的接线：解锁时注入、关库 / 锁屏 / 关开关时卸载，事件写进 `jobs` |
+| `Sources/brosis/Models/OvernightIndexJob.swift` | 「现在开始建索引」一次性动作：门控纯函数 + 进度 + 单独的一本 GPU 账 |
+| `Sources/brosis/Models/QueryEmbedderSelfCheck.swift` | 第 4 节自检的第 10 组（`SelfCheck.swift` 又只加了一行） |
+
+改动过的产品文件只有 `IPCService.swift`（三处：`attach` / `detach` / `setPaused`）
+与 `ModelsWindow.swift`（一个按钮 + 开关联动）。
+
+**接入方式（留给主会话）**：**不用改任何东西**——注入点在 `MCPIPCService`，
+那是 `LockController` 已经在调的路径；面板按钮在 `ModelsWindow` 里，菜单项还是
+13.1 的那一行 `ModelsMenu.menuItem()`。
+
+### 15.2 生命周期：常驻 + 空闲 10 分钟卸载
+
+判定是 core 的纯函数 `QueryEmbedderPolicy`（`swift test` 与自检各钉一遍）：
+
+| 事件 | 动作 |
+|---|---|
+| 第一次有人 `search` | **加载**（不是解锁时加载：解锁只是"允许"） |
+| 又一次 `search` | 复用 |
+| 空闲 ≥ **600 s**（定时器 60 s 检查一次） | 卸载 + `MLX.Memory.clearCache()` |
+| 屏幕锁定 / 用户暂停（3.5 的 `paused`） | **立刻**卸载 |
+| 关库（`locking` / 退出） | **立刻**卸载 |
+| 用户在面板里关掉「在检索里使用向量」 | **立刻**卸载 |
+
+为什么不是"每次查完就卸"：冷加载实测 **0.35 s**，每条 MCP 查询都付一次，
+3.4 的「查询嵌入 ≤ 150 ms」直接不可能达标。
+为什么不是"一直常驻"：Air 只有 16 GiB，模型常驻约 0.6–0.7 GiB footprint，
+而 MCP 查询是阵发的（Agent 问几句就走）。
+
+两个事件（`jobs` 里的运行时事件，`brosis-store events` 能看）：
+`embedder_loaded`（加载耗时、峰值 footprint、cacheLimit、热状态）、
+`embedder_unloaded`（原因、GPU 缓冲池前后、footprint 前后）。
+
+### 15.3 零模型调用的三种情况
+
+「模型未装 / 开关关 / 锁定时零模型调用」是**结构性**保证，不是靠 if 堆出来的：
+
+| 情况 | 谁挡下的 | 实测证据 |
+|---|---|---|
+| `retrieval.vectorsEnabled` 关（默认） | core 的四道门第一道，连嵌入器都不问 | 整个服务端进程 peak footprint **11.08 MiB**（模型一次都没加载） |
+| 模型没装 | 嵌入器返回 nil（0.023 ms） | 服务端 `loads = 0`、peak **17.00 MiB**，`search` 照常返回 5 条 FTS 命中 |
+| 库锁着 / 采集暂停 | `MCPGate` 根本不把调用交给 `StoreMCPService`（3.5） | 自检那一条：`locked=locked paused=paused`，嵌入器调用次数不变 |
+| 查询带 `app:` / `host:` 等字段前缀 | core 第三道门（这类查询本来就不走向量通道） | 60 题里 19 题走这条，`queryEmbed.source = field_prefix` |
+
+### 15.4 实测（M4 Air，1 个月合成库 46,545 块）
+
+| 项 | 数 |
+|---|---|
+| 首次加载（`embedder_loaded`） | **0.366 s**，加载后 peak footprint **732.0 MiB** |
+| 查询嵌入**热**延迟 | p50 **19.4 ms** / p95 **26.1 ms**（47 题）、p50 17.4 / p95 34.5（60 题）；目标 ≤ 150 ms |
+| 首次查询（含加载） | 403 ms（那一次就是冷加载） |
+| 服务端进程 peak footprint | **850.4 MiB**（含 SQLCipher 页缓存） |
+| 卸载（`embedder_unloaded`） | GPU 缓冲池 25.9 → **0 MiB**，footprint 850.4 → 824.3 MiB |
+| 经 MCP 的一次 `search` 端到端（客户端墙钟） | p50 **84.3 ms** / p95 92.7 ms |
+
+数字出处：`tools/bench/results/m2_d_vectors_mcp_2026-09-08.md`。
+
+### 15.5 「现在开始建索引（连续跑到完成或取消）」
+
+D8 的第三个条件：首次全量建索引在 Air 上要按小时计（c 批实测 1 小时 32 分），
+塞不进 10 分钟的日均 GPU 预算。所以面板上多一个一次性动作，
+与夜间增量共用同一套判定输入，**只有三处不一样**（自检里 12 条对照用例逐条钉住）：
+
+| 门 | 夜间增量 | 整晚一次性 | 理由 |
+|---|---|---|---|
+| 空闲 ≥ 5 分钟 | 要 | **不要** | 用户自己按的按钮，他知道机器要忙一夜；等空闲会让"睡前点一下"变成永远等不到 |
+| 日均 GPU 预算 600 s | 要 | **不作为门**，单独记一本账 | 一夜就是几小时 GPU；单独记账才不会吞掉夜间增量的预算 |
+| 「夜间自动建索引」开关 | 要 | 不看 | 这个动作本身就是显式的用户动作 |
+| **接电** | 要 | **要**（拔电 → 暂停，插回来继续） | 一夜的 GPU 活拿电池跑必然跑不完 |
+| 热状态 | `nominal` 才跑 | fair **暂停**、serious / critical **停止** | 无风扇 Air 持续负载 2 分 10 秒就转 fair（D27），要求 nominal 等于永远跑不动 |
+| 锁定 / 暂停 | 停 | **停**（不放开） | 库关了就没得跑；锁屏按停处理，宁可保守 |
+
+进度（`OvernightProgress`，纯函数）写进事件：`overnight_index_started` /
+`_progress`（已嵌入 / 剩余 / 总数、块每秒、预计剩余秒、GPU 秒、热状态）/
+`_paused`（原因）/ `_finished`（停因、总量、GPU 秒、今日整晚累计、峰值 footprint）。
+每跑 60 s 回来重新问一次门控，段内每批也问一次，所以拔电 / 转烫 / 锁屏最多多跑一批（16 块 ≈ 2 s）。
+
+### 15.6 `brosis-embed serve-search`：没有 GUI 也能量"经 MCP 的数字"
+
+产品路径上算查询向量的是 brosis.app 里的 IPC 服务端，而 `brosis-store serve` 在 core 里
+（零 mlx 依赖）注入不了嵌入器。屏幕锁着不能起 GUI 时，用这个子命令：
+**同一份 `MLXQueryEmbedder` + 同一个 `StoreMCPService` + 同一个 `MCPGate` + 同一个 `IPCServer`**，
+差别只有三处，都写在子命令的注释里：`FileKeyProvider` 代替钥匙串、锁定相位写死 `unlocked`、
+可以 `--skip-codesign` 跳过对端签名校验（`swift build` 出来的 `brosis-mcp` 没有 Developer ID）。
+
+```sh
+"$APP/Contents/MacOS/brosis-embed" serve-search --dir <数据目录> --key-file <密钥> \
+    --models-dir <模型目录> --socket <路径>/mcp.sock --tz UTC --rate 100000 \
+    --skip-codesign --seconds 600 --out serve.json
+# 另一个终端：真的 brosis-mcp 作客户端
+"$APP/Contents/MacOS/brosis-mcp" admin grant add --client x --socket <路径>/mcp.sock
+```
+
+**产品路径没有这个开关**：`app/Sources/brosis/IPCService.swift` 里
+`peerPolicy` 写死 `.requireSameTeam`，不读任何环境变量。
+
+E2 一致性的完整跑法见 `tools/eval/d8_mcp_compare.py`（结果文件第 4 节）。
+
+---
+
+## 16. 加密导出 / 导入（3.8 / D7，M2 d 批 / T16）
+
+计划 3.8「加密导出另有独立口令；删除不能覆盖已导出的副本，需要在 UI 里如实提示」
+与 D7「满后最旧先删且删前通知并可先加密导出」的界面那一半。
+格式、加密与落库全在 core（`core/README.md` 的「加密导出与导入」一章），这里只讲接法与界面。
+
+### 16.1 两个新文件 + `AppDelegate.swift` 的三行接线
+
+| 文件 | 干什么 |
+|---|---|
+| `ExportWindow.swift` | `ExportController`（@MainActor；后台串行队列跑导出、进度回主线程、配额通知联动）+ `ExportWindowController`（AppKit 窗口） |
+| `ExportSelfCheck.swift` | 临时库往返冒烟；`SelfCheck.swift` 里只加了一行 `failures += ExportSelfCheck.run()` |
+
+**已经接上的两处**（写这一节时留给主会话，现已在 `AppDelegate.swift` 里）：
+
+```swift
+// ① applicationDidFinishLaunching(_:) 里，recorder 建好之后：
+let exportController = ExportController()
+exportController.install(recorder: recorder)
+self.exportController = exportController
+
+// ② 菜单里加一项：
+let exportItem = NSMenuItem(title: "加密导出…", action: #selector(openExport), keyEquivalent: "")
+@objc private func openExport() { exportController?.presentWindow() }
+```
+
+`install` 只存一个 `weak var recorder`，不接管任何现有回调，所以这两处不影响现有行为。
+
+**③ 遗留：app 内还没有配额过期的调度器。** 现在 app 里**一个 `store.expire()` 调用点都没有**——
+配额过期只有命令行的 `brosis-store expire` 与 `brosis-store maintenance --expire`。
+将来在 app 里接上定时的配额检查时，那一处要调 `exportController?.expireWithNotice()`
+而**不是** `try store.expire()`：没确认过通知时它**不删**，而是把窗口弹出来停在
+"先加密导出"上（3.8「删前通知」/ D7）。这一轮不自己发明调度器，
+所以 `expireWithNotice()` 目前只有自检覆盖（16.4 第 10 项）。
+
+### 16.2 窗口上有什么
+
+顶部一段**如实提示**（3.8 的两条要求都在这里），然后是配额通知区、目标目录、范围、
+应用白名单、口令两次输入 + 强度提示、开始按钮、进度、结果。
+
+四句提示是写死的文案，不随构建变：
+
+1. 口令是**独立**的：与登录密码、数据库密钥、跨设备同步的配对口令都无关，也不会存在任何地方——
+   **丢了就再也打不开这份归档，没有找回通道**；
+2. 归档写一次就不再改动：**以后在 app 里删掉这些记录，不会影响已经导出的副本**；
+   要让归档也消失，只能自己去把归档目录删掉；
+3. 导出的正文就是库里那一份——入库前已经脱敏，归档不做二次脱敏、也不还原；
+4. 不含 MCP 访问审计、采集质量遥测与同步密钥。
+
+配额那一行来自 `QuotaAction.message`（core 算的）：满了那一档必然包含「先做一次加密导出」
+与「不会影响已经导出的副本」。旁边的「我已了解，允许按最旧先删」只在 `level == .full`
+且还没确认过时出现，点它调 `acknowledgeQuotaAction(archiveID:)`——
+如果这一轮已经导出成功，会把归档 id 一起记进去（"用户确认时确实先导出了"）。
+
+**口令的处理**：只在 `startExport` 这一次调用里存在；点了开始就立刻把两个输入框清空，
+关窗口时再清一次；不写 `UserDefaults`、不进日志、不进事件、不进任何错误消息。
+
+### 16.3 UserDefaults 键
+
+| 键 | 含义 |
+|---|---|
+| `export.lastDirectory` | 上次选的**父目录**（不是归档本身），下次打开保存面板时定位到它 |
+| `export.lastRangeDays` | 预留（当前界面只有三档预设：全部 / 最近 30 天 / 最近 90 天） |
+
+归档默认名 `brosis-export-<yyyyMMdd-HHmm>.brosisexport`——**不含主机名与用户名**。
+
+### 16.4 自检（`--self-check` 的第 11 组，10 项）
+
+两个临时数据目录 + 两个 `Store`（同一个 device_id，模拟"恢复到一台新机器"），
+`InMemoryKeyProvider`，不碰钥匙串、不弹授权：
+
+1. 入库前脱敏生效（库里没有脱敏前的密钥）；
+2. 弱口令被拒，**且一个字节都没写出去**；
+3. 导出成功（条数 / 块数 / 字节数）；
+4. 清单不需要口令就能读，且不含密钥材料；
+5. 归档目录里搜不到正文、脱敏前明文与口令（**带阳性对照**：`archive_id` 必须搜得到）；
+6. 口令错误 → 明确报口令错，一块都没读；
+7. 往返一致：恢复模式、id 原样、正文逐字节相同 + 一致性检查全过；
+8. 同一份归档再导一次不翻倍；
+9. **源库删掉之后：库里查不到，归档仍然完整**（3.8 的如实提示就是这一条）；
+10. 篡改一字节 → 校验失败并拒绝；配额满时通知带「先加密导出」且没确认前不删、确认后才删。
+
+### 16.5 本轮不做，界面上也没有入口
+
+- **从窗口里导入归档**。导入是恢复动作，产品路径要先想清楚"往哪个库恢复、恢复到一半怎么办"；
+  数据层已经做好（`Store.importArchive`），命令行入口是 `brosis-store import`。
+- **归档的自动轮转 / 清理**。归档在用户自己选的位置，app 不去动它——这正是"删除不影响已导出副本"的另一面。
+- **自定义起止时刻**。当前只有三档预设；`ExportRequest` 本身支持任意 `[start, end)`，
+  命令行 `--start` / `--end` 已经能用。
+
+
+---
+
+## 17. Focus 联动 + 全局热键（4.5 / 3.5 / 4.2 / 4.3.2 T18，M2 d 批）
+
+### 17.1 四个新文件 + `AppDelegate.swift` 的接线
+
+| 文件 | 干什么 |
+|---|---|
+| `Sources/brosis/FocusProbe.swift` | Focus 状态探针（读两个 JSON、宽容解析）、暂停名单匹配、`FocusMonitor` 轮询器 |
+| `Sources/brosis/HotKeys.swift` | `RegisterEventHotKey` 的登记处、键位字符串解析（纯函数 + 向量） |
+| `Sources/brosis/FocusHotKeySelfCheck.swift` | 自检第 12 组（7 项） |
+| `Sources/brosis/HardConstraintSelfCheck.swift` | 自检第 13 组（3 项，补 2.2 硬约束里能自动化的部分） |
+
+改到的现成文件只有两处，都是追加：`LockController.swift`（`PauseReason.focus`、
+两个 `LockTrigger`、三条转移用例）与 `SelfCheck.swift`（两行 `failures += …`）。
+
+**已经接上**（写这一节时留给主会话，现已在 `AppDelegate.applicationDidFinishLaunching(_:)` 里、
+`lock` 建好之后）：
+
+```swift
+// Focus 联动（默认关：启动时探一次，之后 focus.pauseModes 为空就零 syscall）
+let focus = FocusMonitor()
+focus.install(lock: lock, recorder: recorder)
+self.focus = focus
+
+// 全局热键：处理器只发通知，动作走既有的 togglePause / lockNow
+_ = HotKeys.shared.install(recorder: recorder,
+                           onPause: { [weak lock] in lock?.togglePause() },
+                           onLock:  { [weak lock] in lock?.lockNow() })
+```
+
+菜单里两行状态显示（`menuWillOpen` 的 `refreshMenu()` 里，权限那两行下面）：
+
+```swift
+menu.addItem(disabledItem(focus?.menuDescription ?? "Focus 联动：未启动"))
+menu.addItem(disabledItem(HotKeys.shared.menuDescription))
+```
+
+`AppDelegate` 里存了一个 `private var focus: FocusMonitor?`；
+`applicationWillTerminate` 里调 `HotKeys.shared.uninstall()`（不调也不会漏到别的进程）。
+
+### 17.2 Focus 探针：读两个文件，读不到就说读不到
+
+macOS **没有**公开 API 报告"当前生效的 Focus 是哪个"。系统把它写在：
+
+| 文件（相对主目录） | 内容 |
+|---|---|
+| `Library/DoNotDisturb/DB/Assertions.json` | 当前生效的断言，里面有 `assertionDetailsModeIdentifier` |
+| `Library/DoNotDisturb/DB/ModeConfigurations.json` | 模式 id → 显示名 |
+
+两个文件受 TCC 的**完全磁盘访问**保护。三条口径：
+
+1. **只读这两个文件，不碰任何会弹窗的接口**（不用 EventKit、不用通知中心、不发 Apple 事件、
+   不 spawn 子进程）。`open(2)` 被拒就是 `EPERM`，**系统不会为这一类权限弹窗**——
+   只能用户自己去「系统设置 → 隐私与安全性 → 完全磁盘访问」把 brosis 勾上。
+2. **`stat(2)` 成功不代表读得到。** TCC 拦的是 `open`，不是 `stat`；所以探针一定要真开一次文件，
+   不能用"文件存在"当可用性判据。
+3. **「读不到」≠「没开 Focus」。** 探针的三个结果是
+   `unavailable(原因)` / `inactive`（可读、当前没有 Focus） / `active([模式])`，
+   解析失败也算 `unavailable`。不可用时**不暂停**（不猜），菜单显示
+   `Focus 联动不可用（原因）`。
+
+**本机实测（M4 Air / macOS 26.6，2026-09-08，屏幕锁定态）**：两个文件 `stat` 成功、
+`open` 回 `EPERM`（0.011–0.057 ms 返回，不阻塞、不弹窗）→ 这台机器上 Focus 联动**恒为不可用**，
+菜单会把原因写出来。数字见 `tools/bench/results/m2_d_focus_hotkey_2026-09-08.md`。
+
+解析写成"在整棵 JSON 树里找这几个键"的宽容遍历（深度上限 32），而不是照某一版结构逐层下钻；
+文件格式没有公开契约，系统换一层包装不至于直接失效。
+
+### 17.3 暂停名单与联动路径
+
+设置里一份"这些 Focus 生效时暂停采集"的名单，`UserDefaults` 键 `focus.pauseModes`（字符串数组），
+**默认空 = 不联动**：`FocusMonitor.start()` 启动时探一次（`poll(force: true)`，好让菜单
+第一次打开就能说清"可不可用、为什么"），此后空名单的每一轮轮询都**零 syscall**。
+
+```bash
+# 工作模式与勿扰生效时暂停采集
+defaults write com.brosis.app focus.pauseModes -array 工作 勿扰模式
+# 任何 Focus 生效都暂停
+defaults write com.brosis.app focus.pauseModes -array '*'
+# 关掉联动
+defaults delete com.brosis.app focus.pauseModes
+```
+
+名单项**三种写法都认**：显示名（`工作`）、完整模式 id（`com.apple.focus.work`）、
+id 末段（`work`）；比较时去空白、大小写折叠。中文名随系统语言变，换语言要重配——这是如实的局限。
+
+命中之后走的是**现成那条暂停路径**，与安全输入 / 锁屏 / 屏保 / 私密浏览同一个集合：
+`LockController.apply(.focusPauseStarted)` → `pauseReasons` 加一条 `.focus` →
+`snapshot.isRecording == false` → 采集停、MCP 拒绝、库**保持打开**（夜间任务照跑）。
+恢复走 `.focusPauseEnded`，只删 `.focus` 这一条——屏幕还锁着时那条 `.screenLocked` 留着，
+不会在锁屏状态下把采集恢复回来（有专门的转移用例）。
+
+事件（`jobs` 表的运行期事件）：
+
+| kind | 什么时候 | detail |
+|---|---|---|
+| `focus_probe` | 可用性变化时（含首次探测） | `focus=…`、轮询间隔 |
+| `focus_pause` | 名单命中，进 `paused` | 命中的模式名与 id |
+| `focus_resume` | 退出名单 / 名单被清空 | 原因 |
+
+**轮询间隔与 `CaptureController` 的定时兜底同一个值**：默认 **12 s**，
+键 `capture.periodicInterval`（下限 3 s）。不另设一个键——多一个节奏就多一份要解释的东西，
+而 Focus 的变化频率远低于 12 s。
+
+### 17.4 全局热键
+
+| 动作 | 默认组合 | UserDefaults 键 | 走哪条路 |
+|---|---|---|---|
+| 暂停 / 继续采集 | `⌃⌥⌘P` | `hotkey.pause` | `LockController.togglePause()`（与菜单同一条） |
+| 锁定数据库 | `⌃⌥⌘L` | `hotkey.lock` | `LockController.lockNow()`（与菜单同一条） |
+
+改键：`defaults write com.brosis.app hotkey.lock "ctrl+shift+cmd+L"`。
+键位字符串收单词写法（`ctrl+alt+cmd+P`，别名 `command` / `opt` / `option` / `control` / `meta`）
+与符号写法（`⌃⌥⌘P`），大小写与空格无所谓；**至少要有一个修饰键**——
+不带修饰键的全局热键会把那个键从所有 app 里抢走（实测无修饰键的 `F19` 也能注册成功），
+这个陷阱不给用户踩，直接拒绝。
+
+**为什么用 Carbon `RegisterEventHotKey`**：`NSEvent.addGlobalMonitorForEvents` 与 `CGEventTap`
+都是"看得见所有按键"的接口，因此要辅助功能权限；一个记录型 app 去申请能读全部击键的通道，
+与 2.2 的取向相反。`RegisterEventHotKey` 只登记**一个具体组合**，由 WindowServer 匹配后才回调。
+
+**实测依据**（2026-09-08，屏幕锁定态）：把测试进程用 `responsibility_spawnattrs_setdisclaim`
+断开与终端的 TCC 归属，使 `AXIsProcessTrusted() == false`，`RegisterEventHotKey` 仍返回
+`noErr` 并拿到 `EventHotKeyRef`。**结论：全局热键不需要辅助功能权限。**
+
+三条如实说明：
+
+1. **注册成功 ≠ 按键一定到得了。** 组合被系统快捷键（如 ⌘Space）或别的进程占用时，
+   `RegisterEventHotKey` 照样返回 `noErr`，按键只是永远不来。Carbon 只在**本进程内**
+   重复登记同一组合时报 `eventHotKeyExistsErr (-9878)`。所以菜单里写的是
+   "注册成功 / 失败 + 组合"，不敢写"热键可用"。
+2. **注册失败会记事件并在菜单显示**：`hotkey_registered` / `hotkey_register_failed`
+   （带 `action`、`combo`、`OSStatus`、原因），菜单那一行直接把失败原因摊开。
+   按下时记 `hotkey_fired`。
+3. **键盘布局无关的是键码，不是字符。** Dvorak / 法语布局下 `kVK_ANSI_P` 还是那个物理键位，
+   但键帽上的字母会变。
+
+### 17.5 自检（`--self-check` 的第 12 / 13 组，10 项）
+
+第 12 组（`FocusHotKeySelfCheck`，7 项）：
+
+1. **Focus 探针（本机实测，如实报可用性）**——真读一次那两个文件，把结论与原因原样打出来。
+   判定的是"给出了一个能解释的结论"，不是"这台机器一定读得到"：本机是 TCC 拒绝，
+   那是既定事实，不该让自检变红，但**原因必须写得出来**。
+2. **Focus 解析向量 7 条**（开 / 关 / 多个同时生效并去重 / 名字表读不到时退回 id 末段 /
+   兜底形状 / 坏 JSON / EPERM）——合成样本，纯函数，断"读不到"与"没开"始终分得清。
+3. **Focus 暂停名单匹配 10 条**（显示名 / 完整 id / id 末段 / 通配符 / 不命中 / 名单空 /
+   不可用时不猜 / 空白项忽略）。
+4. **热键注册 · 暂停**、5. **热键注册 · 锁定**——**真的调 `RegisterEventHotKey`**，
+   把 `OSStatus`、`registered`、原因、`UnregisterEventHotKey` 的返回值全打出来；
+   判定的是**一致性**（`registered == (status == noErr)`）与**注册成功的必须能注销**。
+6. **热键注销干净**——**装 → 卸 → 再装 → 再卸，两轮 `OSStatus` 必须相同**。
+   只看 `UnregisterEventHotKey` 的返回值是不够的（把它换成常量 `noErr` 也全绿）；
+   真漏注销时 Carbon 会在第二轮回 `eventHotKeyExistsErr (-9878)`。
+   自检因此不会给正在运行的那个 brosis 留下一个抢着的组合。
+7. **键位解析 14 条**（单词 / 符号 / 别名 / 重复修饰键 / 三种拒绝）。
+
+第 13 组（`HardConstraintSelfCheck`，3 项）是做 2.2 对照表时补的：
+
+1. **硬约束 6**：`Info.plist` 不含 `NSMicrophoneUsageDescription` /
+   `NSCameraUsageDescription` / `NSSpeechRecognitionUsageDescription`——
+   没有这几个键的 app 在 macOS 上**拿不到**麦克风 / 摄像头 TCC，
+   这比"代码里没写 AVAudioEngine"更可核对。
+2. **硬约束 5 / 8**：读本进程主二进制的 `LC_LOAD_DYLIB` 一族（等价 `otool -L`），
+   断言直接链接的库全在 `/System/Library/Frameworks/` `/usr/lib/` `@rpath/` 里，
+   没有私有框架、没有 `/opt` 或 `/usr/local`、没有 Python。
+3. **硬约束 6**：`SUEnableAutomaticChecks` / `SUAutomaticallyUpdate` 都是 `false`、
+   `SUFeedURL` 是 https——更新检查也是一次出网，默认必须关。
+
+### 17.6 本轮不做
+
+- **界面**：暂停名单与热键都只有 `UserDefaults`，没有设置面板。产品化时进「设置」窗口。
+- **按下热键的端到端验证**：不能在无人值守的会话里模拟按键（要么用 `CGEvent` 合成——
+  那正是我们不想申请的那类权限；要么真人按）。留给你在 GUI 里试。
+- **Focus 联动的真机验证**：本机没授予完全磁盘访问，探针恒为 `unavailable`。
+  要验证联动，需要你手动把 brosis 加进「完全磁盘访问」，再开一个 Focus。
+- **按 Focus 分档采集**（例如"工作模式只记事件"）：本轮只有"暂停 / 不暂停"两态。

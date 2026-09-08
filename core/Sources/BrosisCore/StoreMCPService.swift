@@ -10,6 +10,11 @@ import BrosisIPC
 // 只读：本文件只调用 `Store` 的查询方法（search / getEvidence / getTimeline /
 // getDayLedger / getItem / getContext）与 grant 读写、审计写入，没有任何观察写入路径
 // （2.2 硬约束 4「MCP 只读」）。
+//
+// M2 d / T15：`search` 多了一个**可注入**的查询嵌入器（`QueryEmbedder`，定义在
+// `QueryEmbedder.swift`）。core 仍然不加载任何模型——注入的实现在 app 侧
+// （`BrosisModels.MLXQueryEmbedder`）。**没注入时行为与 c 批逐位相同**：
+// 结果里 `vectorsUnavailable = true`、`vectorUnavailableReason = no_query_vector`。
 // =============================================================================
 
 /// 被 grant 挡下（应用白名单 / 时间窗 / 字段级别）。
@@ -43,10 +48,30 @@ public final class StoreMCPService: @unchecked Sendable {
     /// 服务端自己的名字，写进 ping / status 结果。
     private let serverInfo: String
 
-    public init(store: Store, options: Options = Options(), serverInfo: String = "brosis") {
+    // ---- M2 d / T15：查询嵌入器（可注入，nil 时行为与 c 批逐位相同）----
+    private let embedderLock = NSLock()
+    private var _queryEmbedder: QueryEmbedder?
+
+    public init(store: Store, options: Options = Options(), serverInfo: String = "brosis",
+                queryEmbedder: QueryEmbedder? = nil) {
         self.store = store
         self.options = options
         self.serverInfo = serverInfo
+        self._queryEmbedder = queryEmbedder
+    }
+
+    /// 当前注入的查询嵌入器（`nil` = 没有，`search` 走 `no_query_vector` 那条老路）。
+    public var queryEmbedder: QueryEmbedder? {
+        embedderLock.lock(); defer { embedderLock.unlock() }
+        return _queryEmbedder
+    }
+
+    /// app 侧在「库解锁 + 模型已装 + `retrieval.vectorsEnabled` 开」时注入，
+    /// 关库 / 锁定时摘掉（M2 d / T15；产品接线在 `app/Sources/brosis/IPCService.swift`）。
+    public func setQueryEmbedder(_ embedder: QueryEmbedder?) {
+        embedderLock.lock()
+        _queryEmbedder = embedder
+        embedderLock.unlock()
     }
 
     /// 给 `MCPGate` 补写审计用（库不可用期间攒下的行）。
@@ -193,8 +218,11 @@ public final class StoreMCPService: @unchecked Sendable {
             throw MCPDeniedByGrant(message: "grant 的应用白名单不含 \(app)")
         }
 
+        // ---- M2 d / T15：查询向量（**在 `store.search` 之前算，不持库锁**）----
+        let timing = queryEmbedding(for: q)
         let fetch = scoped ? min(limit * options.whitelistOverfetch, 500) : limit
-        let result = try store.search(q: q, start: start, end: end, app: app, limit: fetch)
+        let result = try store.search(SearchRequest(q: q, start: start, end: end, app: app,
+                                                    limit: fetch, queryVector: timing.vector))
         var hits = result.hits
         var dropped = 0
         if scoped {
@@ -210,8 +238,47 @@ public final class StoreMCPService: @unchecked Sendable {
         if let end { object["appliedEnd"] = .int(end) }
         object["grant"] = grantBlock(grant, windowStart: windowStart,
                                      filtered: scoped, droppedByGrant: dropped)
-        return ToolOutcome(value: .object(object), count: hits.count,
-                           note: scoped ? "grant_filtered=\(dropped)" : nil)
+        // 3.4 的分层目标要按它报：查询嵌入热延迟 ≤ 150 ms（M2 d / T15）。
+        object["queryEmbed"] = try JSONValue(encoding: timing.timing)
+        var note = "qvec=\(timing.timing.source)"
+        if let ms = timing.timing.elapsedMS { note += String(format: " embed_ms=%.1f", ms) }
+        if scoped { note += " grant_filtered=\(dropped)" }
+        return ToolOutcome(value: .object(object), count: hits.count, note: note)
+    }
+
+    /// 算一条查询向量。**四道门，顺序有意义**，前三道任意一道命中就
+    /// **一次模型调用都不发**（4.3.2 T15：模型未装 / 开关关 / 锁定时零模型调用）：
+    ///
+    ///  1. `retrieval.vectorsEnabled` 关着（默认关，D8 的条件 1）→ `disabled`；
+    ///  2. 没有注入嵌入器（模型没装 / app 没接线 / `brosis-store serve`）→ `no_embedder`；
+    ///  3. 查询带字段前缀（`app:` / `host:` / …）→ `field_prefix`：
+    ///     `Store.search` 对这类查询本来就直接返回、不走向量通道，算了也是白算；
+    ///  4. 嵌入器自己说这次算不出（正在卸载 / 模型目录没了）→ `unavailable`。
+    ///
+    /// **锁定**那一道不在这里：`MCPGate` 在 `locked` / `paused` 时根本不会把调用交到这一层
+    /// （3.5），所以锁着的时候连 `runSearch` 都进不来，更谈不上调模型。
+    /// 这条由 `QueryEmbedderTests.testLockedGateNeverTouchesTheModel` 钉住。
+    ///
+    /// 出错不算失败：记 `error:<原因>`，检索照常走前三条通道（3.11 降级表）。
+    private func queryEmbedding(for q: String) -> (vector: [Float]?, timing: QueryEmbedTiming) {
+        guard store.retrieval.vectorsEnabled else { return (nil, QueryEmbedTiming(source: "disabled")) }
+        guard let embedder = queryEmbedder else { return (nil, QueryEmbedTiming(source: "no_embedder")) }
+        guard QueryRouter.parseField(q).field == nil else {
+            return (nil, QueryEmbedTiming(source: "field_prefix"))
+        }
+        let t0 = Date()
+        do {
+            guard let vector = try embedder.queryVector(for: q) else {
+                return (nil, QueryEmbedTiming(source: "unavailable",
+                                              elapsedMS: Date().timeIntervalSince(t0) * 1000))
+            }
+            return (vector, QueryEmbedTiming(source: "embedder",
+                                             elapsedMS: Date().timeIntervalSince(t0) * 1000,
+                                             dimension: vector.count))
+        } catch {
+            return (nil, QueryEmbedTiming(source: "error:\(error)",
+                                          elapsedMS: Date().timeIntervalSince(t0) * 1000))
+        }
     }
 
     // MARK: - get_evidence

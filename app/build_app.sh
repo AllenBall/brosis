@@ -26,6 +26,13 @@
 #   - 把 SwiftPM 生成的资源 bundle（brosis_BrosisModels.bundle 里的模型清单、
 #     swift-transformers_Hub.bundle 里的 tokenizer 配置…）拷进 Contents/Resources；
 #   - 把 brosis-embed 放进 Contents/MacOS 并**单独签**（与 brosis-mcp 同一处理）。
+#
+# 从 M2 d 收尾修复起多一道**发布闸门**（第 4d 步）：签完之后把 SCRATCH 里的
+#   arm64-apple-macosx 临时改名，再跑一遍 --self-check / brosis-embed env
+#   （本机有模型时再加 selftest），任一失败即构建失败，跑完改回来。
+#   理由见 app/Sources/BrosisModels/ModelsUtil.swift 的 ModelResources 头注释：
+#   SwiftPM 的 Bundle.module 访问器会拿编译期写死的构建目录兜底，
+#   有这道闸门，「靠构建目录才没崩」的 .app 不可能再构建通过。
 set -euo pipefail
 
 APP_SRC="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -377,6 +384,78 @@ step "4c. 从 bundle 里跑 brosis-embed env（验 metallib 在位、GPU 真能�
 "$APP_BUNDLE/Contents/MacOS/brosis-embed" env > "$SCRATCH/embed_env.json"
 cat "$SCRATCH/embed_env.json"
 python3 "$APP_SRC/Support/check_embed_env.py" "$SCRATCH/embed_env.json"
+
+# ---------------------------------------------------------------- 4d. 离开构建目录也能跑
+# **这一步是发布闸门**（M2 d 收尾修复的第一件事）。
+#
+# SwiftPM 给带 resources 的目标生成的 `Bundle.module` 访问器只查两处：
+# `Bundle.main.bundleURL/<包名>_<目标名>.bundle`（对 .app 是 brosis.app/ 这一层，
+# 那儿不能放东西，放了 codesign 就报 bundle format 不对）与**编译时写死的绝对构建目录**；
+# 两处都不在时它 `Swift.fatalError`，进程 exit 133。我们把资源 bundle 拷进 Contents/Resources/，
+# 不在那两处里——也就是说，只要 SCRATCH 的构建目录还在，一个「离开构建机就崩」的 .app
+# 照样能把上面每一步跑绿（2026-09-08 就是这么漏出去的）。
+#
+# 所以这里把构建目录**临时改名**再跑一遍：自检 + brosis-embed env（本机装了模型时再加
+# 一次 selftest）。任一失败即构建失败，然后无论成败都把目录改回来（trap）。
+step "4d. 把构建目录临时改名，再跑一遍（证明 .app 不依赖构建目录）"
+GATE_DIR="$SCRATCH/arm64-apple-macosx"
+GATE_HIDDEN="$SCRATCH/arm64-apple-macosx.build-gate-hidden"
+gate_restore() {
+  if [ -d "$GATE_HIDDEN" ]; then
+    mv "$GATE_HIDDEN" "$GATE_DIR"
+    echo "  构建目录已改回：$(basename "$GATE_DIR")"
+  fi
+}
+if [ -d "$GATE_DIR" ]; then
+  rm -rf "$GATE_HIDDEN"
+  trap gate_restore EXIT
+  mv "$GATE_DIR" "$GATE_HIDDEN"
+  echo "  构建目录已改名：$(basename "$GATE_DIR") -> $(basename "$GATE_HIDDEN")"
+
+  gate_fail=""
+  if "$APP_BUNDLE/Contents/MacOS/$APP_NAME" --self-check > "$SCRATCH/gate_self_check.log" 2>&1; then
+    printf '  --self-check：通过（%s 项，全部 PASS）\n' \
+      "$(grep -c '^\[PASS\]' "$SCRATCH/gate_self_check.log" || true)"
+  else
+    gate_fail="--self-check"
+    echo "  --self-check 失败，最后 20 行："
+    tail -20 "$SCRATCH/gate_self_check.log" | sed 's/^/    /'
+  fi
+
+  if "$APP_BUNDLE/Contents/MacOS/brosis-embed" env > "$SCRATCH/gate_embed_env.json" 2>&1; then
+    python3 "$APP_SRC/Support/check_embed_env.py" "$SCRATCH/gate_embed_env.json" \
+      || gate_fail="${gate_fail:+$gate_fail 与 }brosis-embed env"
+  else
+    gate_fail="${gate_fail:+$gate_fail 与 }brosis-embed env"
+    echo "  brosis-embed env 失败，最后 20 行："
+    tail -20 "$SCRATCH/gate_embed_env.json" | sed 's/^/    /'
+  fi
+
+  # 真实模型在的话再跑一次 selftest：它会加载 tokenizer 与权重，
+  # 顺带把 swift-transformers 的 Hub.bundle 那条路也走一遍。没装模型时
+  # selftest 自己打印 skipped 并以 0 退出，所以不用另外判断。
+  GATE_MODELS="${BROSIS_MODELS_DIR:-$HOME/Library/Application Support/brosis-m0/models}"
+  if [ -d "$GATE_MODELS" ]; then
+    if "$APP_BUNDLE/Contents/MacOS/brosis-embed" selftest --models-dir "$GATE_MODELS" \
+         > "$SCRATCH/gate_embed_selftest.json" 2>&1; then
+      printf '  brosis-embed selftest：%s\n' \
+        "$(sed -n 's/.*"status" *: *"\([a-z]*\)".*/\1/p' "$SCRATCH/gate_embed_selftest.json" | head -1)"
+    else
+      gate_fail="${gate_fail:+$gate_fail 与 }brosis-embed selftest"
+      echo "  brosis-embed selftest 失败，最后 20 行："
+      tail -20 "$SCRATCH/gate_embed_selftest.json" | sed 's/^/    /'
+    fi
+  else
+    echo "  本机没有模型目录（$GATE_MODELS），跳过 selftest"
+  fi
+
+  gate_restore
+  trap - EXIT
+  [ -z "$gate_fail" ] || fail "改名构建目录后 $gate_fail 失败：.app 还在依赖构建目录（Bundle.module）。日志在 $SCRATCH/gate_*"
+  echo "离开构建目录也能跑：自检与 brosis-embed 都过"
+else
+  fail "找不到构建目录 $GATE_DIR，闸门没法跑（SCRATCH 的布局变了？）"
+fi
 
 step "5. codesign -dv --verbose=4"
 codesign -dv --verbose=4 "$APP_BUNDLE"

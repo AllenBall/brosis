@@ -11,6 +11,7 @@
 // 一切输出都是 JSON（除 --help）。不启动 GUI、不触发 TCC；密钥用 --key-file（FileKeyProvider）。
 
 import BrosisCore
+import BrosisIPC
 import BrosisModels
 import Foundation
 
@@ -119,6 +120,31 @@ func loadEmbedder(_ args: Args) throws -> MLXEmbeddingProvider {
         maxTokensPerText: args.int("max-tokens") ?? 1024)
 }
 
+// MARK: - 等退出信号（写法与理由同 brosis-store 的同名函数）
+
+/// 等 `SIGINT` / `SIGTERM`，或者 `seconds` 到点。
+///
+/// **必须待在函数里，不能写在顶层**：Swift 6 语言模式下 `main.swift` 的顶层代码是
+/// `@MainActor` 隔离的，而 `setEventHandler(handler:)` 的参数不是 `@Sendable`，
+/// 顶层写的闭包会跟着带上 MainActor 检查，libdispatch 在信号队列上调它就 `SIGTRAP`。
+func waitForShutdownSignal(seconds: Int?) {
+    let done = DispatchSemaphore(value: 0)
+    let signalQueue = DispatchQueue(label: "brosis-embed.serve.signal")
+    var sources: [DispatchSourceSignal] = []
+    for sig in [SIGINT, SIGTERM] {
+        signal(sig, SIG_IGN)
+        let source = DispatchSource.makeSignalSource(signal: sig, queue: signalQueue)
+        source.setEventHandler { done.signal() }
+        source.resume()
+        sources.append(source)
+    }
+    if let seconds {
+        signalQueue.asyncAfter(deadline: .now() + .seconds(seconds)) { done.signal() }
+    }
+    done.wait()
+    for source in sources { source.cancel() }
+}
+
 let helpText = """
 brosis-embed —— 嵌入任务与查询向量（M2 c / T11，计划 3.4 / 3.11 / 4.3）
 
@@ -135,6 +161,11 @@ brosis-embed —— 嵌入任务与查询向量（M2 c / T11，计划 3.4 / 3.11
   queries           把一份查询集的检索串批量嵌成向量表（D8 实验用）
                     --file <[{"id":…,"q":…}, …]> --out <{"id": [数字…]}> [--model-id]
   rebuild           清掉全部 chunks / vec_chunks，下次 embed 从头再来（--dir --key-file）
+  serve-search      （M2 d / T15）起一个**注入了查询嵌入器**的 IPC 服务端，
+                    让 brosis-mcp / 评估脚本能走真实的 MCP 路径查（app 的产品路径同款）
+                    --dir --key-file [--models-dir] [--socket] [--rate 600] [--tz UTC]
+                    [--vector-max-distance] [--vector-weight] [--idle-unload-seconds 600]
+                    [--skip-codesign 只给验收脚本：跳过对端签名校验] [--seconds N] [--out]
   selftest          **用真实模型**跑一组断言（维度 / 归一化 / 确定性 / 语义分离 / MRL 截断）。
                     模型没装时打印 skipped 并以退出码 0 结束（CI 上没有模型，见 app/README 13.6）
 
@@ -394,6 +425,66 @@ do {
                               && qNear > qFar,
                             String(format: "近义 %.4f→%.4f，无关 %.4f→%.4f",
                                    nearCosine, qNear, farCosine, qFar)))
+        // ---- M2 d / T15：产品路径上的**查询**嵌入器与索引侧 provider 必须给出同一条向量 ----
+        //
+        // 索引侧写库用的是 `MLXEmbeddingProvider.embed`（批 16），查询侧用的是
+        // `MLXQueryEmbedder`（批固定 1）。E9 的已知限制是「换批大小会改动 1e-3 量级」，
+        // 所以这里比的是**同样批构造 1** 的两条：它们必须**逐元素相同**，
+        // 否则同一个问题在 MCP 里问和用 brosis-embed queries 算出来的向量就不是一回事，
+        // tools/eval/d8_mcp_compare.py 的「逐题相同」也就不成立。
+        var queryChecks: [[String: Any]] = []
+        if let root, ModelStore.isInstalled(root: root, id: id) {
+            let queryEmbedder = MLXQueryEmbedder(modelID: id)
+            queryEmbedder.enable(modelsRoot: root)
+            let t0 = Date()
+            let cold = try queryEmbedder.queryVector(for: near1)
+            let coldMS = Date().timeIntervalSince(t0) * 1000
+            let t1 = Date()
+            let hot = try queryEmbedder.queryVector(for: near1)
+            let hotMS = Date().timeIntervalSince(t1) * 1000
+            let sameAsIndex = (cold == single1[0]) && (hot == single1[0])
+            let coldVector: [Float] = cold ?? []
+            let mismatches = zip(coldVector, single1[0]).filter { $0 != $1 }.count
+            queryChecks.append(check(
+                "查询嵌入器与索引侧 provider 的向量逐元素相同（同为批构造 1）", sameAsIndex,
+                sameAsIndex
+                    ? "\(SchemaV4.dimension) 维逐元素相同，两次调用也相同"
+                    : "不同：\(coldVector.count) 维里有 \(mismatches) 维对不上"))
+            queryChecks.append(check("查询嵌入热延迟 ≤ \(Int(QueryEmbedTiming.hotBudgetMS)) ms（3.4 分层目标）",
+                                     hotMS <= QueryEmbedTiming.hotBudgetMS,
+                                     String(format: "首次（含加载）%.0f ms，热 %.1f ms", coldMS, hotMS)))
+            // 空闲卸载：把门槛调成 0 秒再 tick 一次，权重必须真的还回去
+            let idle = MLXQueryEmbedder(modelID: id, idleUnloadSeconds: 0)
+            idle.enable(modelsRoot: root)
+            _ = try idle.queryVector(for: near2)
+            let loadedBefore = idle.currentStats.loaded
+            idle.tick()
+            let stats = idle.currentStats
+            queryChecks.append(check("空闲到点后卸载并清 GPU 缓冲池（D27）",
+                                     loadedBefore && !stats.loaded && stats.unloads == 1
+                                       && stats.lastUnloadReason == "idle_0s",
+                                     "卸载原因 \(stats.lastUnloadReason ?? "nil")，"
+                                     + String(format: "GPU 缓冲 %.1f MiB",
+                                              MLXMemoryPolicy.snapshot["gpu_cache_mib"] ?? -1)))
+            // 锁定 / 关库：立刻卸载
+            let locked = MLXQueryEmbedder(modelID: id)
+            locked.enable(modelsRoot: root)
+            _ = try locked.queryVector(for: near2)
+            locked.disable(event: .storeClosed)
+            queryChecks.append(check("关库时立刻卸载",
+                                     !locked.currentStats.loaded
+                                       && locked.currentStats.lastUnloadReason == "store_closed",
+                                     locked.currentStats.lastUnloadReason ?? "nil"))
+            // 卸载之后 `enable` 没恢复 ⇒ 零模型调用
+            queryChecks.append(check("关库之后不再算查询向量（零模型调用）",
+                                     (try locked.queryVector(for: near2)) == nil,
+                                     "返回 nil，调用方按 no_query_vector 降级"))
+        } else {
+            queryChecks.append(["check": "查询嵌入器（M2 d / T15）", "ok": true,
+                                "detail": "跳过：模型不是经模型目录安装的（用了 --model-dir）"])
+        }
+        checks.append(contentsOf: queryChecks)
+
         let release = provider.unload()
         emit(["command": "selftest", "status": failures.isEmpty ? "passed" : "failed",
               "model": id, "native_dimension": provider.nativeDimension,
@@ -402,6 +493,97 @@ do {
               "peak_footprint_mib": Double(ModelProc.peakFootprintBytes()) / ModelBytes.mib,
               "release": jsonValue(release)])
         if !failures.isEmpty { exit(1) }
+
+    // ------------------------------------------------------------ serve-search（M2 d / T15）
+    //
+    // 为什么要有它：产品路径上算查询向量的是 **brosis.app 里的 IPC 服务端**
+    // （`MCPIPCService` 注入 `QueryEmbedderService`），而 `brosis-store serve` 在 core 里、
+    // core 零 mlx 依赖，注入不了嵌入器。本轮屏幕锁着、不能起 GUI，
+    // 于是用同一份 `MLXQueryEmbedder` + 同一个 `StoreMCPService` + 同一个 `MCPGate` + 同一个
+    // `IPCServer` 在命令行里起一遍：**代码路径与产品完全一致**，差别只有
+    //   ① 密钥用 `FileKeyProvider` 而不是钥匙串（不弹授权框）；
+    //   ② 锁定相位写死 `unlocked`（没有 GUI 的锁定状态机）；
+    //   ③ 可以用 `--skip-codesign` 跳过对端签名校验（`swift build` 出来的 brosis-mcp 没有
+    //      Developer ID，同 Team 校验必然过不去）。产品路径写死 `.requireSameTeam`，
+    //      没有这个开关，见 app/Sources/brosis/IPCService.swift 的类型注释。
+    case "serve-search":
+        let store = try openStore(args)
+        if let tz = args.string("tz"), let zone = TimeZone(identifier: tz) {
+            store.retrieval.timeZone = zone
+        }
+        store.retrieval.vectorsEnabled = !args.has("no-vectors")
+        if let v = args.double("vector-max-distance") { store.retrieval.vectorMaxDistance = v }
+        if let v = args.double("vector-weight") { store.retrieval.vectorWeight = v }
+
+        let embedder = MLXQueryEmbedder(
+            modelID: args.string("model-id") ?? Catalog.embeddingModelID,
+            cacheLimitMiB: args.int("cache-limit-mib") ?? MLXMemoryPolicy.defaultCacheLimitMiB,
+            idleUnloadSeconds: args.double("idle-unload-seconds")
+                ?? QueryEmbedderPolicy.idleUnloadSeconds)
+        let eventsPath = args.string("events")
+        embedder.onEvent = { kind, detail in
+            let line = "{\"kind\":\"\(kind)\",\"detail\":\(detail)}"
+            FileHandle.standardError.write(Data(("serve-search: " + line + "\n").utf8))
+            if let eventsPath, let handle = FileHandle(forWritingAtPath: eventsPath) {
+                handle.seekToEndOfFile()
+                handle.write(Data((line + "\n").utf8))
+                try? handle.close()
+            }
+        }
+        embedder.enable(modelsRoot: try modelsRoot(args))
+        embedder.startIdleTimer(interval: args.double("idle-tick-seconds") ?? 60)
+
+        let service = StoreMCPService(store: store, queryEmbedder: embedder)
+        let gate = MCPGate { (.unlocked, service) }
+        var configuration = IPCServer.Configuration(
+            socketURL: args.string("socket").map { URL(filePath: $0) }
+                ?? IPCProtocol.socketURL(dataDirectory: store.directory))
+        configuration.requestsPerMinute = args.int("rate") ?? 600
+        configuration.peerPolicy = args.has("skip-codesign") ? .skip : .requireSameTeam
+        let server = IPCServer(configuration: configuration) { call in gate.handle(call) }
+        try server.start()
+        emit(["command": "serve-search", "ready": true,
+              "socket": configuration.socketURL.path,
+              "requests_per_minute": configuration.requestsPerMinute,
+              "peer_policy": args.has("skip-codesign") ? "skip_codesign" : "require_same_team",
+              "vectors_enabled": store.retrieval.vectorsEnabled,
+              "vector_max_distance": store.retrieval.vectorMaxDistance,
+              "vector_weight": store.retrieval.vectorWeight,
+              "model": embedder.modelID,
+              "model_installed": embedder.modelInstalled,
+              "idle_unload_seconds": embedder.idleUnloadSeconds,
+              "cache_limit_mib": embedder.cacheLimitMiB,
+              "schema_version": Schema.version])
+
+        waitForShutdownSignal(seconds: args.int("seconds"))
+        server.stop()
+        embedder.stopIdleTimer()
+        embedder.disable(event: .storeClosed)
+        try? store.checkpoint()
+        store.close()
+        let stats = embedder.currentStats
+        var summary: [String: Any] = [
+            "command": "serve-search", "stopped": true,
+            "queries": stats.queries, "loads": stats.loads, "unloads": stats.unloads,
+            "failures": stats.failures,
+            "last_unload_reason": stats.lastUnloadReason ?? "none",
+            "peak_footprint_mib": Double(ModelProc.peakFootprintBytes()) / ModelBytes.mib,
+            "thermal": ModelProc.thermalState,
+            "hot_query_ms_budget": QueryEmbedTiming.hotBudgetMS,
+        ]
+        if let v = stats.lastLoadSeconds { summary["load_seconds"] = v }
+        if let v = stats.lastLoadPeakFootprintMiB { summary["load_peak_footprint_mib"] = v }
+        if let v = stats.hotP50MS { summary["hot_query_p50_ms"] = v }
+        if let v = stats.hotP95MS { summary["hot_query_p95_ms"] = v }
+        if !stats.hotQueryMS.isEmpty {
+            summary["hot_query_ms"] = stats.hotQueryMS.map { ($0 * 1000).rounded() / 1000 }
+        }
+        if let out = args.string("out") {
+            try JSONSerialization.data(withJSONObject: summary,
+                                       options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes])
+                .write(to: URL(filePath: out))
+        }
+        emit(summary)
 
     // ---------------------------------------------------------------- rebuild
     case "rebuild":

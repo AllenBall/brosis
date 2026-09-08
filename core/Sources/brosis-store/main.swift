@@ -448,6 +448,24 @@ brosis-store —— core/ 加密存储核心的命令行工具（M1 / T2）
   sync-cleanup      删掉所有对端都已 ack 的本机段文件
   sync-run          一轮完整同步：入站 → 出站 → 清理
 
+加密导出 / 导入（M2 d / T16，计划 3.8 / D7）：
+  export            把库导成一份加密归档 --out <归档目录（必须不存在或为空）>
+                    [--start <ms>] [--end <ms>] [--apps a,b]
+                    [--include-policies] [--include-events] [--block-bytes 8388608]
+                    [--batch 200]
+  import            导入一份归档 --archive <归档目录> [--mode restore|merge] [--dry-run]
+                    目标库不存在时按归档的 source_device 建库（于是走恢复模式、id 原样写回）
+  export-info       只读 manifest（**不需要口令**）：格式、时刻、来源设备、范围、计数、每块校验
+  export-verify     全量校验：逐块解密 + 字节数 / 行数 / 计数对账（要口令，不写库）
+  export-imports    这个库导入过哪些归档（archive_id / 来源设备 / 模式 / 时刻）
+  quota-action      D7 配额通知：等级、会删掉哪一段、建议先导出什么范围
+                    [--acknowledge [--archive-id <id>]] 确认通知；[--expire [--force]] 确认后再删
+
+  **口令不走命令行参数**（`ps` 看得见）。两条路，按这个顺序取：
+    1. 环境变量 BROSIS_EXPORT_PASSPHRASE（非空时用它）；
+    2. 标准输入：读一行（末尾换行会去掉）。
+  例：printf '%s' "$PASS" | brosis-store export --dir ... --out ...
+
 本地 IPC / MCP（M1 / T5，计划 3.1 / 3.6）：
   serve             在 <数据目录>/ipc.sock 上起 IPC 服务端（**测试替身**，产品路径在 brosis.app 里）
                     [--rate 60] [--seconds N] [--state-file <文件：unlocked|paused|locked>]
@@ -502,6 +520,72 @@ func importJSON(_ report: SyncImportReport) -> [String: Any] {
      "sessions_stale": report.stats.sessionsStale,
      "ledgers_stale": report.stats.ledgersStale,
      "elapsed_ms": report.elapsedMS]
+}
+
+// MARK: - 加密导出 / 导入（M2 d / T16，计划 3.8 / D7）
+
+enum ExportCLI {
+
+    /// 环境变量名。**只放名字，值永远不落磁盘、不进参数、不进日志。**
+    static let passphraseEnv = "BROSIS_EXPORT_PASSPHRASE"
+
+    /// 取口令：环境变量优先，否则读一行标准输入。
+    ///
+    /// 为什么不做 `--passphrase`：命令行参数在 `ps` 里对同机所有用户可见，
+    /// 也会进 shell 历史。3.8 的独立口令一旦泄露，归档就等于明文。
+    static func passphrase() throws -> String {
+        if let value = ProcessInfo.processInfo.environment[passphraseEnv], !value.isEmpty {
+            return value
+        }
+        guard let line = readLine(strippingNewline: true), !line.isEmpty else {
+            throw CLIError("没拿到导出口令：设 \(passphraseEnv)，或者把口令从标准输入喂进来")
+        }
+        return line
+    }
+
+    static func requestJSON(_ scope: ExportScope) -> [String: Any] {
+        ["start": scope.start as Any, "end": scope.end as Any,
+         "apps": scope.apps, "include_policies": scope.includePolicies,
+         "include_events": scope.includeEvents,
+         "max_observation_id": scope.maxObservationID,
+         "max_deletion_id": scope.maxDeletionID]
+    }
+
+    static func manifestJSON(_ manifest: ExportManifest, root: URL) -> [String: Any] {
+        ["format": manifest.format, "version": manifest.version,
+         "payload_version": manifest.payloadVersion,
+         "archive_id": manifest.archiveID, "created_at": manifest.createdAt,
+         "source_device": manifest.sourceDevice, "schema_version": manifest.schemaVersion,
+         "aead": manifest.aead, "kdf": manifest.kdf, "kdf_iterations": manifest.kdfIterations,
+         "salt_bytes": manifest.salt.count, "block_plain_bytes": manifest.blockPlainBytes,
+         "blocks": manifest.blocks.count,
+         "block_checksums": manifest.blocks.map { ["seq": $0.seq, "rows": $0.rows,
+                                                   "plain_bytes": $0.plainBytes,
+                                                   "cipher_bytes": $0.cipherBytes,
+                                                   "checksum": $0.checksum] },
+         "total_checksum": manifest.totalChecksum,
+         "scope": requestJSON(manifest.scope),
+         "counts": jsonValue(manifest.counts),
+         "notes": manifest.notes,
+         "archive_bytes": ExportArchive.archiveBytes(root: root, manifest: manifest)]
+    }
+
+    static func quotaJSON(_ action: QuotaAction) -> [String: Any] {
+        ["level": action.level.rawValue, "used_bytes": action.usedBytes,
+         "quota_bytes": action.quotaBytes, "ratio": action.ratio,
+         "would_delete_observations": action.wouldDeleteObservations,
+         "would_free_bytes": action.wouldFreeBytes,
+         "would_delete_oldest_ts": action.wouldDeleteOldestTS as Any,
+         "would_delete_newest_ts": action.wouldDeleteNewestTS as Any,
+         "suggested_export_start": action.suggestedExportStart as Any,
+         "suggested_export_end": action.suggestedExportEnd as Any,
+         "acknowledged_at": action.acknowledgedAt as Any,
+         "acknowledged_archive_id": action.acknowledgedArchiveID as Any,
+         "last_export_at": action.lastExportAt as Any,
+         "last_export_archive_id": action.lastExportArchiveID as Any,
+         "expire_allowed": action.expireAllowed,
+         "message": action.message]
+    }
 }
 
 // MARK: - 主流程
@@ -1455,6 +1539,104 @@ do {
             out["status"] = try statusObject()
         }
         emit(out)
+
+    // ------------------------------------------- 加密导出 / 导入（M2 d / T16，3.8 / D7）
+    case "export":
+        let store = try openStore(args, createIfMissing: false)
+        defer { store.close() }
+        let out = URL(fileURLWithPath: try args.require("out"), isDirectory: true)
+        var request = ExportRequest()
+        request.start = args.int64("start")
+        request.end = args.int64("end")
+        request.apps = (args.string("apps") ?? "").split(separator: ",")
+            .map { String($0).trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+        request.includePolicies = args.has("include-policies")
+        request.includeEvents = args.has("include-events")
+        if let n = args.int("block-bytes") { request.blockPlainBytes = n }
+        if let n = args.int("batch") { request.batchObservations = n }
+        let passphrase = try ExportCLI.passphrase()
+        let outcome = try store.exportArchive(to: out, passphrase: passphrase, request: request)
+        emit(["command": "export",
+              "archive_id": outcome.archiveID, "directory": outcome.directory,
+              "blocks": outcome.blocks, "archive_bytes": outcome.archiveBytes,
+              "plain_bytes": outcome.plainBytes, "elapsed_ms": outcome.elapsedMS,
+              "counts": jsonValue(outcome.counts),
+              "event_detail": outcome.eventDetail,
+              "manifest": ExportCLI.manifestJSON(try ExportArchive.readManifest(root: out),
+                                                 root: out)])
+
+    case "export-info":
+        let root = URL(fileURLWithPath: try args.require("archive"), isDirectory: true)
+        let manifest = try ExportArchive.readManifest(root: root)
+        emit(["command": "export-info", "directory": root.path,
+              "manifest": ExportCLI.manifestJSON(manifest, root: root)])
+
+    case "export-verify":
+        let root = URL(fileURLWithPath: try args.require("archive"), isDirectory: true)
+        let reader = try ExportArchiveReader(root: root, passphrase: try ExportCLI.passphrase())
+        let report = try reader.verify()
+        emit(["command": "export-verify", "directory": root.path,
+              "report": jsonValue(report)])
+
+    case "import":
+        let root = URL(fileURLWithPath: try args.require("archive"), isDirectory: true)
+        let manifest = try ExportArchive.readManifest(root: root)
+        let passphrase = try ExportCLI.passphrase()
+        if args.has("dry-run") {
+            let reader = try ExportArchiveReader(root: root, manifest: manifest,
+                                                 passphrase: passphrase)
+            let report = try reader.verify()
+            emit(["command": "import", "dry_run": true, "directory": root.path,
+                  "report": jsonValue(report),
+                  "manifest": ExportCLI.manifestJSON(manifest, root: root)])
+            break
+        }
+        // 目标库不存在时按归档的 source_device 建库：于是恢复出来的 device_id 与源库一致，
+        // 源 id 原样写回，evidence / 台账里的 id 全都还对得上。
+        var importArgs = args
+        if importArgs.flags["device-id"] == nil {
+            importArgs.flags["device-id"] = manifest.sourceDevice
+        }
+        let store = try openStore(importArgs)
+        defer { store.close() }
+        let mode = args.string("mode").flatMap(ExportImportMode.init(rawValue:))
+        let stats = try store.importArchive(from: root, passphrase: passphrase, mode: mode)
+        emit(["command": "import", "dry_run": false, "directory": root.path,
+              "archive_id": manifest.archiveID, "source_device": manifest.sourceDevice,
+              "target_device": store.deviceID,
+              "stats": jsonValue(stats)])
+
+    case "export-imports":
+        let store = try openStore(args, createIfMissing: false)
+        defer { store.close() }
+        let rows = try store.exportImports(limit: args.int("limit") ?? 20)
+        emit(["command": "export-imports", "count": rows.count, "rows": jsonValue(rows)])
+
+    case "quota-action":
+        let store = try openStore(args, createIfMissing: false)
+        defer { store.close() }
+        if args.has("acknowledge") {
+            try store.acknowledgeQuotaAction(archiveID: args.string("archive-id"))
+        }
+        var object: [String: Any] = ["command": "quota-action"]
+        if args.has("expire") {
+            switch try store.expireAfterNotice(toBytes: args.int("to-bytes"),
+                                               force: args.has("force")) {
+            case .notNeeded(let action):
+                object["outcome"] = "not_needed"
+                object["action"] = ExportCLI.quotaJSON(action)
+            case .blocked(let action):
+                object["outcome"] = "blocked"
+                object["action"] = ExportCLI.quotaJSON(action)
+            case .expired(let action, let report):
+                object["outcome"] = "expired"
+                object["action"] = ExportCLI.quotaJSON(action)
+                object["expire"] = jsonValue(report)
+            }
+        } else {
+            object["action"] = ExportCLI.quotaJSON(try store.quotaAction())
+        }
+        emit(object)
 
     default:
         throw CLIError("未知子命令 \(args.command)，见 --help")

@@ -32,6 +32,8 @@ final class MCPIPCService: @unchecked Sendable {
     private var server: IPCServer?
     private var gate: MCPGate!
     private var lastError: String?
+    /// 当前挂着的库（M2 d / T15：暂停 / 恢复时要拿它算模型目录）。
+    private var attachedStore: Store?
 
     init(recorder: Recorder) {
         self.recorder = recorder
@@ -95,25 +97,38 @@ final class MCPIPCService: @unchecked Sendable {
     }
 
     /// 进入 `unlocked`：把库交给 MCP 服务。
+    ///
+    /// M2 d / T15：同时把**查询嵌入器**注入给 `StoreMCPService`，`search` 才有查询向量。
+    /// 注入的是一个懒加载 + 空闲卸载的实现（`QueryEmbedderService`），
+    /// 这一刻不加载任何权重——第一次真的有人 `search` 才载入。
     func attach(store: Store) {
+        QueryEmbedderService.shared.attach(recorder: recorder, store: store)
         lock.lock()
-        service = StoreMCPService(store: store)
+        service = StoreMCPService(store: store,
+                                  queryEmbedder: QueryEmbedderService.shared.embedder)
+        attachedStore = store
         let handle = service
         lock.unlock()
         if let handle { _ = gate.flush(into: handle) }   // 补写锁定期间攒下的审计
     }
 
     /// 离开 `unlocked`：**在关库之前**摘掉，之后所有调用回 `locked`。
+    /// 顺带把查询嵌入器卸掉（4.3.2 T15「锁定 / 关库时立即卸载」）。
     func detach() {
         lock.lock()
         service = nil
+        attachedStore = nil
         lock.unlock()
+        QueryEmbedderService.shared.storeClosed()
     }
 
     func setPaused(_ value: Bool) {
         lock.lock()
         paused = value
+        let store = attachedStore
         lock.unlock()
+        // 3.5：`paused` 下 MCP 已经在拒绝调用了，权重没有理由继续占内存。
+        QueryEmbedderService.shared.setPaused(value, store: store)
     }
 
     /// 退出时停 socket 并删掉 socket 文件。
@@ -122,8 +137,10 @@ final class MCPIPCService: @unchecked Sendable {
         let running = server
         server = nil
         service = nil
+        attachedStore = nil
         lock.unlock()
         running?.stop()
+        QueryEmbedderService.shared.storeClosed()
     }
 
     // MARK: - 菜单显示

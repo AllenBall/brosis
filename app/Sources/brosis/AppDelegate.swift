@@ -15,6 +15,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var guide: PermissionGuide?
     /// 3.9 跨设备同步（c 批 T13）。挂在锁定状态机上，只在 unlocked 相位跑循环。
     private var sync: SyncController?
+    /// d 批 T18：Focus 联动（只读 DoNotDisturb 状态文件，不可读即"不可用"）。
+    private var focus: FocusMonitor?
+    /// d 批 T16：加密导出窗口与配额"先加密导出"联动。
+    private var exportController: ExportController?
     /// 最近一次前台的**非本应用**：菜单里「暂停采集当前应用」要用它。
     /// 不能在菜单打开时现问 `frontmostApplication`——点状态栏图标本身会让本应用成为前台。
     private var foregroundBundleID: String?
@@ -69,6 +73,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         NarrativeScheduler.shared.configure(recorder: recorder, lockSnapshot: lockSnapshot)
         if NarrativeScheduler.shared.isEnabled { NarrativeScheduler.shared.start() }
 
+        // d 批接线（tools/bench/results/m2_d_{export,focus_hotkey}_2026-09-08.md 的「接入方式」）：
+        // 加密导出只存一个 weak recorder；Focus 监视挂到锁定状态机（走现有暂停路径）；
+        // 全局热键 ⌃⌥⌘P 暂停 / 继续、⌃⌥⌘L 锁定，处理器只转发到现有 togglePause / lockNow。
+        let exportController = ExportController()
+        exportController.install(recorder: recorder)
+        self.exportController = exportController
+        let focus = FocusMonitor()
+        focus.install(lock: lock, recorder: recorder)
+        self.focus = focus
+        _ = HotKeys.shared.install(recorder: recorder,
+                                   onPause: { [weak lock] in lock?.togglePause() },
+                                   onLock: { [weak lock] in lock?.lockNow() })
+
         // 3.12 的应用采集清单窗口。**这里只是接线，不创建窗口**——
         // 窗口在用户第一次点菜单项时才建（LSUIElement 的进程不该在启动时拉起 AppKit 窗口）。
         PoliciesWindowController.shared.configure(recorder: recorder) { [weak self] bundleID, mode in
@@ -107,6 +124,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        _ = HotKeys.shared.uninstall()
         NSWorkspace.shared.notificationCenter.removeObserver(self)
         events?.stop()
         events = nil
@@ -338,6 +356,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(disabledItem("写入：\(recorder.stats.summary)"))
         menu.addItem(disabledItem("屏幕录制：\(permissions.screenRecording ? "已授权" : "未授权")"))
         menu.addItem(disabledItem("辅助功能：\(permissions.accessibility ? "已授权" : "未授权")"))
+        menu.addItem(disabledItem(focus?.menuDescription ?? "Focus 联动：未启动"))
+        menu.addItem(disabledItem(HotKeys.shared.menuDescription))
         if let capture, capture.isRunning, let displayID = capture.currentDisplayID {
             let stats = capture.currentStats
             let ago = stats.lastCaptureAt > 0
@@ -432,6 +452,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                                   action: #selector(openSyncWindow), keyEquivalent: "")
         syncItem.target = self
         menu.addItem(syncItem)
+        let exportItem = NSMenuItem(title: "加密导出…", action: #selector(openExport), keyEquivalent: "")
+        exportItem.target = self
+        menu.addItem(exportItem)
 
         menu.addItem(.separator())
         let quit = NSMenuItem(title: "退出 brosis", action: #selector(quit), keyEquivalent: "q")
@@ -638,6 +661,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 self?.refreshMenu()
             }
         }
+    }
+
+    @objc private func openExport() {
+        exportController?.presentWindow()
     }
 
     @objc private func openSyncWindow() {

@@ -41,7 +41,9 @@ import time
 from datetime import datetime, timezone
 
 SCHEMA = "brosis/queryset@1"
-CLASSES = ("活动定位", "原文细节", "跨来源", "无答案或已删除")
+# 六类（M2 d / T17 把「活动模式」「最近活动」两类加进来，见 tools/eval/README §2.1）
+CLASSES = ("活动定位", "原文细节", "跨来源", "无答案或已删除", "活动模式", "最近活动")
+DIFFICULTIES = ("易", "中", "难")
 BUCKETS = ("通过", "未采集", "已过期或已删除", "索引漏召回", "上下文裁剪", "负例误报")
 
 
@@ -52,11 +54,29 @@ def load_queryset(path):
     counts = {}
     for q in qs["queries"]:
         if q["class"] not in CLASSES:
-            raise SystemExit("题 %s 的类别 %r 不在四类里" % (q["id"], q["class"]))
+            raise SystemExit("题 %s 的类别 %r 不在六类里" % (q["id"], q["class"]))
         counts[q["class"]] = counts.get(q["class"], 0) + 1
     if qs.get("quota") and counts != qs["quota"]:
-        raise SystemExit("四类配额不符：实际 %r，声明 %r" % (counts, qs["quota"]))
+        raise SystemExit("六类配额不符：实际 %r，声明 %r" % (counts, qs["quota"]))
     return qs
+
+
+def select_queries(qs, mode):
+    """留出题（`holdout: true`）默认**不参与**日常评估。
+
+    计划 4.3 要求「留出 30 题作独立测试」——留出题只在 `monthly_report.py` 的月度回归里跑，
+    平时调检索参数看的是另外 70 题，免得把留出题也调进去、失去"独立"的意义。
+
+      * `exclude`（默认）—— 只跑非留出题；
+      * `include`（`--include-holdout`）—— 100 题全跑；
+      * `only`（`--holdout-only`）—— 只跑 30 道留出题，月报用的就是这一档。
+    """
+    qs_all = qs["queries"]
+    if mode == "include":
+        return list(qs_all)
+    if mode == "only":
+        return [q for q in qs_all if q.get("holdout")]
+    return [q for q in qs_all if not q.get("holdout")]
 
 
 def run_json(cmd):
@@ -190,7 +210,9 @@ def evaluate(args):
     qs = load_queryset(args.queryset)
     corpus_check = (check_corpus(args, qs) if args.check_corpus
                     else {"checked": False, "reason": "没加 --check-corpus"})
-    queries = qs["queries"]
+    queries = select_queries(qs, args.holdout_mode)
+    if not queries:
+        raise SystemExit("按 --holdout 口径 %r 选出来 0 道题" % args.holdout_mode)
     batch, batch_elapsed = search_batch(args, queries, args.batch_file or (args.out_json + ".batch.json"))
 
     rows = []
@@ -211,6 +233,8 @@ def evaluate(args):
         hits10 = [i for i in got if i in rel]
         row = {
             "id": qid, "class": q["class"], "holdout": bool(q.get("holdout")),
+            "difficulty": q.get("difficulty"), "tool": q.get("tool", "search"),
+            "truth_mode": q.get("truth_mode", "relevant_ids"),
             "expect": q["expect"], "q": q["q"], "search_q": q["search"]["q"],
             "relevant": len(rel), "returned": len(got),
             "route": b.get("route"), "channels": b.get("channels", []),
@@ -297,6 +321,9 @@ def group(rows, pred):
     none = [r for r in rows if r["expect"] == "none" and pred(r)]
     return {
         "hit_queries": len(hit),
+        # Recall 只对"有全量真值"的题算得出来：工具题与真实题的 relevant 是空的，
+        # 它们按 evidence_match 判、recall 记 null，所以均值的分母是这个数不是 hit_queries。
+        "recall_scored_queries": sum(1 for r in hit if r.get("recall@10") is not None),
         "none_queries": len(none),
         "recall@10": mean([r.get("recall@10") for r in hit]),
         "precision@10": mean([r.get("precision@10") for r in hit]),
@@ -309,7 +336,12 @@ def group(rows, pred):
 def summarize(qs, rows, batch_elapsed, mismatched, args):
     """注意：`corpus_check` 由 evaluate() 在这之后塞进来（它要跑 CLI，放在检索之前做）。"""
     buckets = {b: [r["id"] for r in rows if r["bucket"] == b] for b in BUCKETS}
-    by_class = {c: group(rows, lambda r, c=c: r["class"] == c) for c in CLASSES}
+    by_class = {c: group(rows, lambda r, c=c: r["class"] == c) for c in CLASSES
+                if any(r["class"] == c for r in rows)}
+    by_difficulty = {d: group(rows, lambda r, d=d: r.get("difficulty") == d)
+                     for d in DIFFICULTIES if any(r.get("difficulty") == d for r in rows)}
+    tools = sorted({r.get("tool", "search") for r in rows})
+    by_tool = {t: group(rows, lambda r, t=t: r.get("tool", "search") == t) for t in tools}
     return {
         "generated_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "queryset": os.path.basename(os.path.expanduser(args.queryset)),
@@ -318,6 +350,10 @@ def summarize(qs, rows, batch_elapsed, mismatched, args):
         "queries": len(rows),
         "overall": group(rows, lambda r: True),
         "by_class": by_class,
+        "by_difficulty": by_difficulty,
+        "by_tool": by_tool,
+        "holdout_mode": args.holdout_mode,
+        "queryset_total_queries": len(qs["queries"]),
         "holdout": group(rows, lambda r: r["holdout"]),
         "non_holdout": group(rows, lambda r: not r["holdout"]),
         "buckets": {b: len(v) for b, v in buckets.items()},
@@ -385,16 +421,18 @@ def markdown(qs, rows, out):
                  "不能当作真实使用的召回率。真实 60 题按 `tools/eval/queryset.schema.md` 出（D12）。\n")
 
     L.append("\n## 总体与分类\n")
-    L.append("| 组 | 可答题 | 不可答题 | Recall@10 | Precision@10 | MRR@10 | 负例误报 | 通过 |")
-    L.append("|---|---:|---:|---:|---:|---:|---:|---:|")
+    L.append("| 组 | 可答题 | 其中算得出 Recall 的 | 不可答题 | Recall@10 | Precision@10 | MRR@10 | 负例误报 | 通过 |")
+    L.append("|---|---:|---:|---:|---:|---:|---:|---:|---:|")
 
     def line(name, g, total):
-        L.append("| %s | %d | %d | %s | %s | %s | %d | %d/%d |"
-                 % (name, g["hit_queries"], g["none_queries"], fmt(g["recall@10"]),
-                    fmt(g["precision@10"]), fmt(g["mrr@10"]),
+        L.append("| %s | %d | %d | %d | %s | %s | %s | %d | %d/%d |"
+                 % (name, g["hit_queries"], g["recall_scored_queries"], g["none_queries"],
+                    fmt(g["recall@10"]), fmt(g["precision@10"]), fmt(g["mrr@10"]),
                     g["none_with_false_positives"], g["passed"], total))
 
     for c in CLASSES:
+        if c not in out["by_class"]:
+            continue
         g = out["by_class"][c]
         line(c, g, g["hit_queries"] + g["none_queries"])
     line("**合计**", out["overall"], out["queries"])
@@ -403,6 +441,22 @@ def markdown(qs, rows, out):
          out["non_holdout"]["hit_queries"] + out["non_holdout"]["none_queries"])
     L.append("\n目标（计划 2.4）：可答题 Recall@10 ≥ 0.90 —— 实测 %s，%s。\n"
              % (fmt(out["overall"]["recall@10"]), "达标" if out["target_2_4"]["met"] else "**未达标**"))
+    L.append("\n> 留出题口径：`%s`（本次跑了 %d / %d 题）。默认 `exclude`；月报用 `--holdout-only`。\n"
+             % (out["holdout_mode"], out["queries"], out["queryset_total_queries"]))
+
+    L.append("\n## 按难度 / 按工具\n")
+    L.append("| 分组 | 可答题 | 其中算得出 Recall 的 | 不可答题 | Recall@10 | Precision@10 | MRR@10 | 负例误报 | 通过 |")
+    L.append("|---|---:|---:|---:|---:|---:|---:|---:|---:|")
+    for d in DIFFICULTIES:
+        if d not in out["by_difficulty"]:
+            continue
+        g = out["by_difficulty"][d]
+        line("难度 " + d, g, g["hit_queries"] + g["none_queries"])
+    for t, g in sorted(out["by_tool"].items()):
+        line("工具 `%s`" % t, g, g["hit_queries"] + g["none_queries"])
+    L.append("\n> `tool != search` 的题问的是聚合量，`relevant` 留空、按"
+             "「返回的证据满不满足期望证据」判（`judged_by = evidence_match`），Recall 记 null——"
+             "它们的真正判据是 `make_synthetic_queryset.py verify-tools`。\n")
 
     L.append("\n## 失败归因（4.4 前三类 + 上下文裁剪）\n")
     L.append("| 类别 | 题数 | 题号 |")
@@ -412,11 +466,12 @@ def markdown(qs, rows, out):
         L.append("| %s | %d | %s |" % (b, len(ids), ", ".join(ids) or "—"))
 
     L.append("\n## 逐题\n")
-    L.append("| id | 类 | 留出 | 期望 | 真值 | 返回 | R@10 | P@10 | MRR | 首个相关位次 | 通道 | 归因 |")
-    L.append("|---|---|---|---|---:|---:|---:|---:|---:|---:|---|---|")
+    L.append("| id | 类 | 难度 | 工具 | 留出 | 期望 | 真值 | 返回 | R@10 | P@10 | MRR | 首个相关位次 | 通道 | 归因 |")
+    L.append("|---|---|---|---|---|---|---:|---:|---:|---:|---:|---:|---|---|")
     for r in rows:
-        L.append("| `%s` | %s | %s | %s | %d | %d | %s | %s | %s | %s | %s | %s |"
-                 % (r["id"], r["class"], "是" if r["holdout"] else "否", r["expect"],
+        L.append("| `%s` | %s | %s | `%s` | %s | %s | %d | %d | %s | %s | %s | %s | %s | %s |"
+                 % (r["id"], r["class"], r.get("difficulty") or "—", r.get("tool", "search"),
+                    "是" if r["holdout"] else "否", r["expect"],
                     r["relevant"], r["returned"], fmt(r.get("recall@10")),
                     fmt(r.get("precision@10")), fmt(r.get("mrr@10")),
                     r.get("first_relevant_rank") or "—",
@@ -438,6 +493,11 @@ def main(argv=None):
     p.add_argument("--batch-file", default=None)
     p.add_argument("--missed-probe", type=int, default=10,
                    help="漏召回时最多拿几个漏掉的 id 去 get_evidence 探活")
+    p.add_argument("--include-holdout", dest="holdout_mode", action="store_const",
+                   const="include", default="exclude",
+                   help="连留出题一起跑（默认排除，见 select_queries 的说明）")
+    p.add_argument("--holdout-only", dest="holdout_mode", action="store_const", const="only",
+                   help="只跑留出题（月报的独立测试口径）")
     p.add_argument("--check-corpus", action="store_true",
                    help="评估前先用 stats 的观察数核对这个库就是查询集 corpus 段那份语料建出来的"
                         "（真实题没有 corpus 段，自动跳过）")

@@ -81,6 +81,9 @@ let package = Package(
             name: "brosis-embed",
             dependencies: [
                 .product(name: "BrosisCore", package: "core"),
+                // M2 d / T15：`serve-search` 要起一个真的 IPC 服务端（与产品同款），
+                // 好让 brosis-mcp / 评估脚本在没有 GUI 的机器上走真实的 MCP 路径。
+                .product(name: "BrosisIPC", package: "core"),
                 "BrosisModels"
             ],
             path: "Sources/brosis-embed",

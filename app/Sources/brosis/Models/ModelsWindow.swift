@@ -117,9 +117,12 @@ final class ModelsWindowController: NSObject, NSWindowDelegate,
     private var statusLabel: NSTextField?
     private var vectorSwitch: NSButton?
     private var nightlySwitch: NSButton?
+    /// M2 d / T15：「现在开始建索引」按钮（跑起来之后变成「取消」）。
+    private var overnightButton: NSButton?
     private var noteLabel: NSTextField?
     private var entries: [ModelStore.Entry] = []
     private var lastAction: String?
+    private var overnightTimer: Timer?
 
     @objc func openFromMenu(_ sender: Any?) { present() }
 
@@ -197,6 +200,14 @@ final class ModelsWindowController: NSObject, NSWindowDelegate,
         rebuild.autoresizingMask = [.maxXMargin, .minYMargin]
         content.addSubview(rebuild)
 
+        // M2 d / T15：首次全量建索引的一次性动作（D8 的条件 3）。
+        let overnight = NSButton(title: "现在开始建索引（连续跑到完成或取消）", target: self,
+                                 action: #selector(overnightClicked(_:)))
+        overnight.frame = NSRect(x: 660, y: 82, width: 184, height: 28)
+        overnight.autoresizingMask = [.minXMargin, .minYMargin]
+        content.addSubview(overnight)
+        overnightButton = overnight
+
         let vectorToggle = NSButton(checkboxWithTitle: "在检索里使用向量（未装模型时强制关）",
                                     target: self, action: #selector(vectorToggled(_:)))
         vectorToggle.frame = NSRect(x: 16, y: 52, width: 400, height: 22)
@@ -258,8 +269,8 @@ final class ModelsWindowController: NSObject, NSWindowDelegate,
         if let action = lastAction { lines.append(action) }
         statusLabel?.stringValue = lines.prefix(2).joined(separator: "\n")
         noteLabel?.stringValue =
-            "模型目录：\(state.modelsRoot?.lastPathComponent ?? "?")（来源 \(state.modelsRootSource)；"
-            + "D18：数据目录旁的 models/，不加密、不进 iCloud 同步）"
+            OvernightIndexJob.shared.statusText + " · " + QueryEmbedderService.shared.statusDescription
+            + " · 模型目录 \(state.modelsRoot?.lastPathComponent ?? "?")（来源 \(state.modelsRootSource)）"
             + (lastAction.map { " · " + $0 } ?? "")
 
         let installed = entries.first { $0.id == Catalog.embeddingModelID }?.installed ?? false
@@ -267,6 +278,11 @@ final class ModelsWindowController: NSObject, NSWindowDelegate,
         vectorSwitch?.isEnabled = installed && (state.vector?.embeddedChunks ?? 0) > 0
         nightlySwitch?.state = EmbeddingScheduler.shared.isEnabled ? .on : .off
         nightlySwitch?.isEnabled = installed
+        let overnightRunning = OvernightIndexJob.shared.isRunning
+        overnightButton?.title = overnightRunning
+            ? "取消建索引" : "现在开始建索引（连续跑到完成或取消）"
+        overnightButton?.isEnabled = installed
+            && (overnightRunning || (state.vector?.pendingChunks ?? 0) > 0)
     }
 
     /// 门控原因翻成人话。与 `EmbeddingGatePolicy.decide` 的字符串一一对应。
@@ -378,10 +394,57 @@ final class ModelsWindowController: NSObject, NSWindowDelegate,
         reload()
     }
 
+    /// M2 d / T15：一次性动作「现在开始建索引」。跑着的时候这个按钮就是「取消」。
+    @objc private func overnightClicked(_ sender: Any?) {
+        if OvernightIndexJob.shared.isRunning {
+            OvernightIndexJob.shared.cancel()
+            lastAction = "已请求取消整晚建索引（当前这一批跑完就停）"
+            reload()
+            return
+        }
+        guard let root = currentState().modelsRoot else { return }
+        let alert = NSAlert()
+        alert.messageText = "现在开始建索引？"
+        alert.informativeText = """
+            会连续跑到全部块嵌完或你取消，可能要几小时（1 个月合成库实测 1 小时 32 分）。
+            只放开「空闲 5 分钟」这道门：**仍然要求接电**，机器偏热会自动暂停、真烫了会停，\
+            锁库 / 暂停采集也会停。这次的 GPU 时间单独记账，不占夜间增量的 10 分钟日预算。
+            """
+        alert.addButton(withTitle: "开始")
+        alert.addButton(withTitle: "取消")
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        if OvernightIndexJob.shared.start(modelsRoot: root, recorder: recorder) {
+            lastAction = "整晚建索引已开始（进度写进 jobs 与事件）"
+            startOvernightRefresh()
+        } else {
+            lastAction = "整晚建索引已经在跑了"
+        }
+        reload()
+    }
+
+    /// 跑起来之后每 5 s 刷一次面板（只在窗口开着的时候）。
+    private func startOvernightRefresh() {
+        overnightTimer?.invalidate()
+        // `Timer` 的 block 本来就在主 run loop 上跑，`assumeIsolated` 只是把这件事告诉编译器
+        // （与 LockController / SyncController 的定时器写法一致）。
+        overnightTimer = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                if !OvernightIndexJob.shared.isRunning {
+                    self.overnightTimer?.invalidate()
+                    self.overnightTimer = nil
+                }
+                self.reload()
+            }
+        }
+    }
+
     @objc private func vectorToggled(_ sender: NSButton) {
         let on = sender.state == .on
         recorder?.withStore { $0.retrieval.vectorsEnabled = on }
-        UserDefaults.standard.set(on, forKey: "retrieval.vectorsEnabled")
+        UserDefaults.standard.set(on, forKey: QueryEmbedderService.vectorsEnabledKey)
+        // M2 d / T15：关掉就立刻把查询嵌入器卸了，不等 10 分钟空闲。
+        QueryEmbedderService.shared.setVectorsEnabled(on, store: recorder?.withStore { $0 })
         lastAction = on ? "向量通道已打开" : "向量通道已关闭（只走精确字段 + FTS）"
         reload()
     }

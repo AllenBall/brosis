@@ -1241,6 +1241,29 @@ enum SelfCheck {
         // 没装模型的机器上照样全过；真实模型那一次在 `--narrative-smoke` 里。
         failures += NarrativeSelfCheck.run()
 
+        // ------------------------- 10. MCP 检索的查询向量（M2 d / T15，3.4 / 3.6 / 4.3.2）
+        // 实现在 Models/QueryEmbedderSelfCheck.swift（本文件同样只加这一行）。
+        // 查询嵌入器用确定性伪嵌入，**不加载任何模型**；真实模型那一层在
+        // `brosis-embed selftest` 与 tools/eval/d8_mcp_compare.py 里。
+        failures += QueryEmbedderSelfCheck.run()
+
+        // ------------------------------- 11. 加密导出 / 导入（M2 d / T16，3.8 / D7 / 4.3.2）
+        // 实现在 ExportSelfCheck.swift（本文件同样只加这一行）。
+        // 临时库往返冒烟：导出 → 归档里搜不到明文 → 导入 → 证据逐字节相同 →
+        // 源库删掉之后归档仍然完整（3.8「删除不能覆盖已导出的副本」）。
+        failures += ExportSelfCheck.run()
+
+        // ---------------- 12. Focus 联动 + 全局热键（M2 d / T18，4.5 / 3.5 / 4.2 / 4.3.2）
+        // 实现在 FocusHotKeySelfCheck.swift（本文件同样只加这一行）。
+        // Focus 探针如实报本机可读性（本机是 TCC 拒绝，这不算失败）；热键**真的注册**
+        // 一遍再**立刻注销**，不给正在运行的那个 brosis 留下抢着的组合。
+        failures += FocusHotKeySelfCheck.run()
+
+        // ------------------------------- 13. 2.2 硬约束里能自动化的三条（M2 d / T18）
+        // 实现在 HardConstraintSelfCheck.swift（本文件同样只加这一行）。
+        // 逐条对照表在 tools/bench/results/m2_d_focus_hotkey_2026-09-08.md。
+        failures += HardConstraintSelfCheck.run()
+
         // ---------------------------------------------------------------- 参数快照
         print("加密库自检工作目录：\(workspace.path)（跑完删除）")
         print("MCP：\(MCPTool.allCases.count) 个工具 "
@@ -1267,6 +1290,11 @@ enum SelfCheck {
         print("AX BFS 限额：默认 \(AX.defaultBFSLimits.label)；"
               + "com.apple.finder \(finderLimits.label)；单角色正文上限 \(AX.maxCharsPerRole) 字符")
         print("内置默认不采集清单：" + BuiltinDenylist.shared.sorted.joined(separator: " "))
+        print("Focus 联动：暂停名单键 \(FocusPausePolicy.modesKey)（默认空 = 不联动，"
+              + "启动时探一次，之后空名单零 syscall）；轮询 \(Int(FocusMonitor.pollInterval)) s")
+        print("全局热键：" + HotKeyAction.allCases
+                .map { "\($0.defaultsKey)=\(HotKeys.keyString($0)) → \($0.title)" }
+                .joined(separator: "；"))
         print(failures == 0 ? "自检通过" : "自检失败 \(failures) 项")
         return failures == 0 ? 0 : 1
     }

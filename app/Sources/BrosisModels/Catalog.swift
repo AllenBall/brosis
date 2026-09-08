@@ -5,7 +5,8 @@ import Foundation
 //
 // 由 tools/e9 的 `Catalog.swift` 搬进产品，改动只有三处，其余逐字保留：
 //   1. 换成 public API（app 与 brosis-embed 两个目标都要用）；
-//   2. 清单文件的查找顺序里加上 `.app/Contents/Resources`（`ModelResources`）；
+//   2. 清单文件的查找顺序换成 `ModelResources`（`.app/Contents/Resources` 优先，
+//      `Bundle.module` 只在确认不会 fatalError 时才碰——见 ModelsUtil.swift 的头注释）；
 //   3. `fitsThisMachine` 之外再给一个 `unavailableReason`，界面上要显示"为什么置灰"。
 //
 // 清单**随 app 打包、随 app 更新，运行时不联网拉清单**（3.11）。
@@ -73,8 +74,9 @@ public struct Catalog: Codable, Sendable {
 
     public static func load() throws -> Catalog {
         guard let url = ModelResources.url(named: "catalog.json") else {
-            throw ModelsError("找不到 catalog.json（试过 Bundle.module、.app 的 Contents/Resources、"
-                              + "可执行文件同目录、BROSIS_MODEL_RESOURCES）")
+            // **抛错，不 fatalError**：清单缺失只该让模型相关功能显示「未启用」（3.11 降级表），
+            // 不该杀掉进程。消息里把真正试过的目录逐条列出来，好定位是打包漏了哪一步。
+            throw ModelsError(ModelResources.notFoundMessage(named: "catalog.json"))
         }
         return try JSONDecoder().decode(Catalog.self, from: try Data(contentsOf: url))
     }

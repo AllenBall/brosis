@@ -21,6 +21,10 @@ enum PauseReason: String, Sendable, CaseIterable {
     case screenLocked        // 屏幕锁定（非严格模式）
     case screensaver         // 屏保启动
     case secureInput         // 安全输入（由采集侧逐次判定，这里只用于显示）
+    /// Focus（专注模式）命中暂停名单（M2 d / T18，计划 4.5「Focus 联动」）。
+    /// 与上面几路同一个集合、同一条恢复路径：`FocusMonitor` 只负责判"该不该"，
+    /// "怎么暂停 / 怎么恢复"仍然是这里这一套。
+    case focus
 }
 
 /// 状态机的输入。
@@ -42,6 +46,9 @@ enum LockTrigger: String, Sendable {
     case screensaverStopped
     case menuPause
     case menuResume
+    /// M2 d / T18：Focus 命中暂停名单 / 退出暂停名单。由 `FocusMonitor` 发。
+    case focusPauseStarted
+    case focusPauseEnded
 }
 
 /// 状态机的完整状态。
@@ -112,6 +119,10 @@ enum LockPolicy {
             next.pauseReasons.insert(.user)
         case .menuResume:
             next.pauseReasons.remove(.user)
+        case .focusPauseStarted:
+            next.pauseReasons.insert(.focus)
+        case .focusPauseEnded:
+            next.pauseReasons.remove(.focus)
         }
         return next
     }
@@ -171,6 +182,8 @@ enum LockPolicy {
         (.menuUnlock, false, false),
         (.screenUnlocked, false, false),
         (.screensaverStarted, false, false),
+        // Focus 暂停也不关库，同样不取消补做（M2 d / T18）
+        (.focusPauseStarted, false, false),
     ]
 
     /// 自检用的补做用例表：`(起点相位, 触发, 严格模式, 期望补做的触发)`。
@@ -182,6 +195,7 @@ enum LockPolicy {
         // 非严格模式下屏幕解锁只清暂停原因，本来就不开库，不需要补
         (.locking, .screenUnlocked, false, nil),
         (.locking, .screensaverStopped, false, nil),
+        (.locking, .focusPauseEnded, false, nil),
         // 只有 locking 期间才需要补：unlocked 不需要，locked 时 next 自己就会开库
         (.unlocked, .systemDidWake, false, nil),
         (.locked, .systemDidWake, false, nil),
@@ -216,6 +230,15 @@ enum LockPolicy {
          LockSnapshot(phase: .unlocked, pauseReasons: [.screensaver])),
         (LockSnapshot(phase: .unlocked, pauseReasons: [.screensaver]), .screensaverStopped, false,
          LockSnapshot(phase: .unlocked)),
+        // Focus 联动（M2 d / T18）：只进 / 出 paused，库始终开着，与屏保 / 锁屏同一个集合
+        (LockSnapshot(phase: .unlocked), .focusPauseStarted, false,
+         LockSnapshot(phase: .unlocked, pauseReasons: [.focus])),
+        (LockSnapshot(phase: .unlocked, pauseReasons: [.focus]), .focusPauseEnded, false,
+         LockSnapshot(phase: .unlocked)),
+        // Focus 退出时屏幕还锁着：只清 focus 这一条，锁屏那条留着（不能在锁屏下恢复采集）
+        (LockSnapshot(phase: .unlocked, pauseReasons: [.focus, .screenLocked]),
+         .focusPauseEnded, false,
+         LockSnapshot(phase: .unlocked, pauseReasons: [.screenLocked])),
         // 一键暂停与屏幕锁定互不抵消
         (LockSnapshot(phase: .unlocked, pauseReasons: [.screenLocked]), .menuPause, false,
          LockSnapshot(phase: .unlocked, pauseReasons: [.screenLocked, .user])),

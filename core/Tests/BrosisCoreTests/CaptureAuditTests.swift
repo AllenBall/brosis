@@ -218,7 +218,8 @@ final class CaptureAuditTests: XCTestCase {
             try conn.textColumn("SELECT note FROM migrations ORDER BY version;")
         }
         // 重开时 migrateIfNeeded 从 v2 一路补到当前版本，每版留一条审计行。
-        XCTAssertEqual(notes.count, Schema.version)
+        // 版本号不一定连续（并行任务预分配号段，没认领的留空），按 Schema.migrationVersions 数。
+        XCTAssertEqual(notes.count, Schema.migrationVersions.count)
         XCTAssertTrue(notes[2].contains("capture_audit"))
 
         // 老数据原样在，新表可写

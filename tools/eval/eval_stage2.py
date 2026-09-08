@@ -38,7 +38,9 @@ import urllib.request
 from datetime import datetime, timezone
 
 SCHEMA = "brosis/queryset@1"
-CLASSES = ("活动定位", "原文细节", "跨来源", "无答案或已删除")
+# 六类（M2 d / T17 把「活动模式」「最近活动」两类加进来，见 tools/eval/README §2.1）
+CLASSES = ("活动定位", "原文细节", "跨来源", "无答案或已删除", "活动模式", "最近活动")
+DIFFICULTIES = ("易", "中", "难")
 API_URL = "https://api.anthropic.com/v1/messages"
 API_VERSION = "2023-06-01"
 DEFAULT_MODEL = "claude-opus-5"
@@ -283,8 +285,13 @@ def run(args):
     outdir = os.path.expanduser(args.outdir)
     os.makedirs(os.path.join(outdir, "prompts"), exist_ok=True)
 
+    # 第二阶段只判**第一阶段真的跑过的那些题**：留出题的口径由 eval_stage1.py 定
+    # （默认排除，`--include-holdout` / `--holdout-only` 三档），这里跟着它走，
+    # 免得两个阶段的题目集合对不上（计划 4.3「留出 30 题作独立测试」）。
+    selected = [q for q in qs["queries"] if q["id"] in st]
+    skipped = [q["id"] for q in qs["queries"] if q["id"] not in st]
     prompts, rows = {}, []
-    for q in qs["queries"]:
+    for q in selected:
         ids = (st.get(q["id"], {}).get("evidence_ids") or [])[:args.evidence_top_k]
         ev = fetch_evidence(args, ids)
         user, truncated = build_prompt(q, ev, qs["scoring"], args.max_evidence_chars)
@@ -362,7 +369,8 @@ def summarize(qs, rows, args, egress):
     by_class = {}
     for c in CLASSES:
         g = [r for r in scored if r["class"] == c]
-        by_class[c] = {"scored": len(g), "passed": sum(1 for r in g if r.get("score_passed"))}
+        if g or c in ("活动定位", "原文细节", "跨来源", "无答案或已删除"):
+            by_class[c] = {"scored": len(g), "passed": sum(1 for r in g if r.get("score_passed"))}
     return {
         "generated_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "queryset": os.path.basename(os.path.expanduser(args.queryset)),
@@ -429,7 +437,9 @@ def markdown(qs, rows, out):
         L.append("| 组 | 判了几题 | 通过 |")
         L.append("|---|---:|---:|")
         for c in CLASSES:
-            g = out["by_class"][c]
+            g = out["by_class"].get(c)
+            if not g:
+                continue
             L.append("| %s | %d | %d |" % (c, g["scored"], g["passed"]))
         L.append("| **合计** | %d | %d |" % (out["scored"], out["passed"]))
         L.append("\n- 通过率 %.3f；有效证据引用率 %s（目标 ≥ 0.95，计划 2.4）\n"

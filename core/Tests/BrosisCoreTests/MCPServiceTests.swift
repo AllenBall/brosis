@@ -640,8 +640,8 @@ final class MCPServiceTests: XCTestCase {
         // 这个夹具的库是按当前 schema 建的，这里只把 v2 之后的审计痕迹抹掉、把 mcp_audit 删掉；
         // 重开时 migrateIfNeeded 从 v2 一路补到当前版本（表与列大多已经在，按"先查再做"跳过），
         // 每一版各留一条审计行，所以是 1…Schema.version。
-        XCTAssertEqual(versions, (1...Schema.version).map(Int64.init),
-                       "migrations 表要留下每一版的审计")
+        XCTAssertEqual(versions, Schema.migrationVersions.map(Int64.init),
+                       "migrations 表要留下每一版的审计（版本号不一定连续，见 Schema.migrationVersions）")
         let note = try migrating.store.withLock { conn in
             try conn.scalarText("SELECT note FROM migrations WHERE version = 2;")
         }

@@ -1,7 +1,10 @@
-# tools/eval —— 两阶段评估与存储月报
+# tools/eval —— 两阶段评估、失败归因、规模压测与存储月报
 
-M1 第二轮 T6 的产物。对应计划 4.2「评估：查询集扩到 60 题；两阶段评估脚本；月报脚本
-（存储按字节分项）」、2.4 的检索与存储口径、4.4 的失败归因。
+M1 第二轮 T6 的产物，**M2 d 批 T17 扩了三样**：查询集 60 → **100 题**（留出 30 题）、
+4.4 的**六类失败归因**脚本、**1 / 3 / 12 个月规模压测**脚本。
+对应计划 4.2「评估：查询集扩到 60 题；两阶段评估脚本；月报脚本（存储按字节分项）」、
+4.3「查询集扩到 100 题，留出 30 题作独立测试；持续记录答不出的问题并按 4.4 的六类归因」
+「规模压测：1 / 3 / 12 个月合成库，按 2.4 报告延迟」、2.4 的检索 / 存储 / 延迟口径、4.4 的六类归因。
 
 **只有 Python 标准库**，不装任何依赖；所有命令前面加 `PYTHONDONTWRITEBYTECODE=1`，
 产物一律落 `~/Library/Caches/brosis-build/<任务名>/`，项目目录里不留构建产物。
@@ -11,22 +14,35 @@ tools/eval/
 ├── README.md                     本文
 ├── queryset.schema.md            查询集格式（真实题按它出，D12）
 ├── queryset.example.json         四题样例（真实题模板，source=real）
-├── make_synthetic_queryset.py    从合成流造 60 题 / 执行删除 / 变异检验
-├── make_paraphrase_queryset.py   从 60 题派生**改写题**（D8 裁决用，M2 c / T11）
-├── eval_stage1.py                第一阶段：检索能不能拿到证据
+├── make_synthetic_queryset.py    从合成流造 100 题 / 执行删除 / 变异检验 / 工具题核对
+├── make_paraphrase_queryset.py   从原 60 题派生**改写题**（D8 裁决用，M2 c / T11）
+├── eval_stage1.py                第一阶段：检索能不能拿到证据（留出题默认排除）
 ├── eval_stage2.py                第二阶段：固定证据后能不能答对
+├── triage_failures.py            **4.4 的六类失败归因** + 人工标注（M2 d / T17）
+├── scale_test.py                 **1 / 3 / 12 个月规模压测**（M2 d / T17）
+├── scale_report.py               把压测 JSON 排成表 + 3.4 分层目标逐项判定（M2 d / T17）
 ├── d8_compare.py                 同一套题上比 FTS-only 与混合检索（M2 c / T11）
-├── monthly_report.py             存储月报（按字节分项 + 月增长）
+├── monthly_report.py             存储月报（按字节分项 + 月增长 + 留出题的检索回归）
 ├── run_all.sh                    一键复现：建库 → 造题 → 两阶段 → 月报
+├── run_t17_eval.sh               **M2 d / T17 的评估半边一键复现**（含 21 项自检）
 └── run_d8.sh                     一键复现 D8 实验：建库 → 造题 → 改写题 → 建向量索引 → 两遍检索
 ```
+
+> `run_all.sh` 是 M1 那条流水线，脚本升级之后它跑出来的是 **100 题**（文件名还叫
+> `queryset_60.json`，内容是 100 题；它的第一阶段加了 `--include-holdout`，因为第 7 步的
+> 判分器自检要给**每一道题**造答案）。T17 的完整跑法用 `run_t17_eval.sh`：
+> 建库 → 100 题（含「原 60 题一个字没改」与「两次生成逐字节相同」两项核对）→ 删除对账
+> → `verify-tools` 真跑 22 道工具题 → 第一阶段三档留出口径 → 五道变异题 + 六类归因核对
+> → 第二阶段（未评分 + 一道故意答错的）→ 100 题的六类归因 → 月报，
+> **末尾自己核对 21 项，任何一项不过就 exit 1**。
 
 ---
 
 ## 1. 一键复现
 
 ```sh
-sh tools/eval/run_all.sh                                          # 默认 30 天合成库
+sh tools/eval/run_t17_eval.sh                                     # M2 d / T17：100 题 + 六类归因 + 21 项自检
+sh tools/eval/run_all.sh                                          # M1 那条流水线（现在也是 100 题）
 SCRATCH=~/Library/Caches/brosis-build/verify-eval sh tools/eval/run_all.sh   # 验收者用自己的 scratch
 PER_DAY=2880 sh tools/eval/run_all.sh                             # 冒烟
 SKIP_BUILD=1 sh tools/eval/run_all.sh                             # 复用已有的 brosis-store
@@ -99,6 +115,64 @@ PYTHONDONTWRITEBYTECODE=1 python3 make_synthetic_queryset.py apply-deletions \
 # 实测 exit 1，stderr：删除条数与生成侧模拟不符：del-04（期望 10，实际 9）
 ```
 
+### 2.1b 100 题：六类、难度、留出题、工具题（M2 d / T17）
+
+**原 60 题一个字都没改**——`id` / `q` / `search` / `relevant` / `answer` / `holdout` 全部原样，
+只是每道题多了 `difficulty` / `tool` / `truth_mode` 三个字段。`run_t17_eval.sh` 第 2b 步
+拿 M2 c 批那个提交（`git show 8b732dc:tools/eval/make_synthetic_queryset.py`）重建一份 60 题
+逐字段比对，不一致就退出——这是"没改老题"的**可执行证据**，不是一句承诺。
+
+**六类配额**（原四类 + 两个新类，共 100 题）：
+
+| 类 | 题数 | 新增 | 怎么出的 |
+|---|---:|---:|---|
+| 活动定位 | 25 | +5 | 原 20 题 + `docs.internal.example`（周窗口）、`/spec/` 前缀 URL、基础站点 + 3 h 窗口、`report-q3.md`、窗口标题「每日笔记」+ 整天 |
+| 原文细节 | 26 | +6 | 原 20 题 + 单字「榄」、模板词「复核」、两个 `.swift` 路径、`kanban.internal.example`、**全大写 `SQLCIPHER`**（考 ASCII 大小写折叠） |
+| 跨来源 | 13 | +3 | 原 10 题 + 「橄榄」「brosis-m1/notes」「珀」，生成时断言证据跨 ≥ 2 个 bundle_id |
+| 无答案或已删除 | 14 | +4 | 原 10 题（6 负例 + 4 已删除）+ 4 道新负例（「麒麟」「鳄」「星际航行日志」`nowhere.invalid.example`），生成时断言全库 0 命中 |
+| **活动模式** | 14 | +14 | `get_day_ledger` 2、周台账 3、`get_patterns` 5、`get_timeline` 2、`get_item` 2 |
+| **最近活动** | 8 | +8 | `recent_activity` 7、`get_context` 1 |
+
+**难度**（`difficulty`）是**算出来的**不是手工标的，规则在 `difficulty_of()` 里：
+工具题 / 不可答题 / 单个汉字 / 全大写变形 = 难；跨来源、带时间窗或应用过滤 = 中；其余 = 易。
+本语料上的分布是 **易 24 / 中 35 / 难 41**。
+
+**留出题 30 道**（计划 4.3「留出 30 题作独立测试」）分两段选，都没有随机数：
+
+1. M1 的 60 题按老规则（每类 id 排序后第 3、6、9… 题）→ **18 道，与 M1 完全一致，一道没换**；
+2. 新增的 40 题按 id 排序后每 10 题取第 3 / 6 / 9 道 → **12 道**。
+
+留出题**只在月报里跑**：`eval_stage1.py` 默认 `--holdout` 口径是 `exclude`，
+`--include-holdout` 全跑、`--holdout-only` 只跑留出题（月报用的就是这一档）。
+`eval_stage2.py` 跟着第一阶段走（只判第一阶段真的跑过的题），两个阶段的题目集合不会错位。
+
+#### 工具题：`tool` / `tool_call` / `tool_check` 与 `verify-tools`
+
+22 道工具题问的是**聚合量**（"哪个应用最多"、"这一周多少条"、"最近半小时在干嘛"），
+不是"某几条观察"。给它们编一份全量 `relevant` 既臃肿（一周窗口动辄一万多条）又没意义
+（前 10 条里随便哪 10 条都"相关"）。所以：
+
+* `relevant` 留空、`truth_mode = "evidence_match"` —— 第一阶段判"返回的证据满不满足
+  期望证据"（与真实题同一条口径，见 `queryset.schema.md` §7），**Recall 记 null**，
+  报告里按 `tool` 单列一张表；
+* 真正的判据是 `tool_check` —— 一组能从 JSONL **精确算出来**的断言，
+  `make_synthetic_queryset.py verify-tools` 真的调 `brosis-store` 跑一遍逐条核对，
+  和 `apply-deletions` 的对账是同一个思路：**模拟的语义 == 存储层真实语义**。
+
+断言只用**条数**这类严格可算的量，不用 dwell 秒数——合成流里 `source_state` 有约 10%
+是 `permission_lost` / `timeout`，不计入 dwell，秒数不是确定量；而观察是 10 s 一格的
+均匀网格，条数是。断言的期望值**按删除之后的库算**（`deletions` 在建库之后、评估之前执行），
+切换对也一样：被删的观察不参与"相邻"，删掉一整段之后前后两条间隔超过 90 s 就不算一次切换——
+与 `get_patterns` 的定义一致。
+
+`tool_check` 的形状：`{"path": "byHour.*.observations", "op": "sum_eq", "value": 60476}`。
+`path` 点号分段、数字段是数组下标、`*` 是"每个元素"；`op ∈ eq / all_eq / sum_eq / all_le / len / le / ge`；
+`value` 写成 `"@另一条路径"` 就是两条路径互相比（周台账的"周 = 7 天之和"就是这么断言的）。
+
+**合成语料没有作息**：它是 24 h 均匀网格，所以"我一般几点开始工作"这类题在这套语料上的
+正确答案是"没有高峰"（`pat-07` 就是这么出的，故意留的诚实答案）。真要量作息类模式，
+用 `tools/proto/gen_workweek.py` 的库——T14 已经在那上面和生成器的计划表逐项对照过。
+
 ### 2.2 `eval_stage1.py`
 
 逐题跑两遍检索：`search-batch`（一个进程跑完整套，整套耗时以它为准）+ 逐题 `search`
@@ -110,7 +184,12 @@ PYTHONDONTWRITEBYTECODE=1 python3 make_synthetic_queryset.py apply-deletions \
 对不上就退出，免得拿错库跑出一份没意义的指标；活/墓碑数与 `deletions` 的预期条数
 并排列进报告，只作参考不作判据。真实题没有 `corpus` 段，加了也自动跳过。
 
-指标：**Recall@10 / Precision@10 / MRR@10**，按四类、按留出 / 非留出分列。
+**留出题三档**（M2 d / T17）：默认 `exclude`（只跑 70 道非留出题）、`--include-holdout`（100 题全跑）、
+`--holdout-only`（只跑 30 道留出题，月报用）。计划 4.3 要「留出 30 题作独立测试」——
+平时调检索参数看不到留出题，才谈得上"独立"。
+
+指标：**Recall@10 / Precision@10 / MRR@10**，按六类、按**难度**、按 **`tool`**、
+按留出 / 非留出分列。`tool != search` 的题 Recall 记 null（见 §2.1b），不进 Recall 的均值。
 `Recall@10 = |前 10 条 ∩ 真值| / min(10, |真值|)`；不可答题只看有没有返回。
 
 失败归因（计划 4.4 的前三类 + 上下文裁剪）：
@@ -178,9 +257,104 @@ provider：
   最后 stats 里的 `first_ts` / `last_ts`；
 * **行数与去重率**：去重率 = 1 − 文本版本 / 出现记录；另给全文索引 / 净载荷、原文 b-tree / 净载荷两个倍数。
 
+**检索回归（留出题）**：`--stage1 <eval_stage1 的 JSON>`（一般是 `--holdout-only` 跑出来的）
+把留出题的 Recall / Precision / MRR、通过数、负例误报与 2.4 的达标判定写进同一张报表；
+再加 `--triage <triage_failures 的 JSON>` 就把 4.4 的**六类归因计数**、
+「留出题里没过的题号」、人工标注与分歧数一起写上。两个都不给就是「未提供」，月报照常只报存储。
+**留出题只在这里跑**——这是计划 4.3「留出 30 题作独立测试」落到脚本上的样子。
+
 缩略图与模型资产不在库里，用 `--thumbs-dir` / `--models-dir`（量目录）或
 `--thumbs-bytes` / `--models-bytes`（直接给数）传进来；不给就是「未提供」。
 临时空间默认记 0 并注明理由：D25 把 `SQLITE_TEMP_STORE` 编译成 3，PRAGMA 改不回文件。
+
+### 2.5 `triage_failures.py`：4.4 的六类失败归因
+
+计划 4.4 原文：「每个答不出的问题先归入六类之一：未采集、已过期、索引漏召回、上下文裁剪、
+别名不统一、推理错误。前四类修采集与检索。……只有轻量方案之后**留出题**上的失败仍然集中在
+关系 / 别名 / 时态问题，才对同一批留出题做图谱对照实验」。
+**M2b 语义图谱要不要启动，看的就是这个脚本的输出。**
+
+规则按优先级从上往下，第一个命中的算：
+
+| 类 | 判据 | 数据来源 |
+|---|---|---|
+| `未采集` | 真值为空、期望证据也一条没匹配上——答案那次观察根本不在库里 | 第一阶段 |
+| `已过期或已删除` | 漏掉的证据 id 拿去 `get_evidence` 全部回 `missing` | 第一阶段 |
+| `别名不统一` | 证据**还活着**却没召回，**并且**检索串与期望答案没有任何公共字面（中文字符 bigram ∪ ASCII 词元）；或者原题过了、它的**改写题**挂了（`--paraphrase-stage1`） | 第一阶段（+ 改写题跑分） |
+| `索引漏召回` | 证据还活着、没召回，但检索串与答案**有**公共字面 | 第一阶段 |
+| `上下文裁剪` | 证据召回了，但 ≤ 100 token 的摘要与片段里都没有答案子串 | 第一阶段 |
+| `推理错误` | **兜底**：证据拿到了、也没被裁，第二阶段仍然答错 | 第二阶段（要 `--stage2`） |
+
+另外单列 `负例误报`（不可答题却返回了证据）。它不在 4.4 的六类里（六类说的是"答不出"），
+但草稿规定"编造一次即失败"，必须看得见。
+
+**`别名不统一` 排在 `索引漏召回` 前面**是有依据的：两者都是"活着但没召回"，
+区别只在为什么。本项目的 FTS 通道是「bigram phrase 命中 → 在原文上做子串复核」（D22 + 3.4），
+语义上等于精确子串，换个说法之后字面通道必然一条都召不回——这正是 D8 改写题实验的前提（§4）。
+所以"检索串与期望答案没有公共字面"就是"换了说法"的可判定形式。
+
+**没有 `--stage2` 就判不出 `推理错误`**，报告开头会写明这一条。
+
+**人工标注**：规则只给候选。`--write-annotations <file.jsonl>` 写一份一题一行的 JSONL，
+人工把 `manual_bucket` 填成六类之一、`note` 写理由；下次跑加 `--annotations <同一个文件>`
+读回来，`final_bucket` 优先用人工的，并统计规则与人工**分歧**了几题
+（`disagreements`）——分歧率就是这套规则的可信度。已填的行永远不会被覆盖。
+
+**分类器自己怎么验**：`make_synthetic_queryset.py mutate` 造 5 道注定失败的题
+（每个桶各一道，第 5 道 `mut-05-alias` 是"同一道题换个说法"），
+`verify-mutations --triage <triage.json>` 同时核对**第一阶段的桶**与**六类归因**。
+`推理错误` 那一桶靠 `run_t17_eval.sh` 第 7 步：给一道本来全过的题喂一个驴唇不对马嘴的答案，
+第二阶段判挂、归因必须落到 `推理错误`。
+
+### 2.6 `scale_test.py`：1 / 3 / 12 个月规模压测
+
+计划 2.4「延迟」行要求「在 1 / 3 / 12 个月规模的合成库上测」，冷 / 热、p50 / p95。
+E7（M0）在**明文原型库**上做过一次，这一轮是在**产品路径**（SQLCipher + core 的检索实现）上重做。
+
+```sh
+PYTHONDONTWRITEBYTECODE=1 python3 tools/eval/scale_test.py \
+  --bin ~/Library/Caches/brosis-build/m2-eval-scale-core/release/brosis-store \
+  --work ~/Library/Caches/brosis-build/m2-eval-scale/scale \
+  --results ~/Library/Caches/brosis-build/m2-eval-scale/results --months 1,3,12
+```
+
+三件必须这么做的事：
+
+1. **按月分文件生成 → 导入 → 立刻删 JSONL**。磁盘峰值只有「库 + 一个月的 JSONL」
+   （12 个月档约 5.9 GiB），不是「库 + 12 个月的 JSONL」（约 12.7 GiB）。
+2. **每个月一个 `--anchor`**（`gen_synth_m1.py` 新加的可选参数，缺省仍是 2026-09-07），
+   否则 12 段落在同一个月上、时间区间全重叠。
+3. **每个月一个种子**（`seed + 月序号`）。同种子产出**逐字节相同的正文**，
+   而存储层按内容去重（`text_versions`），12 个月会塌成 1 个月的正文量，
+   量出来的就不是 12 个月了。导入**从最老的月份开始**，`observations.id` 才随时间单调——
+   这是检索层「FTS 候选按 rowid 倒序 ≈ 时间倒序」的前提（3.4 / D22）。
+
+**机器必须空闲**：无风扇的 Air 上旁边跑一个 `swift build` 就能把延迟翻倍。每一档开测前先等
+「1 分钟负载 < `--max-load`（默认 4）**且**没有 `swift-build` / `swift-frontend` / `clang` /
+`swift-driver` / `ld-prime` 进程」，最多等 `--max-wait-min`（默认 30）分钟；
+等了多久、当时的负载、测完之后又看到的负载与忙进程，全写进结果 JSON 的
+`idle_gate` / `after_measure` / `contended`。**`contended = true` 的数字不能拿去对目标。**
+
+被别的活儿干扰了要重测：加 `--keep-db` 保住库，再用 `--reuse` 只重测延迟，不重建库。
+
+每档产出 `results/scale_m<NN>.json`：`build`（逐月生成 / 导入耗时与峰值 footprint、磁盘峰值）、
+`size`（`stats --detail` 的分项字节 + 占比 + 对原文净载荷的倍数）、
+`latency`（`bench` 的四类查询 + 周台账 / `get_patterns` 7 天与 30 天 / `recent_activity` 各冷热 p50 / p95）。
+跑完这一档就删库释放磁盘（`--keep-db` 可保留）。
+
+`scale_report.py --scale <results>/scale_all.json --out-md <…>/scale_report.md`
+把三档排成表，并按 3.4 的分层目标**逐桶判定**（一律用热 p95，取桶内最慢的一条）：
+精确字段 / FTS < 10 ms、1–2 字扫描 7 天 ≤ 150 ms、限应用 ≤ 60 ms、报表类 ≤ 50 ms、
+台账缓存与 `recent_activity` ≤ 50 ms、`get_patterns` ≤ 7 ms/天。
+分成两个脚本是因为压测要跑几十分钟、机器还得空闲，而排表是纯文本操作，改格式不该重跑压测。
+
+`bench` 已经覆盖了 `get_day_ledger`（`ledger_day`）、`get_timeline`（`timeline_day`）、
+`get_evidence`（`exact_evidence`）与 `get_item`（`exact_item_app`）四条，所以脚本只另测
+周台账 / `get_patterns` / `recent_activity` 三条——它们是 M2 c 批新加的、`bench` 里没有。
+
+**没测的**：向量通道。建整套向量索引要加载 mlx 模型、1 个月库就要 1 小时 32 分
+（T11 实测），12 个月档跑不完；向量索引的体积与延迟见
+`tools/bench/results/m2_c_vectors_2026-09-08.md`。所以本轮的"索引"一项**不含向量**。
 
 ## 3. 口径与已知限制
 
@@ -208,6 +382,19 @@ provider：
    有了它月报就能只靠一份导出文件跑完。
 8. 单位一律 **MiB = 2^20、GiB = 2^30**；月长度默认按 **30 天**折算（E7 / D21 的口径），
    要按平均月长用 `--month-days 30.436875`。
+9. **工具题的 `tool_check` 只断言条数与结构，不断言时长**（M2 d / T17）。合成流里
+   `source_state` 约 10% 是 `permission_lost` / `timeout`，不计入 dwell，所以 dwell 秒数
+   不是"能从 JSONL 精确算出来"的量；条数是。想把时长也纳入断言，得先在生成侧把
+   `source_state` 的分布固定下来——记在未做项里。
+10. **合成语料没有作息**（24 h 均匀网格），所以 `get_patterns` 的"星期 × 小时热力"
+   在这套语料上是平的，`pat-07` 的正确答案就是"没有高峰"。作息类模式题要用
+   `tools/proto/gen_workweek.py` 的库。
+11. **规模压测不含向量通道**：建整套向量索引 1 个月库就要 1 小时 32 分（T11 实测），
+   12 个月档跑不完。所以 `scale_test.py` 报的"索引"不含 `vec_chunks`，
+   延迟也只有精确字段 / FTS / 扫描 / 聚合四类，没有混合检索。
+12. **延迟对机器负载极敏感**：无风扇的 Air 上旁边一个 `swift build` 就能让报表类查询翻倍。
+   `scale_test.py` 把开测前的等待、当时负载、测完之后的负载与忙进程都写进 JSON；
+   看数字之前先看 `idle_gate.timed_out` 与 `contended`。
 
 
 ---

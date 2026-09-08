@@ -105,23 +105,115 @@ public enum ModelHashing {
 }
 
 /// 清单与其他随包资源的查找。
+///
+/// **为什么不直接用 `Bundle.module`**（M2 d 收尾修复的第一件事，原本是发布阻断项）：
+/// SwiftPM 生成的 `Bundle.module` 访问器只查两处——
+///   ① `Bundle.main.bundleURL/brosis_BrosisModels.bundle`（对 `.app` 来说是 `brosis.app/`
+///      **这一层**，而 bundle 根目录下不能放东西，放了 `codesign` 就报 bundle format 不对）；
+///   ② **编译时写死的那个绝对构建目录**。
+/// 两处都不在时它 `Swift.fatalError`，进程当场 exit 133。`build_app.sh` 把资源 bundle 拷进
+/// `Contents/Resources/`，不在这两处里，所以打包好的 `.app` 只是**借着构建目录**才没崩：
+/// 把构建目录改名 / 删掉 / 换台机器，任何一次 `Bundle.module` 求值都会杀掉进程
+/// （2026-09-08 实测：改名构建目录后 `--self-check` 在第 88 项 exit 133）。
+///
+/// 所以这里自己按顺序找目录，**`Bundle.module` 排在最后，而且只在先确认它一定命中时才碰**
+/// （见 `safeModuleBundle`）。全部候选都没有时返回 `nil`，由调用方给一句能读的错误
+/// （清单缺失 ⇒ 模型相关功能显示「未启用」），不是让进程死。
 public enum ModelResources {
-    /// 环境变量覆盖（测试与验收用）。
+    /// 环境变量覆盖（测试与验收用）：指向一个**目录**。
     public static let overrideKey = "BROSIS_MODEL_RESOURCES"
 
-    /// 依次找：环境变量 → SwiftPM 资源 bundle（`Bundle.module`）→ 主 bundle 的
-    /// `Contents/Resources` → 可执行文件同目录 → 可执行文件旁的 `brosis_BrosisModels.bundle`。
-    public static func url(named name: String) -> URL? {
-        var candidates: [URL] = []
-        if let override = ProcessInfo.processInfo.environment[overrideKey] {
-            candidates.append(URL(filePath: override).appending(path: name))
+    /// SwiftPM 给 `BrosisModels` 目标生成的资源 bundle 名。
+    /// 命名规则是 `<包名>_<目标名>.bundle`；改包名或目标名时这里要跟着改，
+    /// `build_app.sh` 的构建后闸门会把改漏了当场打红。
+    public static let bundleName = "brosis_BrosisModels.bundle"
+
+    /// 按优先级排好的候选**目录**。资源既可能在资源 bundle 里，也可能被
+    /// `build_app.sh` 平铺拷了一份到 `Contents/Resources/`，所以每一处都给两个候选。
+    ///
+    /// 顺序（前面的赢）：
+    ///   1. `BROSIS_MODEL_RESOURCES`；
+    ///   2. `Bundle.main.resourceURL`（= `.app/Contents/Resources`，产品路径就走这一条）；
+    ///   3. `Bundle.main.bundleURL`（裸可执行文件时就是它所在的目录，构建目录里直接跑走这条）；
+    ///   4. 可执行文件所在目录的 `../Resources`（`brosis-embed` / `brosis-mcp` 待在
+    ///      `Contents/MacOS/`，它们的 `Bundle.main` 是 `.app`，但**万一**不是也能兜住）；
+    ///   5. 可执行文件所在目录本身；
+    ///   6. `Bundle.main.bundleURL` 的上一级（`swift test` 时 `.xctest` 与资源 bundle
+    ///      是构建目录里的兄弟）。
+    public static func searchDirectories() -> [URL] {
+        var roots: [URL] = []
+        func addRoot(_ url: URL?) {
+            guard let url else { return }
+            let standardized = url.standardizedFileURL
+            if !roots.contains(where: { $0.path == standardized.path }) { roots.append(standardized) }
         }
-        candidates.append(Bundle.module.bundleURL.appending(path: name))
-        if let resources = Bundle.module.resourceURL { candidates.append(resources.appending(path: name)) }
-        if let main = Bundle.main.resourceURL { candidates.append(main.appending(path: name)) }
-        let exeDir = URL(filePath: CommandLine.arguments[0]).deletingLastPathComponent()
-        candidates.append(exeDir.appending(path: name))
-        candidates.append(exeDir.appending(path: "brosis_BrosisModels.bundle").appending(path: name))
-        return candidates.first { FileManager.default.fileExists(atPath: $0.path) }
+        if let override = ProcessInfo.processInfo.environment[overrideKey], !override.isEmpty {
+            addRoot(URL(filePath: (override as NSString).expandingTildeInPath))
+        }
+        addRoot(Bundle.main.resourceURL)
+        addRoot(Bundle.main.bundleURL)
+        for exeDir in executableDirectories() {
+            addRoot(exeDir.deletingLastPathComponent().appending(path: "Resources"))
+            addRoot(exeDir)
+        }
+        addRoot(Bundle.main.bundleURL.deletingLastPathComponent())
+
+        // 每个根目录先看资源 bundle，再看平铺的那一份。
+        var out: [URL] = []
+        for root in roots {
+            out.append(root.appending(path: bundleName))
+            out.append(root)
+        }
+        return out
+    }
+
+    /// 找一个随包资源。找不到返回 `nil`——**不 fatalError**。
+    public static func url(named name: String) -> URL? {
+        let fm = FileManager.default
+        for directory in searchDirectories() {
+            let candidate = directory.appending(path: name)
+            if fm.fileExists(atPath: candidate.path) { return candidate }
+        }
+        // 最后一招：SwiftPM 的资源 bundle 访问器。上面的候选假定 bundle 是**平铺**的
+        // （macOS 上 SwiftPM 现在就是这么生成的）；万一哪天换成 `Contents/Resources/`
+        // 那种结构化布局，这一条还能救回来。只有确认它不会 fatalError 时才碰。
+        guard let bundle = safeModuleBundle else { return nil }
+        let ext = (name as NSString).pathExtension
+        let base = (name as NSString).deletingPathExtension
+        return bundle.url(forResource: base, withExtension: ext.isEmpty ? nil : ext)
+    }
+
+    /// 找不到时给调用方的一句话：把真正试过的地方列出来，好让人一眼看出打包漏了什么。
+    public static func notFoundMessage(named name: String) -> String {
+        let tried = searchDirectories().map { $0.path }.joined(separator: "\n  ")
+        return "找不到随包资源 \(name)。按顺序试过（环境变量 \(overrideKey) 可覆盖）：\n  " + tried
+    }
+
+    /// 只有在 SwiftPM 的访问器**一定**命中时才返回 `Bundle.module`，否则 `nil`。
+    ///
+    /// 访问器的第一候选是 `Bundle.main.bundleURL/<bundleName>`，第二候选是编译期写死的
+    /// 构建目录——后者在运行期看不见，也不该去赌它还在（正是它让"离开构建机就崩"这件事
+    /// 一直没被发现）。所以只认第一候选：它在，`Bundle.module` 就不会 fatalError；
+    /// 它不在，宁可返回 `nil`。
+    private static var safeModuleBundle: Bundle? {
+        let accessorPath = Bundle.main.bundleURL.appending(path: bundleName)
+        guard FileManager.default.fileExists(atPath: accessorPath.path) else { return nil }
+        return Bundle.module
+    }
+
+    /// 可执行文件所在目录。两条来源都取（`Bundle.main.executableURL` 与 `argv[0]`），
+    /// 因为命令行工具被 `PATH` 找到时 `argv[0]` 可能只是个名字。
+    private static func executableDirectories() -> [URL] {
+        var out: [URL] = []
+        func add(_ url: URL?) {
+            guard let url else { return }
+            let dir = url.standardizedFileURL
+            if !out.contains(where: { $0.path == dir.path }) { out.append(dir) }
+        }
+        add(Bundle.main.executableURL?.deletingLastPathComponent())
+        if let argv0 = CommandLine.arguments.first, argv0.contains("/") {
+            add(URL(filePath: argv0).deletingLastPathComponent())
+        }
+        return out
     }
 }
