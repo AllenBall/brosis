@@ -13,6 +13,12 @@ if arguments.contains("--self-check") {
     exit(SelfCheck.run())
 }
 
+// D33：MCP 集成的命令行入口。brosis 是 LSUIElement，自动化工具看不见它的窗口，
+// 所以同一套逻辑给一个能脚本化的入口（跑的是和窗口一样的 MCPIntegration）。
+if arguments.contains("--mcp") {
+    exit(MCPIntegrationCLI.run(arguments))
+}
+
 if arguments.contains("--dump-vectors") {
     exit(VectorDump.run())
 }
