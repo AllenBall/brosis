@@ -990,11 +990,15 @@ extension Store {
     /// 真正删多少由 `expire()` 当场决定；这里的数字只用来写通知与建议导出范围。
     ///
     /// - Parameter recordEvent: 等级**跨档**时写一条运行期事件（同一档不会重复写）。
-    public func quotaAction(now: Int64? = nil, recordEvent: Bool = true) throws -> QuotaAction {
+    /// - Parameter quota: 覆盖 `options.quotaBytes`（原文净载荷字节）。设置窗口把用户当前设的值
+    ///   传进来，于是改配额不用关库重开、也不用在 `Store` 里留一份可变副本
+    ///   （`expire(toBytes:)` / `expireAfterNotice(toBytes:)` 早就是这个路子）。
+    public func quotaAction(now: Int64? = nil, recordEvent: Bool = true,
+                            quota quotaOverride: Int? = nil) throws -> QuotaAction {
         let nowMS = now ?? Self.nowMS()
         var action: QuotaAction = try withLock { conn in
             let used = try contentBytes(conn)
-            let quota = max(1, options.quotaBytes)
+            let quota = max(1, quotaOverride ?? options.quotaBytes)
             let ratio = Double(used) / Double(quota)
             let level: QuotaLevel = used > quota ? .full
                 : (ratio >= options.quotaWarnRatio ? .warning : .ok)
@@ -1086,7 +1090,8 @@ extension Store {
     /// 这里是产品路径用的那一层——UI 拿到 `.blocked` 就弹通知，通知里带"先加密导出"。
     public func expireAfterNotice(toBytes: Int? = nil, force: Bool = false) throws
         -> QuotaExpireOutcome {
-        let action = try quotaAction()
+        // 覆盖值要一路传到判定里去，否则"按新配额删"和"按旧配额判到没到线"会用两个数。
+        let action = try quotaAction(quota: toBytes)
         guard action.level == .full else { return .notNeeded(action) }
         guard force || action.acknowledgedAt != nil else { return .blocked(action) }
         let report = try expire(toBytes: toBytes)

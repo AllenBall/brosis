@@ -63,6 +63,26 @@ fail() { printf 'ERROR: %s\n' "$1" >&2; exit 1; }
 
 mkdir -p "$SCRATCH"
 
+# ------------------------------------------------- 0a. Metal 工具链（**必须在长构建之前查**）
+# 本机 `xcode-select -p` 指向 CommandLineTools，那里没有 `metal`，而第 1d 步现编
+# metallib 非它不可。以前这个检查在第 1d 步——等于先花 40 分钟编完再报错。
+# 有 Xcode 就自己切过去（不改全局 xcode-select，只对本脚本生效）。
+if [ -z "${MLX_METALLIB:-}" ] && ! xcrun -sdk macosx metal --version > /dev/null 2>&1; then
+  for candidate in "${DEVELOPER_DIR:-}" /Applications/Xcode.app/Contents/Developer; do
+    [ -n "$candidate" ] || continue
+    if DEVELOPER_DIR="$candidate" xcrun -sdk macosx metal --version > /dev/null 2>&1; then
+      export DEVELOPER_DIR="$candidate"
+      echo "注意：当前 xcode-select 没有 metal，本次构建改用 DEVELOPER_DIR=$candidate"
+      break
+    fi
+  done
+fi
+if [ -z "${MLX_METALLIB:-}" ] && ! xcrun -sdk macosx metal --version > /dev/null 2>&1; then
+  fail "拿不到 metal 编译器（第 1d 步要现编 mlx.metallib）。装 Metal Toolchain
+        （xcodebuild -downloadComponent MetalToolchain），或者 DEVELOPER_DIR=<Xcode>/Contents/Developer，
+        或者 MLX_METALLIB=<现成的 metallib>（只适合验证）。"
+fi
+
 # ---------------------------------------------------------------- 0. 签名身份
 if [ "${SKIP_SIGN:-0}" != "1" ]; then
   step "0. 确认签名身份"
@@ -108,7 +128,7 @@ elif xcrun -sdk macosx metal --version > /dev/null 2>&1; then
   SCRATCH="$SCRATCH" bash "$APP_SRC/Support/build_metallib.sh" "$SCRATCH/mlx.metallib"
   METALLIB="$SCRATCH/mlx.metallib"; METALLIB_SOURCE="xcrun metal 现编（Metal Toolchain 已装）"
 else
-  fail "拿不到 mlx.metallib：没装 Metal Toolchain。先 xcodebuild -downloadComponent MetalToolchain，或用 MLX_METALLIB 指定一个版本对得上的（只适合验证）。"
+  fail "拿不到 mlx.metallib：metal 编译器在第 0a 步还在、这会儿没了？"  # 0a 已经挡过一次
 fi
 echo "metallib：$METALLIB（$(stat -f%z "$METALLIB") 字节）来源：$METALLIB_SOURCE"
 

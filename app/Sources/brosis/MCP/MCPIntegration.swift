@@ -7,12 +7,22 @@ import Foundation
 ///  1. 往 harness 的用户级配置里增删 `brosis` 这一项——只是让它知道"有这么个服务器可连"；
 ///  2. 在 `grants` 表里增删对应 client 的授权——**这才是真正的门**（没有 grant 一律全拒）。
 /// 所以关的时候两边都撤：只删配置留着 grant，等于凭据还在。
+/// 子进程输出的收集盒：读回调在后台队列跑，`runProcess` 在调用线程等，两边共享得加锁。
+/// （单独一个类是为了跨并发域传递时不用 `nonisolated(unsafe)` 局部变量。）
+private final class OutputBuffer: @unchecked Sendable {
+    private let lock = NSLock()
+    private var data = Data()
+    func append(_ chunk: Data) {
+        guard !chunk.isEmpty else { return }
+        lock.withLock { data.append(chunk) }
+    }
+    var value: Data { lock.withLock { data } }
+}
+
 enum MCPIntegration {
 
     struct Status: Sendable {
         var harness: Harness
-        /// 配置文件在不在。
-        var configExists: Bool
         /// 有没有这个 harness 的其它痕迹（目录、CLI）。
         var installed: Bool
         /// 官方 CLI 的绝对路径（找到才用得上）。
@@ -48,11 +58,14 @@ enum MCPIntegration {
         NSHomeDirectory() + "/.npm-global/bin",
     ]
 
+    /// 进程环境在本进程内不变，拷一次就够——以前每次探测都全量复制一遍字典。
+    static let processEnvironment = ProcessInfo.processInfo.environment
+
     static func locateCLI(_ name: String?) -> String? {
         guard let name else { return nil }
         let fm = FileManager.default
         var dirs = extraBinaryDirectories
-        if let path = ProcessInfo.processInfo.environment["PATH"] {
+        if let path = processEnvironment["PATH"] {
             dirs.append(contentsOf: path.split(separator: ":").map(String.init))
         }
         for dir in dirs {
@@ -82,7 +95,7 @@ enum MCPIntegration {
             }
         }
         let granted = (try? store?.grant(clientID: harness.id)) ?? nil
-        return Status(harness: harness, configExists: exists, installed: exists || probed || cli != nil,
+        return Status(harness: harness, installed: exists || probed || cli != nil,
                       cliPath: cli, currentCommand: command, configProblem: problem,
                       hasGrant: granted != nil)
     }
@@ -102,9 +115,7 @@ enum MCPIntegration {
     static func setEnabled(_ enabled: Bool, harness: Harness, store: Store?,
                            grantHandledExternally: Bool = false) throws -> Outcome {
         let command = HarnessCatalog.serverCommand()
-        let entry = MCPConfigWriter.Entry(name: HarnessCatalog.serverName, command: command,
-                                          includeStdioType: harness.format == .mcpServersJSON
-                                                         && harness.id == "claude-code")
+        let entry = MCPConfigWriter.entry(for: harness, command: command)
         var notes: [String] = []
         var snippet: String?
 
@@ -185,27 +196,13 @@ enum MCPIntegration {
         return nil
     }
 
-    /// 写不了时给的手动片段。
+    /// 写不了时给用户手动粘的片段。
+    ///
+    /// **不再手写三份模板**：空文本喂给 `apply` 走的正是"文件不存在 → 建出来"那条路，
+    /// 输出就是要粘的内容。手写模板已经开始漂了（writer 会写 env 子表，模板里写死 `args = []`）。
     static func snippet(for harness: Harness, entry: MCPConfigWriter.Entry) -> String {
-        switch harness.format {
-        case .mcpServersTOML:
-            """
-            [mcp_servers.\(entry.name)]
-            command = "\(entry.command)"
-            args = []
-            """
-        case .zcodeNestedJSON:
-            """
-            { "mcp": { "servers": { "\(entry.name)": {
-                "command": "\(entry.command)", "args": [] } } } }
-            """
-        case .mcpServersJSON:
-            """
-            { "mcpServers": { "\(entry.name)": {
-                \(entry.includeStdioType ? "\"type\": \"stdio\", " : "")\
-            "command": "\(entry.command)", "args": [] } } }
-            """
-        }
+        (try? MCPConfigWriter.apply(format: harness.format, text: "",
+                                     entry: entry, enabled: true)) ?? ""
     }
 
     // MARK: - 学习模式（连过来的 client 到底自报什么名）
@@ -253,10 +250,16 @@ enum MCPIntegration {
         do { try process.run() } catch {
             return ProcessResult(status: -1, output: "起不来：\(error)")
         }
-        let deadline = Date().addingTimeInterval(timeout)
-        while process.isRunning && Date() < deadline { usleep(50_000) }
-        if process.isRunning { process.terminate(); return ProcessResult(status: -2, output: "超时") }
-        let data = (try? pipe.fileHandleForReading.readToEnd()) ?? Data()
+        // 边跑边读：等进程退出再 readToEnd，输出超过管道缓冲（64 KB）就会双方死等。
+        let collected = OutputBuffer()
+        pipe.fileHandleForReading.readabilityHandler = { collected.append($0.availableData) }
+        // 超时用一个看门狗，主体走 waitUntilExit（内核等待，没有 50 ms 轮询与尾延迟）。
+        let watchdog = DispatchWorkItem { if process.isRunning { process.terminate() } }
+        DispatchQueue.global().asyncAfter(deadline: .now() + timeout, execute: watchdog)
+        process.waitUntilExit()
+        watchdog.cancel()
+        pipe.fileHandleForReading.readabilityHandler = nil
+        let data = collected.value
         return ProcessResult(status: process.terminationStatus,
                              output: String(data: data, encoding: .utf8) ?? "")
     }

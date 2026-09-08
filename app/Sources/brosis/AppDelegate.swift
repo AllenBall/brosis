@@ -184,12 +184,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         // 自动建索引：库解锁着就让它的定时器跑（首次延迟 20 s，之后每小时）；
         // 其余状态一律停"踢"，正在跑的任务由 OvernightIndexPolicy 的 locked_* / paused 收尾。
-        if lock.snapshot.isRecording {
+        // **只在解锁时起，暂停时不停**：`syncSubsystems` 每次锁屏 / 屏保 / 用户暂停都会跑，
+        // 而 start() 是按"现在 + 首次延迟"重排的——停了再起等于把「每小时」变成
+        // 「每次解锁后 20 秒」。两个调度器的 tick 自己都会判 locked / paused 直接跳过，
+        // 空转一次的代价接近零，所以让 timer 一直挂着更省。关库时由 stopSubsystems 停。
+        if lock.snapshot.phase == .unlocked {
             AutoIndexScheduler.shared.start()
             QuotaScheduler.shared.start()
-        } else {
-            AutoIndexScheduler.shared.stop()
-            QuotaScheduler.shared.stop()
         }
 
         if recording && permissions.screenRecording {

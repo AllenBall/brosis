@@ -46,10 +46,11 @@ enum Settings {
 
     // MARK: - 采集
 
-    /// 定时兜底截图间隔（秒）。键沿用 CaptureController 原来那个。
-    static let periodicIntervalKey = "capture.periodicInterval"
-    static let periodicIntervalDefault = 12.0
-    static let periodicIntervalRange = 3.0...120.0
+    /// 定时兜底截图间隔（秒）。**键、默认值、下限都取自拥有者 `CaptureController`**——
+    /// 抄一份字面量就会两边劈叉（上一版这里自加了 120 的上限，拥有者那边根本没有上限）。
+    static let periodicIntervalKey = CaptureController.periodicIntervalKey
+    static let periodicIntervalDefault = CaptureController.periodicIntervalDefault
+    static let periodicIntervalRange = CaptureController.periodicIntervalMinimum...120.0
     static var periodicInterval: Double {
         get {
             let raw = UserDefaults.standard.double(forKey: periodicIntervalKey)
@@ -60,8 +61,8 @@ enum Settings {
                                         forKey: periodicIntervalKey) }
     }
 
-    /// 严格锁屏：屏幕一锁就关库（不只是暂停采集）。默认关。
-    static let strictLockKey = "lock.strict"
+    /// 严格锁屏：屏幕一锁就关库（不只是暂停采集）。默认关。键的拥有者是 `LockPolicy`。
+    static let strictLockKey = LockPolicy.strictKey
     static var strictLock: Bool {
         get { UserDefaults.standard.bool(forKey: strictLockKey) }
         set { UserDefaults.standard.set(newValue, forKey: strictLockKey) }
@@ -69,19 +70,21 @@ enum Settings {
 
     // MARK: - 索引与检索（键沿用各调度器已有的，不改名）
 
+    /// 直接转发给拥有者的**可写属性**——它的 setter 自己写键、自己起停定时器。
+    /// 真源不是键，是"改这个设置要连带做的那件事"。
     static var autoIndex: Bool {
         get { AutoIndexScheduler.isEnabled }
-        set { UserDefaults.standard.set(newValue, forKey: AutoIndexScheduler.enabledKey) }
+        set { AutoIndexScheduler.isEnabled = newValue }
     }
 
     static var autoIndexIntervalMinutes: Double {
         get { AutoIndexScheduler.intervalMinutes }
-        set { UserDefaults.standard.set(max(AutoIndexScheduler.minimumIntervalMinutes, newValue),
-                                        forKey: AutoIndexScheduler.intervalKey) }
+        set { AutoIndexScheduler.intervalMinutes = newValue }
     }
 
-    static let dailyGPUSecondsKey = "embedding.dailyGPUSeconds"
-    static let dailyGPUSecondsDefault = 600.0
+    /// 键与默认值的拥有者是 `EmbeddingGatePolicy`。
+    static let dailyGPUSecondsKey = EmbeddingGatePolicy.budgetKey
+    static let dailyGPUSecondsDefault = EmbeddingGatePolicy.defaultBudgetSeconds
     static var dailyGPUSeconds: Double {
         get {
             let raw = UserDefaults.standard.double(forKey: dailyGPUSecondsKey)
@@ -90,9 +93,10 @@ enum Settings {
         set { UserDefaults.standard.set(max(60, newValue), forKey: dailyGPUSecondsKey) }
     }
 
+    /// **只读**：写要走 `QueryEmbedderService.setVectorsEnabled(_:store:)`，
+    /// 因为开关还要推 `store.retrieval`（core 的检索闸门）并加载 / 卸载权重。
     static var vectorsEnabled: Bool {
-        get { UserDefaults.standard.object(forKey: QueryEmbedderService.vectorsEnabledKey) as? Bool ?? true }
-        set { UserDefaults.standard.set(newValue, forKey: QueryEmbedderService.vectorsEnabledKey) }
+        UserDefaults.standard.object(forKey: QueryEmbedderService.vectorsEnabledKey) as? Bool ?? true
     }
 
     private static func clamp(_ value: Double, _ range: ClosedRange<Double>) -> Double {

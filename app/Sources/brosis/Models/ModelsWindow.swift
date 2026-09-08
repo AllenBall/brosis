@@ -362,13 +362,10 @@ final class ModelsWindowController: NSObject, NSWindowDelegate,
         switch reason {
         case "started": "已踢起一轮"
         case "auto_disabled": "开关关着"
-        case "model_not_installed": "没有可用的嵌入模型"
         case "already_running": "上一轮还在跑"
-        case "nothing_pending": "没有待办的块"
-        case "paused": "采集已暂停"
-        case "还没跑过": "还没跑过"
-        default:
-            reason.hasPrefix("locked_") ? "数据库未解锁" : reason
+        // 其余（model_not_installed / nothing_pending / paused / locked_* …）与门控原因
+        // 完全重合，交给 gateText，不维护第二套译文。
+        default: gateText(reason)
         }
     }
 
@@ -698,8 +695,7 @@ final class ModelsWindowController: NSObject, NSWindowDelegate,
     /// 自动建索引开关（`embedding.autoIndex`）。关掉之后定时器立刻停，正在跑的那轮不打断。
     @objc private func autoIndexToggled(_ sender: NSButton) {
         let on = sender.state == .on
-        UserDefaults.standard.set(on, forKey: AutoIndexScheduler.enabledKey)
-        if on { AutoIndexScheduler.shared.start() } else { AutoIndexScheduler.shared.stop() }
+        AutoIndexScheduler.isEnabled = on   // setter 自己写键、自己起停
         recorder?.logEvent(kind: "auto_index_toggled", detail: "enabled=\(on)")
         lastAction = on
             ? "自动建索引已打开（打开时与每 \(Int(AutoIndexScheduler.intervalMinutes)) 分钟一次）"
@@ -714,6 +710,9 @@ final class ModelsWindowController: NSObject, NSWindowDelegate,
     }
 
     private func presentAlert(title: String, body: String) {
+        // brosis 是 LSUIElement，不激活的话弹窗会出现在别的 app 后面（Updater 与
+        // PoliciesWindow 里那两份一直有这句，这里和 MCP 窗口漏了）。
+        NSApp.activate(ignoringOtherApps: true)
         let alert = NSAlert()
         alert.messageText = title
         alert.informativeText = body

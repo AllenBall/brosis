@@ -45,9 +45,7 @@ public final class Store: @unchecked Sendable {
     private let lock = NSLock()
     private var conn: SQLiteConnection
     private var key: SecureKey
-    /// 打开时定下的选项。**只有配额允许运行时改**（设置窗口里那一项）——
-    /// 其余项（页大小、cipher、cache）都只在开库那一刻起作用，改了也没意义。
-    private(set) var options: StoreOptions
+    let options: StoreOptions
 
     /// 数据目录（0700，已排除 TM / Spotlight）。
     public let directory: URL
@@ -118,14 +116,6 @@ public final class Store: @unchecked Sendable {
                             keyProvider: KeyProvider,
                             options: StoreOptions = StoreOptions()) throws -> Store {
         try Store(directory: directory, keyProvider: keyProvider, options: options)
-    }
-
-    /// 运行时调整配额（设置窗口用）。立刻影响 `quotaAction()` 与 `expireByQuota()`，
-    /// 不用关库重开。下次开库由调用方按同一个设置重新传进来。
-    public func setQuotaBytes(_ bytes: Int) {
-        lock.lock()
-        defer { lock.unlock() }
-        options.quotaBytes = max(1, bytes)
     }
 
     private init(directory: URL, keyProvider: KeyProvider, options: StoreOptions) throws {

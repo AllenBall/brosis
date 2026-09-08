@@ -41,19 +41,15 @@ enum MCPIntegrationCLI {
     private static func list() -> Int32 {
         let grants = grantedClients()
         print("服务器路径：\(HarnessCatalog.serverCommand())")
+        // 状态判定只有一份：`MCPIntegration.status` + `Status.stateText`（窗口用的也是它），
+        // 以前 CLI 自己又推了一遍，措辞已经和窗口不一致。
         for harness in HarnessCatalog.all {
-            let path = harness.expandedConfigPath()
-            let text = (try? String(contentsOfFile: path, encoding: .utf8)) ?? ""
-            let command = (try? MCPConfigWriter.currentCommand(format: harness.format, text: text,
-                                                               name: HarnessCatalog.serverName)) ?? nil
-            let cli = MCPIntegration.locateCLI(harness.cliName)
-            let state = command.map { $0 == HarnessCatalog.serverCommand() ? "已配置" : "已配置(指向别处)" }
-                     ?? (FileManager.default.fileExists(atPath: path) ? "未配置" : "无配置文件")
-            print(String(format: "%-12@ %-16@ grant=%@ cli=%@ %@",
-                         harness.id as NSString, state as NSString,
+            let status = MCPIntegration.status(of: harness, store: nil)
+            print(String(format: "%-12@ %-28@ grant=%@ cli=%@ %@",
+                         harness.id as NSString, status.stateText as NSString,
                          (grants.contains(harness.id) ? "有" : "无") as NSString,
-                         (cli.map { ($0 as NSString).lastPathComponent } ?? "无") as NSString,
-                         (path as NSString).abbreviatingWithTildeInPath as NSString))
+                         (status.cliPath.map { ($0 as NSString).lastPathComponent } ?? "无") as NSString,
+                         (harness.expandedConfigPath() as NSString).abbreviatingWithTildeInPath as NSString))
         }
         return 0
     }
@@ -82,7 +78,7 @@ enum MCPIntegrationCLI {
 
     /// 转给同 bundle 里的 brosis-mcp。它连的是正在跑的 app，所以库必须已解锁。
     private static func runGrant(_ verb: String, client: String) -> String {
-        let executable = Bundle.main.bundleURL.appending(path: "Contents/MacOS/brosis-mcp").path
+        let executable = HarnessCatalog.serverCommand()
         guard FileManager.default.isExecutableFile(atPath: executable) else {
             return "找不到 brosis-mcp（\(executable)）"
         }
@@ -96,7 +92,7 @@ enum MCPIntegrationCLI {
     }
 
     private static func grantedClients() -> Set<String> {
-        let executable = Bundle.main.bundleURL.appending(path: "Contents/MacOS/brosis-mcp").path
+        let executable = HarnessCatalog.serverCommand()
         guard FileManager.default.isExecutableFile(atPath: executable) else { return [] }
         let result = MCPIntegration.runProcess(executable, ["admin", "grant", "list"])
         guard let start = result.output.firstIndex(of: "{"),

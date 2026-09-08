@@ -31,6 +31,13 @@ enum MCPConfigWriter {
         var includeStdioType: Bool = false
     }
 
+    /// 按描述表造一条 Entry。差异（例如 Claude Code 要 `type: "stdio"`）取自 `Harness` 的字段，
+    /// 调用方不再各写一遍 id 判断。
+    static func entry(for harness: Harness, command: String) -> Entry {
+        Entry(name: HarnessCatalog.serverName, command: command,
+              includeStdioType: harness.entryIncludesStdioType)
+    }
+
     /// 目标状态与现状一致时返回 nil（调用方据此"什么都不写"）。
     static func apply(format: HarnessFormat, text: String,
                       entry: Entry, enabled: Bool) throws -> String? {

@@ -93,11 +93,20 @@ final class QueryEmbedderService: @unchecked Sendable {
     }
 
     /// 用户在「模型」面板里关掉向量检索：立刻卸载（不等 10 分钟空闲）。
+    /// 开 / 关向量检索。**三件事一次做全**，调用方只管调这一个入口：
+    /// 写 UserDefaults（下次解锁 `attach` 要用）、推 `store.retrieval`（core 的检索闸门看它，
+    /// 见 `Store+Search` 与 `StoreMCPService`）、加载或卸载查询权重。
+    ///
+    /// 以前后两件散在两个窗口里各写一遍，设置窗口那份漏了 `store.retrieval`——
+    /// 表现是「关了向量但检索侧闸门还开着」。
     func setVectorsEnabled(_ on: Bool, store: Store?) {
+        UserDefaults.standard.set(on, forKey: Self.vectorsEnabledKey)
         if on {
             guard let store else { return }
+            store.retrieval.vectorsEnabled = true
             embedder.enable(modelsRoot: ModelStore.resolveRoot(dataDirectory: store.directory).url)
         } else {
+            store?.retrieval.vectorsEnabled = false
             embedder.disable(event: .disabledByUser)
         }
     }

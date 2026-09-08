@@ -55,11 +55,15 @@ enum SettingsSelfCheck {
         check("配额口径写清楚了（原文净载荷，不含 FTS / 向量 / WAL）", true,
               "当前设置 \(String(format: "%.0f", Settings.quotaGiB)) GiB = \(Settings.quotaBytes) 字节")
 
-        // 默认值不能悄悄漂移。
-        check("默认值与各处原来的硬编码一致",
-              Settings.periodicIntervalDefault == 12.0
-                && Settings.dailyGPUSecondsDefault == 600.0
-                && Settings.quotaCheckMinutesDefault == 30.0,
+        // 设置面板必须读**各功能自己的**那把键和默认值，否则界面上调的和实际生效的是两码事。
+        // 断言比的是「Settings 的别名 == 归属方的常量」，不是字面量——归属方改了这里跟着改，
+        // 而写死 12.0 / 600.0 只会在归属方改动时逼人手工同步，恰恰漏掉真正的漂移。
+        check("设置读的是各功能自己的键与默认值（别名没接错）",
+              Settings.periodicIntervalKey == CaptureController.periodicIntervalKey
+                && Settings.periodicIntervalDefault == CaptureController.periodicIntervalDefault
+                && Settings.strictLockKey == LockPolicy.strictKey
+                && Settings.dailyGPUSecondsKey == EmbeddingGatePolicy.budgetKey
+                && Settings.dailyGPUSecondsDefault == EmbeddingGatePolicy.defaultBudgetSeconds,
               "兜底截图 \(Settings.periodicIntervalDefault) s、日均 GPU "
               + "\(Settings.dailyGPUSecondsDefault) s、配额检查 \(Settings.quotaCheckMinutesDefault) 分钟")
 

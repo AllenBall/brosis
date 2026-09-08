@@ -29,14 +29,30 @@ final class AutoIndexScheduler: @unchecked Sendable {
     /// 解锁后延迟多久跑第一次。给启动阶段（授权、起流、首帧采集）让开一会儿。
     static let launchDelaySeconds: TimeInterval = 20
 
+    /// 总开关。**setter 自己写键并自己起停**（与 `EmbeddingScheduler.isEnabled` 同一写法），
+    /// 免得每个 UI 各写一遍"写 UserDefaults + if on { start() } else { stop() }"。
     static var isEnabled: Bool {
-        UserDefaults.standard.object(forKey: enabledKey) as? Bool ?? true
+        get { UserDefaults.standard.object(forKey: enabledKey) as? Bool ?? true }
+        set {
+            UserDefaults.standard.set(newValue, forKey: enabledKey)
+            if newValue { shared.start() } else { shared.stop() }
+        }
     }
 
+    /// 间隔（分钟）。setter 会重建定时器——`start()` 是在建 timer 时快照 interval 的，
+    /// 不重建的话改完要等下一次锁屏 / 解锁才生效。
     static var intervalMinutes: Double {
-        let configured = UserDefaults.standard.double(forKey: intervalKey)
-        guard configured > 0 else { return defaultIntervalMinutes }
-        return max(minimumIntervalMinutes, configured)
+        get {
+            let configured = UserDefaults.standard.double(forKey: intervalKey)
+            guard configured > 0 else { return defaultIntervalMinutes }
+            return max(minimumIntervalMinutes, configured)
+        }
+        set {
+            UserDefaults.standard.set(max(minimumIntervalMinutes, newValue), forKey: intervalKey)
+            guard isEnabled else { return }
+            shared.stop()
+            shared.start()
+        }
     }
 
     private let lock = NSLock()
@@ -59,7 +75,8 @@ final class AutoIndexScheduler: @unchecked Sendable {
         guard timer == nil else { lock.unlock(); return }
         let interval = Self.intervalMinutes * 60
         let t = DispatchSource.makeTimerSource(queue: queue)
-        t.schedule(deadline: .now() + Self.launchDelaySeconds, repeating: interval)
+        t.schedule(deadline: .now() + Self.launchDelaySeconds, repeating: interval,
+                   leeway: .seconds(300))   // 小时级任务，让系统合并唤醒
         t.setEventHandler { [weak self] in self?.tick() }
         t.resume()
         timer = t
@@ -95,8 +112,10 @@ final class AutoIndexScheduler: @unchecked Sendable {
             return
         }
         let input = scheduler.currentInput(modelsRoot: root)
+        // modelInstalled 就是 currentModelID(...) != nil，currentInput 已经算过一次；
+        // 再算一次等于多读一遍 catalog.json 并 stat 一遍权重文件。
         let reason = Self.decide(enabled: Self.isEnabled,
-                                 modelUsable: scheduler.currentModelID(modelsRoot: root) != nil,
+                                 modelUsable: input.modelInstalled,
                                  alreadyRunning: OvernightIndexJob.shared.isRunning,
                                  pendingChunks: input.pendingChunks,
                                  lockPhase: input.lockPhase,
@@ -120,12 +139,5 @@ final class AutoIndexScheduler: @unchecked Sendable {
         lock.lock()
         _lastDecision = reason
         lock.unlock()
-    }
-}
-
-private extension NSLock {
-    func withLock<T>(_ body: () -> T) -> T {
-        lock(); defer { unlock() }
-        return body()
     }
 }

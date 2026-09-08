@@ -41,7 +41,9 @@ final class QuotaScheduler: @unchecked Sendable {
         guard timer == nil else { lock.unlock(); return }
         let interval = Settings.quotaCheckMinutes * 60
         let t = DispatchSource.makeTimerSource(queue: queue)
-        t.schedule(deadline: .now() + Self.launchDelaySeconds, repeating: interval)
+        // 30 分钟一次的检查不需要秒级精度；给足 leeway 让系统合并唤醒（常驻进程的能耗）。
+        t.schedule(deadline: .now() + Self.launchDelaySeconds, repeating: interval,
+                   leeway: .seconds(120))
         t.setEventHandler { [weak self] in self?.tick() }
         t.resume()
         timer = t
@@ -62,10 +64,11 @@ final class QuotaScheduler: @unchecked Sendable {
     func checkNow() -> String {
         let (recorder, exporter) = lock.withLock { (self.recorder, self.exporter) }
         guard let recorder, let exporter else { return "还没接线" }
-        // 开库时的配额是开库那一刻的设置；用户刚改过就先推给库，免得按旧值判。
-        _ = recorder.withStore { $0.setQuotaBytes(Settings.quotaBytes) }
         guard Settings.autoExpire else {
-            let action = recorder.withStore { try $0.quotaAction() } ?? nil
+            // 配额作为参数传下去，库里不留可变副本（`quotaAction(quota:)`）。
+            let action = recorder.withStore {
+                try $0.quotaAction(recordEvent: false, quota: Settings.quotaBytes)
+            } ?? nil
             let note = action.map { "只提示不清理（自动清理已关）：\($0.message)" } ?? "库没打开"
             self.note(note)
             return note
@@ -74,6 +77,32 @@ final class QuotaScheduler: @unchecked Sendable {
         // "配额未到线" 是常态噪音；删了东西 / 被通知拦住 / 库没开 才值得落盘。
         self.note(note, significant: !note.hasPrefix("配额未到线"))
         return note
+    }
+
+    /// 给界面用：**扫描放后台**（全表 SUM + 解密 + 占 Store 锁），完成后回主线程回调。
+    /// 只读一次配额，界面拿现成结果显示，不再每次 reload 都重扫。
+    @MainActor
+    func checkNowAsync(_ completion: @escaping @MainActor (String, QuotaAction?) -> Void) {
+        let recorder = lock.withLock { self.recorder }
+        let quota = Settings.quotaBytes
+        let autoExpire = Settings.autoExpire
+        queue.async { [weak self] in
+            let action = recorder?.withStore {
+                try $0.quotaAction(recordEvent: false, quota: quota)
+            } ?? nil
+            Task { @MainActor in
+                guard let self else { return }
+                // 到线且开着自动清理，才走真正会删东西的那条（它是 @MainActor，要弹导出窗口）。
+                if autoExpire, action?.level == .full {
+                    let note = self.checkNow()
+                    completion(note, action)
+                } else {
+                    let note = action.map { $0.message } ?? "库没打开"
+                    self.note(note)
+                    completion(note, action)
+                }
+            }
+        }
     }
 
     /// 定时器跑在 utility 队列上，而检查要碰 @MainActor 的 ExportController，所以回主线程。
@@ -99,12 +128,5 @@ final class QuotaScheduler: @unchecked Sendable {
         } else {
             BrosisLog.lifecycle.info("配额检查：\(text, privacy: .public)")
         }
-    }
-}
-
-private extension NSLock {
-    func withLock<T>(_ body: () -> T) -> T {
-        lock(); defer { unlock() }
-        return body()
     }
 }

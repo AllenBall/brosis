@@ -44,6 +44,9 @@ struct Harness: Sendable, Identifiable {
     var probePaths: [String]
     /// 界面上要提醒的话。
     var note: String?
+    /// 这一家的条目里要不要 `"type": "stdio"`。**差异写进表，不写进 if**——
+    /// 之前用 `harness.id == "claude-code"` 判，两个调用点的条件还不一样。
+    var entryIncludesStdioType = false
 
     func expandedConfigPath(environment: [String: String] = ProcessInfo.processInfo.environment,
                             home: String = NSHomeDirectory()) -> String {
@@ -70,7 +73,8 @@ enum HarnessCatalog {
                 allowDirectWrite: false,
                 probePaths: [".claude", ".claude.json"],
                 note: "配置文件很大且 Claude Code 自己在频繁重写，所以只用官方 CLI 增删；"
-                    + "CLI 不在时改为复制片段手动加。"),
+                    + "CLI 不在时改为复制片段手动加。",
+                entryIncludesStdioType: true),
         Harness(id: "codex", displayName: "Codex CLI",
                 configPath: ".codex/config.toml", homeEnvKey: nil,
                 format: .mcpServersTOML,

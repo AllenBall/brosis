@@ -117,6 +117,8 @@ final class MCPIntegrationWindowController: NSObject, NSWindowDelegate,
 
     private var store: Store? { recorder?.withStore { $0 } ?? nil }
 
+    /// 整表重探：读 6 个 harness 的配置文件 + 找 CLI（每家要 stat 十几个目录）。
+    /// 学习模式每 2 秒的心跳**不该**走这里，见 `refreshNote()`。
     private func reload() {
         let store = self.store
         rows = HarnessCatalog.all.map { MCPIntegration.status(of: $0, store: store) }
@@ -127,6 +129,11 @@ final class MCPIntegrationWindowController: NSObject, NSWindowDelegate,
                    + "两件事缺一不可：没有 grant 的客户端所有工具都会被拒。")
         if let lastAction { lines.append(lastAction) }
         statusLabel?.stringValue = lines.suffix(2).joined(separator: "\n")
+        refreshNote()
+    }
+
+    /// 只重画底部那行字（学习模式倒计时走这条，不重探配置）。
+    private func refreshNote() {
         var note = "服务器路径：\(HarnessCatalog.serverCommand())"
         if !learned.isEmpty {
             note += " · 学习模式抓到未授权 client：\(learned.joined(separator: " "))（选中行不影响，按钮会问你给哪个发）"
@@ -193,9 +200,7 @@ final class MCPIntegrationWindowController: NSObject, NSWindowDelegate,
 
     @objc private func copyClicked() {
         guard let status = selected else { return }
-        let entry = MCPConfigWriter.Entry(name: HarnessCatalog.serverName,
-                                          command: HarnessCatalog.serverCommand(),
-                                          includeStdioType: status.harness.id == "claude-code")
+        let entry = MCPConfigWriter.entry(for: status.harness, command: HarnessCatalog.serverCommand())
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(MCPIntegration.snippet(for: status.harness, entry: entry),
                                        forType: .string)
@@ -206,8 +211,8 @@ final class MCPIntegrationWindowController: NSObject, NSWindowDelegate,
     /// 学习模式：60 秒内谁连过来被 `no_grant` 拒了，就把它自报的名字捞出来给你确认。
     @objc private func learnClicked() {
         learned = []
-        learnDeadline = Date().addingTimeInterval(60)
         learnTimer?.invalidate()
+        learnDeadline = Date().addingTimeInterval(60)
         let timer = Timer(timeInterval: 2, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.learnTick() }
         }
@@ -218,18 +223,25 @@ final class MCPIntegrationWindowController: NSObject, NSWindowDelegate,
     }
 
     private func learnTick() {
-        let found = MCPIntegration.unknownClients(store: store)
-        if found != learned { learned = found }
-        if let deadline = learnDeadline, Date() >= deadline {
-            learnTimer?.invalidate(); learnTimer = nil; learnDeadline = nil
-            if learned.isEmpty {
-                lastAction = "学习模式结束：这 60 秒里没有未授权的客户端来连过。"
-            } else {
-                askToGrant()
-            }
+        learned = MCPIntegration.unknownClients(store: store)
+        guard let deadline = learnDeadline, Date() >= deadline else { refreshNote(); return }
+        stopLearning()
+        if learned.isEmpty {
+            lastAction = "学习模式结束：这 60 秒里没有未授权的客户端来连过。"
+        } else {
+            askToGrant()
         }
         reload()
     }
+
+    private func stopLearning() {
+        learnTimer?.invalidate()
+        learnTimer = nil
+        learnDeadline = nil
+    }
+
+    /// 窗口关了还每 2 秒扫一次 grants 表没有意义。
+    func windowWillClose(_ notification: Notification) { stopLearning() }
 
     private func askToGrant() {
         for client in learned {
@@ -253,6 +265,7 @@ final class MCPIntegrationWindowController: NSObject, NSWindowDelegate,
     }
 
     private func presentAlert(title: String, body: String) {
+        NSApp.activate(ignoringOtherApps: true)   // LSUIElement：不激活弹窗会藏到别的 app 后面
         let alert = NSAlert()
         alert.messageText = title
         alert.informativeText = body

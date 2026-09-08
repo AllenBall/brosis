@@ -24,6 +24,8 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     private var strictLockSwitch: NSButton?
     private var noteLabel: NSTextField?
     private var lastAction: String?
+    /// 最近一次配额检查的结果，只在真查过之后才有值（查一次很贵，见 reload 的注释）。
+    private var lastQuota: QuotaAction?
 
     func configure(recorder: Recorder) { self.recorder = recorder }
 
@@ -270,16 +272,18 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         intervalField?.doubleValue = Settings.autoIndexIntervalMinutes
         gpuField?.doubleValue = Settings.dailyGPUSeconds
 
-        let action = recorder?.withStore { try $0.quotaAction() } ?? nil
-        usageLabel?.stringValue = action?.message ?? "库没打开，用量未知（解锁后再看）"
-        noteLabel?.stringValue = (lastAction.map { $0 + " · " } ?? "")
-            + "上次配额检查：\(QuotaScheduler.shared.lastNote)"
+        // **不在这里查配额**：`quotaAction()` 会对 text_versions 做一次 SUM(byte_len) 全表扫描，
+        // 而 text_versions 没有覆盖 byte_len 的索引、行里还带着正文，SQLCipher 要逐页解密，
+        // 整个过程还占着 Store 的锁（采集写入被挡住）。以前每个 handler 都调 reload()，
+        // 点一下步进器就扫一遍。现在只显示最近一次检查的结果，要新的就点「现在检查并清理」。
+        usageLabel?.stringValue = lastQuota?.message ?? "点「现在检查并清理」查看当前用量"
+        noteLabel?.stringValue = "上次配额检查：\(lastAction ?? QuotaScheduler.shared.lastNote)"
     }
 
-    /// 配额改了要**立刻推给正在开着的库**，否则要等下次开库才生效。
+    /// 配额只写设置——判定与清理时由调用方把它作为参数传给 core
+    /// （`quotaAction(quota:)` / `expire(toBytes:)`），库里不留可变副本。
     private func applyQuota(_ giB: Double) {
         Settings.quotaGiB = giB
-        _ = recorder?.withStore { $0.setQuotaBytes(Settings.quotaBytes) }
         recorder?.logEvent(kind: "settings_changed",
                            detail: "storage.quotaGiB=\(Settings.quotaGiB)")
         lastAction = "配额已设为 \(String(format: "%.0f", Settings.quotaGiB)) GiB"
@@ -296,14 +300,22 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         reload()
     }
 
+    /// 扫描搬到后台队列：它是全表扫 + 解密 + 占 Store 锁，放主线程会卡住菜单栏。
     @objc private func checkNowClicked() {
-        lastAction = QuotaScheduler.shared.checkNow()
+        lastAction = "正在检查…"
         reload()
+        QuotaScheduler.shared.checkNowAsync { [weak self] note, action in
+            self?.lastAction = note
+            self?.lastQuota = action
+            self?.reload()
+        }
     }
 
     @objc private func periodicChanged() {
         Settings.periodicInterval = periodicField?.doubleValue ?? Settings.periodicInterval
-        lastAction = "定时兜底改为 \(String(format: "%.0f", Settings.periodicInterval)) s（下次起流生效）"
+        // CaptureController 的间隔是 `private static let` 一次性解析并缓存的，
+        // 写 UserDefaults 不会让本进程重读——如实说要重启，别写"下次起流生效"。
+        lastAction = "定时兜底改为 \(String(format: "%.0f", Settings.periodicInterval)) s（**重启 brosis 后生效**）"
         recorder?.logEvent(kind: "settings_changed",
                            detail: "capture.periodicInterval=\(Settings.periodicInterval)")
         reload()
@@ -315,9 +327,10 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         reload()
     }
 
+    // 这三个开关的副作用（推 store.retrieval、起停定时器、重建 timer）都在拥有者的
+    // setter 里，两个窗口都只调这一个入口——以前两边各写一遍，向量那份还漏了 store.retrieval。
     @objc private func vectorsToggled() {
-        Settings.vectorsEnabled = vectorsSwitch?.state == .on
-        QueryEmbedderService.shared.setVectorsEnabled(Settings.vectorsEnabled,
+        QueryEmbedderService.shared.setVectorsEnabled(vectorsSwitch?.state == .on,
                                                       store: recorder?.withStore { $0 } ?? nil)
         lastAction = "向量检索：\(Settings.vectorsEnabled ? "开" : "关")"
         reload()
@@ -325,15 +338,12 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
 
     @objc private func autoIndexToggled() {
         Settings.autoIndex = autoIndexSwitch?.state == .on
-        if Settings.autoIndex { AutoIndexScheduler.shared.start() } else { AutoIndexScheduler.shared.stop() }
         lastAction = "自动建索引：\(Settings.autoIndex ? "开" : "关")"
         reload()
     }
 
     @objc private func intervalChanged() {
         Settings.autoIndexIntervalMinutes = intervalField?.doubleValue ?? Settings.autoIndexIntervalMinutes
-        AutoIndexScheduler.shared.stop()
-        if Settings.autoIndex { AutoIndexScheduler.shared.start() }
         lastAction = "自动建索引间隔改为 \(Int(Settings.autoIndexIntervalMinutes)) 分钟"
         reload()
     }
