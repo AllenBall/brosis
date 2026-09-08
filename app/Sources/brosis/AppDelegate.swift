@@ -74,6 +74,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // 自动建索引（2026-09-08 用户要求：打开时跑一次、之后每小时一次）。
         // 只登记依赖；真正的启停跟着锁定状态走（见 syncSubsystems / stopSubsystems）。
         AutoIndexScheduler.shared.configure(recorder: recorder)
+        // D33：MCP 集成窗口（把 brosis 注册进各家 harness 的用户级配置 + 发 grant）。
+        MCPIntegrationWindowController.shared.configure(recorder: recorder)
         // 2026-09-08：用户决定不要叙述功能，夜间叙述调度器**不再接线、不再启动**，
         // 菜单里也没有入口。core / app 里的叙述代码原样留着（休眠，自检仍跑它的纯逻辑用例），
         // 将来要恢复：装回生成模型、把清单条目加回 catalog.json、恢复这两行与 narrativeMenuItem()。
@@ -459,6 +461,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // 夜间叙述（T12）的入口 2026-09-08 按用户决定去掉了。
         menu.addItem(.separator())
         menu.addItem(ModelsMenu.menuItem())
+        menu.addItem(MCPIntegrationWindowController.menuItem())
         let syncItem = NSMenuItem(title: "跨设备同步…（\(sync?.status.enabled == true ? "已开启" : "未开启")）",
                                   action: #selector(openSyncWindow), keyEquivalent: "")
         syncItem.target = self

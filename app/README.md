@@ -1351,6 +1351,34 @@ menu.addItem(NSMenuItem(title: "跨设备同步…", action: #selector(openSync)
 
 ---
 
+## 12.9 MCP 集成（D33，2026-09-08）
+
+菜单「MCP 集成…」：把 brosis 注册进各家 harness 的**用户级**配置，一个开关管两件事——
+**写配置**（让它知道有这么个服务器）+ **发 grant**（`grants` 表，这才是真正的门；
+没有 grant 的 client 所有工具都被拒）。关掉时两边都撤。**项目级不做**：那等于把活动记录
+接口提交进仓库。
+
+| Harness | 用户级配置 | 格式 | 写入方式 |
+|---|---|---|---|
+| Claude Code | `~/.claude.json` | 顶层 `mcpServers` | **只走官方 CLI**（`claude mcp add -s user`）——文件 100 KB 量级且它自己在频繁重写，直接改会对写打架；CLI 不在就给片段手动加 |
+| Codex CLI | `~/.codex/config.toml` | `[mcp_servers.brosis]` | 直接改（TOML 逐行手术，注释与别人的节一字不动） |
+| Cursor | `~/.cursor/mcp.json` | `mcpServers` | 直接改 |
+| Grok CLI | `~/.grok/config.toml` | `[mcp_servers.brosis]` | 官方 CLI 优先（`grok mcp add`），否则直接改 |
+| ZCode | `~/.zcode/cli/config.json` | **`mcp.servers`**（嵌套） | 直接改。注意 ZCode 的规矩：`.zcode` 里只要有 server，同作用域 `~/.agents/mcp.json` 被**整个跳过、不合并** |
+| Kimi Code | `~/.kimi-code/mcp.json`（或 `$KIMI_CODE_HOME/`） | `mcpServers` | 直接改 |
+
+**改文件的规矩**：只增删 `brosis` 这一项、写前备份成 `<原文件>.brosis-backup-<时间戳>`、
+临时文件 + `replaceItemAt` 原子替换、**解析不了就不写**（改成把片段复制到剪贴板让你手动加）、
+已有 brosis 但指向别处时先问一句。目录与文件不存在就现建——别人机器上装了但没配过是常态。
+
+**学习模式**：`grants` 是按 **client 名**授权的，而各家连过来自报什么名字文档不写。
+点「学习模式」等 60 s，去那个 harness 里发一条要用 brosis 的请求，被拒的调用会在 `mcp_audit`
+里留一行 `no_grant`，面板把这些 client 名捞出来让你确认发 grant。事件
+`mcp_integration_changed` / `mcp_grant_learned`。
+
+纯函数（`MCPConfigWriter`）+ 自检 14 条对照（空文件 / 已有别人的服务器 / 幂等 / 删除 /
+坏 JSON 必须抛错 / ZCode 嵌套 / TOML 保留注释与子表），**全程不碰真实配置文件**。
+
 ## 13. 模型管理器与向量检索（3.4 / 3.11 / D18 / D27，M2 c 批 / T11）
 
 ### 13.1 三个新文件 + 一个新目标，`AppDelegate.swift` 一行没改
