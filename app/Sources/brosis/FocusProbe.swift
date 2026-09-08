@@ -423,7 +423,7 @@ final class FocusMonitor {
     /// 不可用且原因是 TCC 拒绝（EPERM / EACCES）：菜单要给一个「打开完全磁盘访问设置」的入口。
     /// 这一类 TCC 服务系统不会弹窗，只能用户自己去勾，所以入口比一行灰字有用得多。
     var needsFullDiskAccess: Bool {
-        status.unavailableReason?.hasPrefix("TCC 拒绝") == true
+        status.unavailableReason?.contains("TCC 拒绝") == true
     }
 
     /// 「系统设置 → 隐私与安全性 → 完全磁盘访问」的直达链接（不触发任何授权弹窗）。
