@@ -1055,6 +1055,39 @@ enum SelfCheck {
               paneFailures.isEmpty ? paneDetail.joined(separator: "；")
                                    : paneFailures.joined(separator: " "))
 
+        // 12.10d 窗口定向截图的挑窗规则（M2）
+        typealias Candidate = CaptureController.WindowCandidate
+        let wechatBundle = "com.tencent.xinWeChat"
+        let mainWindow = Candidate(id: 1, bundleID: wechatBundle, isOnScreen: true, layer: 0,
+                                   frame: CGRect(x: 1601, y: 97, width: 1085, height: 846))
+        let imageViewer = Candidate(id: 2, bundleID: wechatBundle, isOnScreen: true, layer: 0,
+                                    frame: CGRect(x: 200, y: 200, width: 600, height: 500))
+        let tooltip = Candidate(id: 3, bundleID: wechatBundle, isOnScreen: true, layer: 0,
+                                frame: CGRect(x: 0, y: 0, width: 180, height: 60))
+        let panel = Candidate(id: 4, bundleID: wechatBundle, isOnScreen: true, layer: 3,
+                              frame: CGRect(x: 0, y: 0, width: 1200, height: 900))
+        let offscreen = Candidate(id: 5, bundleID: wechatBundle, isOnScreen: false, layer: 0,
+                                  frame: CGRect(x: 0, y: 0, width: 1400, height: 1000))
+        let otherApp = Candidate(id: 6, bundleID: "com.apple.Safari", isOnScreen: true, layer: 0,
+                                 frame: CGRect(x: 0, y: 0, width: 1600, height: 1200))
+        let pool = [tooltip, imageViewer, panel, offscreen, otherApp, mainWindow]
+        var pickFailures: [String] = []
+        func expectPick(_ name: String, _ candidates: [Candidate], _ bundle: String?,
+                        _ expected: CGWindowID?) {
+            let got = CaptureController.pickTarget(candidates, bundleID: bundle)
+            if got?.id != expected { pickFailures.append("\(name)→\(got?.id.description ?? "nil")") }
+        }
+        expectPick("多窗口取面积最大的主窗口", pool, wechatBundle, 1)
+        expectPick("跳过浮层 / 小窗 / 离屏 / 别的应用",
+                   [tooltip, panel, offscreen, otherApp], wechatBundle, nil)
+        expectPick("只剩图片查看窗口时就用它", [imageViewer, tooltip], wechatBundle, 2)
+        expectPick("bundle id 为空 → 不定向截图（退回整屏）", pool, nil, nil)
+        expectPick("这个应用一个窗口都没有 → 退回整屏", [otherApp], wechatBundle, nil)
+        check("窗口定向截图挑窗：5 条（面积最大 / 排除浮层与离屏 / 退回整屏）",
+              pickFailures.isEmpty,
+              pickFailures.isEmpty ? "只认在屏的普通窗口层、边长 ≥ 200 pt，取面积最大的那个"
+                                   : pickFailures.joined(separator: " "))
+
         // 12.11 裁剪坐标：AX 坐标 → 显示器局部 → 像素（含 2x 缩放与跨屏落空）
         var cropDetail = "构图失败"
         var cropOK = false

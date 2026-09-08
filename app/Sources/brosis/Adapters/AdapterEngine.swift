@@ -32,8 +32,13 @@ struct OCRRequest: Sendable {
     var regionName: String
     var kind: RegionKind
     /// AX 坐标系（原点主屏左上、y 向下、跨屏全局）。
+    ///
+    /// 这是**扫描时**算出来的粗矩形。`pane != nil` 时它会在 `CaptureCoordinator.handleFrame`
+    /// 里被现场量出来的边界覆盖掉——AX 扫描那一刻还没有图像，量不了。
     var rect: CGRect
     var reason: OCRTriggerReason
+    /// 见 `RegionRule.pane`。
+    var pane: PaneRole?
 }
 
 /// 单个区域的扫描结果。
@@ -191,7 +196,7 @@ enum AdapterEngine {
                                                   coverageFailed: coverageFailed),
                let rect = result.rect, !rect.isEmpty {
                 scan.ocrRequests.append(OCRRequest(regionName: region.name, kind: region.kind,
-                                                   rect: rect, reason: reason))
+                                                   rect: rect, reason: reason, pane: region.pane))
             }
 
             scan.regions.append(result)

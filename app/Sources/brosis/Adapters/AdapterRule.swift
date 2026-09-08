@@ -143,11 +143,30 @@ struct RegionRule: Sendable {
     var clipToViewport: Bool = true
     /// 这个区域一次最多留多少字符（防止长会话把库刷爆）。
     var maxChars: Int = AX.maxCharsPerRole
+    /// 这块区域在三栏布局里的角色。**声明了角色的区域，OCR 时矩形由 `PaneDetector`
+    /// 从窗口图像现场量**，`locator` 给的那个只当量不到时的兜底（见 `PaneLayout`）。
+    var pane: PaneRole?
 
     var label: String {
         "\(name) kind=\(kind.rawValue) \(locator.label) read=\(read.rawValue)"
             + " clip=\(clipToViewport ? "yes" : "no") required=\(required ? "yes" : "no")"
             + (ocrFallback ? " ocr_fallback=yes" : "")
+            + (pane.map { " pane=\($0.rawValue)" } ?? "")
+    }
+}
+
+/// 三栏布局量不到边界时的兜底值（点，从窗口边缘算）。
+///
+/// 这一组就是 M2 之前写死在规则里的那三个数。现在它们**只在检测失败时**生效，
+/// 所以偏一点也不再意味着整块区域切错。
+struct PaneFallback: Sendable, Equatable {
+    var sidebar: Double
+    var titleBar: Double
+    var composer: Double
+
+    func layout(windowHeight: Double) -> PaneLayout {
+        PaneLayout(sidebarRight: sidebar, titleBottom: titleBar,
+                   composerTop: windowHeight - composer, source: .defaults)
     }
 }
 
@@ -190,6 +209,11 @@ struct AdapterRule: Sendable {
     var maxFrameProbes: Int = 300
     /// 已知局限，原样进 README 与结果文件。
     var notes: String
+    /// 声明了 `pane` 角色的区域，边界量不到时用这一组兜底。
+    var paneFallback: PaneFallback?
+    /// **窗口定向截图**：截这个应用时不截整块显示器，只截它的焦点窗口
+    /// （`SCContentFilter(desktopIndependentWindow:)`）。见 `CaptureController.capture`。
+    var capturesWindow: Bool = false
 
     /// 这条规则声明了哪些区域必须走 OCR。
     var ocrRegions: [RegionRule] { regions.filter { $0.read.declaresOCR } }

@@ -197,9 +197,10 @@ final class CaptureCoordinator: @unchecked Sendable {
     ///   `frontmostBundleID`）。与上下文里的应用不一致就整帧不处理——上下文是上一次 AX 扫描
     ///   留下的，而私密浏览 / AX 超时 / 读不到焦点窗口这三支**不扫描**，截图这条通路却照常出图；
     ///   不核身份的话，上一个应用排的 OCR 请求会落到新应用的画面上（详见 `clearContext`）。
-    /// - Parameter displayBoundsOverride: **只给自检用**。产品路径一律用
-    ///   `CGDisplayBounds(displayID)`（不需要任何权限）；自检要在一张自绘位图上跑完整条通路，
-    ///   所以允许把"这台显示器有多大"直接喂进来。
+    /// - Parameter displayBoundsOverride: **这张图覆盖的 AX 矩形**，不传就是整块显示器
+    ///   （`CGDisplayBounds(displayID)`，不需要任何权限）。两种情况会传：
+    ///   窗口定向截图时传窗口矩形（M2，图就是那个窗口）；自检要在自绘位图上跑完整条通路时
+    ///   传那张图的尺寸。裁剪那套换算对两者是同一套——只差原点与缩放。
     @discardableResult
     func handleFrame(_ image: CGImage, displayID: UInt32, recorder: Recorder,
                      gated: Bool, trigger reason: String,
@@ -236,9 +237,36 @@ final class CaptureCoordinator: @unchecked Sendable {
         /// 认完但还没成文的一块区域。
         struct Recognized {
             var request: OCRRequest
+            /// 实际送去识别的矩形（可能是量出来的，不一定等于 `request.rect`）。
+            var rect: CGRect
             var result: ViewportOCR.Result
         }
         var recognized: [Recognized] = []
+
+        // —— 0. 分栏边界：从这一帧的**窗口图像**现场量（M2）——
+        //
+        // 只能在这里做，不能在 AX 扫描那一步做：扫描跑在主线程，那一刻还没有图像。
+        // 量出来的边界覆盖掉规则给的粗矩形；量不到就退回规则的兜底那一组（行为与之前一致）。
+        var paneRects: [PaneRole: CGRect] = [:]
+        var paneLayout: PaneLayout?
+        let rule = AdapterRegistry.rule(for: pending.bundleID)
+        if let windowFrame = pending.windowFrame,
+           let paneFallback = rule.paneFallback,
+           pending.ocrRequests.contains(where: { $0.pane != nil }),
+           let windowImage = ViewportOCR.crop(image, axRect: windowFrame,
+                                              displayBounds: displayBounds)?.image {
+            let layout = PaneDetector.detect(
+                window: windowImage, windowSize: windowFrame.size,
+                fallback: paneFallback.layout(windowHeight: Double(windowFrame.height)))
+            paneLayout = layout
+            paneRects[.chatPanel] = layout.rect(for: .chatPanel, in: windowFrame)
+            paneRects[.conversationTitle] = layout.rect(for: .conversationTitle, in: windowFrame)
+        }
+
+        /// 这块区域最终用哪个矩形：量出来的优先，其次规则给的。
+        func resolvedRect(_ request: OCRRequest) -> CGRect {
+            request.pane.flatMap { paneRects[$0] } ?? request.rect
+        }
 
         for request in pending.ocrRequests {
             // 第二类触发条件（帧变化 + AX 未变）只在这一帧真的有变化时才算数。
@@ -256,9 +284,10 @@ final class CaptureCoordinator: @unchecked Sendable {
             case .allow:
                 break
             }
+            let rect = resolvedRect(request)
             do {
                 guard let result = try ViewportOCR.recognize(fullFrame: image,
-                                                             axRect: request.rect,
+                                                             axRect: rect,
                                                              displayBounds: displayBounds,
                                                              kind: request.kind) else {
                     missingRegions += 1
@@ -276,7 +305,7 @@ final class CaptureCoordinator: @unchecked Sendable {
                     continue
                 }
                 if result.meanConfidence < ViewportOCR.lowConfidenceThreshold { lowConfidence = true }
-                recognized.append(Recognized(request: request, result: result))
+                recognized.append(Recognized(request: request, rect: rect, result: result))
             } catch {
                 lock.withLock { stats.ocrFailures += 1 }
                 recorder.logEvent(kind: "ocr_failed",
@@ -318,6 +347,7 @@ final class CaptureCoordinator: @unchecked Sendable {
         for item in ordered {
             let request = item.request
             let result = item.result
+            let rect = item.rect
             let key = "\(pending.bundleID)|\(request.regionName)"
 
             // 聊天类区域先做气泡归属，再入库（计划 3.3 微信 / 飞书）。
@@ -326,7 +356,7 @@ final class CaptureCoordinator: @unchecked Sendable {
                 let bubbles = BubbleAttribution.attribute(
                     items: result.lines, layout: layout,
                     group: resolvedTitle?.isGroup ?? false,
-                    regionHeightPoints: Double(request.rect.height))
+                    regionHeightPoints: Double(rect.height))
                 if !bubbles.isEmpty { text = BubbleAttribution.text(bubbles) }
             }
             // —— 入库前脱敏（2.2 硬约束 2）：OCR 出来的文本走的是同一条脱敏管线 ——
@@ -348,7 +378,7 @@ final class CaptureCoordinator: @unchecked Sendable {
                 text: redacted.text,
                 region: "ocr:\(pending.ruleID).\(request.regionName)",
                 confidence: result.meanConfidence,
-                note: result.note(rect: request.rect)))
+                note: result.note(rect: rect)))
         }
 
         if !fragments.isEmpty {
@@ -368,7 +398,8 @@ final class CaptureCoordinator: @unchecked Sendable {
                 captureMethod: method,
                 completeness: completeness,
                 visibleRange: pending.ocrRequests.isEmpty ? nil
-                    : ocrVisibleRangeJSON(pending: pending, ranRegions: regionsRun),
+                    : ocrVisibleRangeJSON(pending: pending, ranRegions: regionsRun,
+                                          paneRects: paneRects, layout: paneLayout),
                 sourceState: .ok,
                 texts: fragments))
             if observationID != nil { lock.withLock { stats.observationsWritten += 1 } }
@@ -379,7 +410,9 @@ final class CaptureCoordinator: @unchecked Sendable {
                                     // 会话身份进事件（**只记形状不记会话名**）：真机校准侧栏宽度时
                                     // 要能看出"标题条到底认出会话了没有、判成群聊了没有"。
                                     + "title=\(resolvedTitle == nil ? "none" : "ok") "
-                                    + "group=\(resolvedTitle?.isGroup == true ? "yes" : "no")")
+                                    + "group=\(resolvedTitle?.isGroup == true ? "yes" : "no") "
+                                    // 分栏边界同样只记形状：三个数字加一个来源，不含任何正文。
+                                    + "pane=\(paneLayout?.label ?? "n/a")")
         }
 
         // —— 2. 采样审计 ——
@@ -433,14 +466,25 @@ final class CaptureCoordinator: @unchecked Sendable {
         }
     }
 
-    private func ocrVisibleRangeJSON(pending: Context, ranRegions: Int) -> String? {
+    private func ocrVisibleRangeJSON(pending: Context, ranRegions: Int,
+                                     paneRects: [PaneRole: CGRect],
+                                     layout: PaneLayout?) -> String? {
         var payload: [String: Any] = ["rule": pending.ruleID, "source": "ocr",
                                       "regions_run": ranRegions]
+        if let layout {
+            // 边界怎么来的要能追溯：同一条观察日后被质疑"这块是不是切歪了"，
+            // 光有矩形不够，还得知道它是量出来的还是兜底的。
+            payload["pane"] = ["sidebar_right": Int(layout.sidebarRight.rounded()),
+                               "title_bottom": Int(layout.titleBottom.rounded()),
+                               "composer_top": Int(layout.composerTop.rounded()),
+                               "source": layout.source.rawValue]
+        }
         payload["regions"] = pending.ocrRequests.map { request -> [String: Any] in
-            ["name": request.regionName,
-             "reason": request.reason.rawValue,
-             "rect": [Int(request.rect.origin.x.rounded()), Int(request.rect.origin.y.rounded()),
-                      Int(request.rect.width.rounded()), Int(request.rect.height.rounded())]]
+            let rect = request.pane.flatMap { paneRects[$0] } ?? request.rect
+            return ["name": request.regionName,
+                    "reason": request.reason.rawValue,
+                    "rect": [Int(rect.origin.x.rounded()), Int(rect.origin.y.rounded()),
+                             Int(rect.width.rounded()), Int(rect.height.rounded())]]
         }
         guard let data = try? JSONSerialization.data(withJSONObject: payload,
                                                      options: [.sortedKeys]) else { return nil }

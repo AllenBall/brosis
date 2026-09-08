@@ -54,9 +54,14 @@ enum PaneRole: String, Sendable {
 
 /// 从窗口图像里量三栏边界。
 ///
-/// **核心手法是纵向 / 横向平均**：消息气泡、头像、时间戳都是局部的矩形，对整列求平均之后
-/// 就被抹平了；而侧栏与聊天区的分界是**贯穿全高**的一条边，平均之后反而更干净。所以这里
-/// 不做边缘检测，只做"两侧均值差最大的位置"——它天然只对贯穿性的边界敏感。
+/// **判据是"贯穿性"，不是"对比强度"。** 一开始按强度找最强的竖边，结果被聊天气泡骗了：
+/// 气泡是左右交替、规律堆叠的，所有左对齐气泡的左边距在整列上凑成一条**真实**的竖边，
+/// 而且它与聊天背景的反差（0.145）远大于会话列表与聊天区的反差（0.035）——按强度选一定选它
+/// （自检实测量出 sidebar=364 = 侧栏 340 + 气泡左边距 24）。
+///
+/// 真正把两者分开的是**它在多少条扫描线上成立**：分栏边界从窗口顶边贯穿到底边，几乎每一行
+/// 都能看到同方向的阶跃；气泡边距只在有气泡的那些行上成立（实测约六成）。所以这里对每个候选
+/// 位置统计"同号且够大的扫描线占比"，先按占比过滤，再在过关的里面挑反差最大的。
 enum PaneDetector {
 
     /// 采样上限。边界只要精确到点级，再细没意义，还白烧内存。
@@ -65,14 +70,20 @@ enum PaneDetector {
     /// 求均值的半窗（采样点）。取 6：比 1 px 分隔线宽，又远小于任何一栏的宽度。
     static let band = 6
 
-    /// 认定"这是一条边界"的最小两侧均值差（亮度 0–1）。
+    /// 单条扫描线上算"这里有阶跃"的最小两侧均值差（亮度 0–1，≈ 1.5/255）。
+    static let perScanStep = 0.006
+
+    /// 一个候选位置至少要在这么大比例的扫描线上成立，才算**贯穿性**边界。
     ///
-    /// 取得很低（≈ 3/255）是**故意**的：会话列表与聊天面板在浅色模式下只差一点点灰度。
-    /// 防误判不靠这个阈值，靠的是搜索范围 + 纵向平均 + 最后的整体合理性校验。
-    static let minStep = 0.012
+    /// 0.85 而不是 1.0：真实窗口里侧栏顶部是它自己的搜索框、聊天区顶部是标题条，
+    /// 那几十行两侧可能恰好同色，贡献不了信号；留出余量，别因为几十行就否掉整条边。
+    static let minConsistency = 0.85
+
+    /// 过关之后还要满足的整体平均反差，挡掉"到处都差一点点"的噪声。
+    static let minStep = 0.010
 
     /// 侧栏右边界的搜索范围（点）。下限 120 是为了**跳过最左边那条竖排功能栏**
-    /// （约 60 pt，它与会话列表的反差比会话列表与聊天区大得多，不跳过就一定选中它）。
+    /// （约 60 pt，它同样是贯穿性边界，不跳过就会选中它）。
     static let sidebarRange: ClosedRange<Double> = 120...600
     /// 标题条下边界的搜索范围（点，从窗口顶边往下量）。
     static let titleRange: ClosedRange<Double> = 24...140
@@ -105,50 +116,54 @@ enum PaneDetector {
         return bytes.map { Double($0) / 255 }
     }
 
-    /// 在 `[lower, upper)` 里找两侧均值差最大的下标。
-    static func strongestStep(_ profile: [Double], lower: Int, upper: Int)
-        -> (index: Int, magnitude: Double)? {
-        guard profile.count > 2 * band else { return nil }
-        let low = max(band, lower)
-        let high = min(profile.count - band, upper)
-        guard low < high else { return nil }
-        var best: (index: Int, magnitude: Double)?
-        for index in low..<high {
-            var left = 0.0, right = 0.0
-            for offset in 1...band {
-                left += profile[index - offset]
-                right += profile[index + offset - 1]
+    /// 一条量出来的边界。
+    struct Boundary: Sendable, Equatable {
+        var index: Int
+        /// 全部扫描线上两侧均值差的平均（带符号取绝对值）。
+        var magnitude: Double
+        /// 同号且够大的扫描线占比——这就是"贯穿性"。
+        var consistency: Double
+    }
+
+    /// 沿一个方向找贯穿性边界。
+    ///
+    /// `value(scan, position)`：`scan` 是扫描线序号（找竖边时是行，找横边时是列），
+    /// `position` 是要定位的那个坐标。两个方向共用这一份实现，避免写两遍容易写反的下标。
+    static func boundary(positions: Range<Int>, positionCount: Int, scanCount: Int,
+                         value: (_ scan: Int, _ position: Int) -> Double) -> Boundary? {
+        let low = max(band, positions.lowerBound)
+        let high = min(positionCount - band, positions.upperBound)
+        guard low < high, scanCount > 0 else { return nil }
+        var positive = [Int](repeating: 0, count: positionCount)
+        var negative = [Int](repeating: 0, count: positionCount)
+        var sum = [Double](repeating: 0, count: positionCount)
+        // 每条扫描线先做一次前缀和，band 均值就是 O(1)（否则是 O(band)，候选一多就慢）。
+        var prefix = [Double](repeating: 0, count: positionCount + 1)
+        for scan in 0..<scanCount {
+            for position in 0..<positionCount {
+                prefix[position + 1] = prefix[position] + value(scan, position)
             }
-            let magnitude = abs(left - right) / Double(band)
-            if magnitude > (best?.magnitude ?? 0) { best = (index, magnitude) }
+            for position in low..<high {
+                let left = (prefix[position] - prefix[position - band]) / Double(band)
+                let right = (prefix[position + band] - prefix[position]) / Double(band)
+                let delta = left - right
+                if delta >= perScanStep {
+                    positive[position] += 1
+                } else if delta <= -perScanStep {
+                    negative[position] += 1
+                }
+                sum[position] += delta
+            }
         }
-        guard let best, best.magnitude >= minStep else { return nil }
+        var best: Boundary?
+        for position in low..<high {
+            let consistency = Double(max(positive[position], negative[position])) / Double(scanCount)
+            guard consistency >= minConsistency else { continue }
+            let magnitude = abs(sum[position]) / Double(scanCount)
+            guard magnitude >= minStep, magnitude > (best?.magnitude ?? 0) else { continue }
+            best = Boundary(index: position, magnitude: magnitude, consistency: consistency)
+        }
         return best
-    }
-
-    /// 逐列均值（只取中间那条横带，避开标题条与输入框）。
-    static func columnProfile(_ pixels: [Double], width: Int, height: Int) -> [Double] {
-        let top = height / 4
-        let bottom = max(top + 1, height * 3 / 4)
-        var profile = [Double](repeating: 0, count: width)
-        for column in 0..<width {
-            var sum = 0.0
-            for row in top..<bottom { sum += pixels[row * width + column] }
-            profile[column] = sum / Double(bottom - top)
-        }
-        return profile
-    }
-
-    /// 逐行均值（只取聊天区那些列，避开侧栏）。
-    static func rowProfile(_ pixels: [Double], width: Int, height: Int, fromColumn: Int) -> [Double] {
-        let first = min(max(0, fromColumn), width - 1)
-        var profile = [Double](repeating: 0, count: height)
-        for row in 0..<height {
-            var sum = 0.0
-            for column in first..<width { sum += pixels[row * width + column] }
-            profile[row] = sum / Double(width - first)
-        }
-        return profile
     }
 
     /// 从窗口图像量三条边界。`windowSize` 是窗口的**点**尺寸（图像可能是 2x）。
@@ -168,37 +183,52 @@ enum PaneDetector {
         func rows(_ points: Double) -> Int { Int((points / pointsPerRow).rounded()) }
 
         var found = 0
-        var total = 0
 
         // —— ① 侧栏右边界 ——
-        total += 1
-        let columnValues = columnProfile(pixels, width: width, height: height)
+        //
+        // 扫描线**不能取全高**：深色模式下输入框常比会话列表更暗，而聊天区比它更亮，
+        // 于是同一条侧栏边界在输入框那几行上阶跃方向是反的，一致性被拉到 0.79 掉出阈值
+        // （自检里"深色三栏"那份就是这个）。所以只扫"无论标题条与输入框多高，都保证落在
+        // 聊天区里"的中间带——它由两个搜索范围的上界推出来，不是又一个拍脑袋的常数。
+        // 带子太窄（窗口很矮）就退回全高，宁可少一次检测也不要没有扫描线。
+        let middleTop = rows(titleRange.upperBound)
+        let middleBottom = rows(Double(windowSize.height) - composerRange.upperBound)
+        let middleIsUsable = middleBottom - middleTop >= 80
+        let sidebarScanFirst = middleIsUsable ? middleTop : 0
+        let sidebarScanCount = middleIsUsable ? middleBottom - middleTop : height
+
         var sidebarRight = fallback.sidebarRight
-        if let step = strongestStep(columnValues,
-                                    lower: columns(sidebarRange.lowerBound),
-                                    upper: columns(sidebarRange.upperBound)) {
+        if let step = boundary(positions: columns(sidebarRange.lowerBound)..<columns(sidebarRange.upperBound),
+                               positionCount: width, scanCount: sidebarScanCount,
+                               value: { row, column in
+                                   pixels[(sidebarScanFirst + row) * width + column]
+                               }) {
             sidebarRight = Double(step.index) * pointsPerColumn
             found += 1
         }
 
-        // —— ② / ③ 标题条与输入框：只在聊天区那些列上找，避开会话列表的行结构 ——
-        let rowValues = rowProfile(pixels, width: width, height: height,
-                                   fromColumn: columns(sidebarRight))
-        total += 1
+        // —— ② / ③ 标题条与输入框：扫描线是**聊天区那些列**（避开会话列表自己的行结构）——
+        let chatFirstColumn = min(max(0, columns(sidebarRight)), width - 1)
+        let chatColumnCount = width - chatFirstColumn
+        func chatValue(_ scan: Int, _ position: Int) -> Double {
+            pixels[position * width + chatFirstColumn + scan]
+        }
+
         var titleBottom = fallback.titleBottom
-        if let step = strongestStep(rowValues,
-                                    lower: rows(titleRange.lowerBound),
-                                    upper: rows(titleRange.upperBound)) {
+        if let step = boundary(positions: rows(titleRange.lowerBound)..<rows(titleRange.upperBound),
+                               positionCount: height, scanCount: chatColumnCount,
+                               value: chatValue) {
             titleBottom = Double(step.index) * pointsPerRow
             found += 1
         }
 
-        total += 1
         var composerTop = fallback.composerTop
         // 输入框是从**底边**往上量的，换算成行下标要用窗口高度减一下。
         let composerLower = rows(Double(windowSize.height) - composerRange.upperBound)
         let composerUpper = rows(Double(windowSize.height) - composerRange.lowerBound)
-        if let step = strongestStep(rowValues, lower: composerLower, upper: composerUpper) {
+        if let step = boundary(positions: composerLower..<composerUpper,
+                               positionCount: height, scanCount: chatColumnCount,
+                               value: chatValue) {
             composerTop = Double(step.index) * pointsPerRow
             found += 1
         }
@@ -211,7 +241,7 @@ enum PaneDetector {
               sidebarRight > 0, titleBottom >= 0,
               composerTop <= Double(windowSize.height) else { return fallback }
 
-        let source: PaneLayout.Source = found == total ? .detected : (found == 0 ? .defaults : .partial)
+        let source: PaneLayout.Source = found == 3 ? .detected : (found == 0 ? .defaults : .partial)
         return PaneLayout(sidebarRight: sidebarRight, titleBottom: titleBottom,
                           composerTop: composerTop, source: source)
     }
@@ -250,8 +280,10 @@ struct PaneFixture: Sendable {
     var expectedSource: PaneLayout.Source = .detected
 
     var expected: PaneLayout {
-        PaneLayout(sidebarRight: Double(sidebar), titleBottom: Double(titleBar),
-                   composerTop: Double(height - composer), source: expectedSource)
+        // 一条都量不到时 `detect` 原样返回兜底那一组，所以期望值就是 fallback 本身。
+        guard expectedSource != .defaults else { return fallback }
+        return PaneLayout(sidebarRight: Double(sidebar), titleBottom: Double(titleBar),
+                          composerTop: Double(height - composer), source: expectedSource)
     }
 
     /// 兜底值故意**都取错**（差 60–120 点），这样"检测生效了"与"退回兜底了"能分辨开。

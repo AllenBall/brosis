@@ -133,6 +133,9 @@ final class CaptureController: NSObject, @unchecked Sendable {
     private var stats = Stats()
     private var previousHash: DHash?
     private var previousGrid: [UInt8]?
+    /// 上一次窗口定向截图的目标窗口。换了窗口就得重置门控基线——
+    /// 拿上一个窗口的 dHash 跟这一个比，第一帧一定判成"大幅变化"。
+    private var previousWindowID: CGWindowID?
     /// 前台应用与它的采集档位。由 `AppDelegate` 在焦点变化时推进来——
     /// 截图跑在 utility 队列上，不能在那里去问 `NSWorkspace.frontmostApplication`。
     private var frontmostBundleID: String?
@@ -381,6 +384,49 @@ final class CaptureController: NSObject, @unchecked Sendable {
 
     // MARK: - 截图
 
+    /// 找这个应用**用来定向截图**的那个窗口。
+    ///
+    /// 判据只用 ScreenCaptureKit 自己给的东西：属于这个 bundle id、在屏上、普通窗口层
+    /// （`windowLayer == 0` 排掉面板、浮层、输入法候选框）、够大、面积最大的那个。
+    /// **不问 AX**：微信的 AX 本来就慢且常超时（M0：6 条观察里 2 条超时），而截图跑在
+    /// utility 队列上，更不该在那里发 AX 消息。
+    ///
+    /// 多窗口时"面积最大"只是启发式——微信开着聊天主窗口和一个小的图片查看窗口时，
+    /// 取的是主窗口。这与事件骨架认定的焦点窗口可能不是同一个，所以 `handleFrame`
+    /// 那道 bundle id 校验仍然是必要的（它挡的是**换了应用**，不是换了窗口）。
+    static func targetWindow(in content: SCShareableContent, bundleID: String?) -> SCWindow? {
+        let candidates = content.windows.map {
+            WindowCandidate(id: $0.windowID, bundleID: $0.owningApplication?.bundleIdentifier,
+                            isOnScreen: $0.isOnScreen, layer: $0.windowLayer, frame: $0.frame)
+        }
+        guard let picked = Self.pickTarget(candidates, bundleID: bundleID) else { return nil }
+        return content.windows.first { $0.windowID == picked.id }
+    }
+
+    /// `SCWindow` 里挑窗口真正要用的那几个字段。抽出来是为了让挑选规则能脱离
+    /// ScreenCaptureKit 单独测——`SCShareableContent` 造不出来。
+    struct WindowCandidate: Sendable, Equatable {
+        var id: CGWindowID
+        var bundleID: String?
+        var isOnScreen: Bool
+        var layer: Int
+        var frame: CGRect
+    }
+
+    /// 窗口太小就不当主窗口（输入法候选框、提示气泡都可能是 layer 0）。
+    static let minTargetSide: Double = 200
+
+    /// 挑选规则本体（纯函数）。
+    static func pickTarget(_ candidates: [WindowCandidate], bundleID: String?) -> WindowCandidate? {
+        guard let bundleID, !bundleID.isEmpty else { return nil }
+        return candidates
+            .filter {
+                $0.bundleID == bundleID && $0.isOnScreen && $0.layer == 0
+                    && $0.frame.width >= minTargetSide && $0.frame.height >= minTargetSide
+            }
+            .max { $0.frame.width * $0.frame.height < $1.frame.width * $1.frame.height }
+    }
+
     private func capture(reason: String) async {
         defer { finish() }
         let started = Date()
@@ -398,18 +444,39 @@ final class CaptureController: NSObject, @unchecked Sendable {
                     ?? content.displays.first else {
                 throw CaptureError.noDisplay
             }
-            // 3.12：排除列表 = 所有解析结果为「不采集」的运行中应用
-            // （内置默认清单 + 用户改档 + 今日临时暂停都在 resolve 里合过了）。
-            // 顺带把没见过的 bundle id 登记进 app_policies，第二轮的应用清单窗口要用。
-            let excluded = content.applications.filter {
-                self.policy.resolve(bundleID: $0.bundleIdentifier).mode == .none
-            }
-            let filter = SCContentFilter(display: display,
+            // —— 窗口定向截图（M2，规则声明 `capturesWindow` 的应用才走）——
+            //
+            // **这条路会连被别的窗口盖住的部分一起采**（`desktopIndependentWindow` 是单独渲染
+            // 那个窗口，不是从屏幕合成图里裁）。这是 2026-09-08 用户明确选的，它**放宽了**
+            // 3.3「只入库视口内实际显示的内容」——库里可能出现用户当时其实看不见的内容。
+            // 换来的是：图像边界就是窗口边界（分栏检测不用再猜尺度）、坐标换算少一层、
+            // 别的应用的画面根本不进这张图。
+            let bundleID = withStateLock { frontmostBundleID }
+            let target = AdapterRegistry.rule(for: bundleID).capturesWindow
+                ? Self.targetWindow(in: content, bundleID: bundleID)
+                : nil
+
+            let filter: SCContentFilter
+            let configuration = SCStreamConfiguration()
+            if let target {
+                // 定向截图只含这一个窗口，所以不需要「不采集」排除列表——
+                // 别的应用本来就不在图里。前台应用自己的档位在 `requestCapture` 已经判过。
+                filter = SCContentFilter(desktopIndependentWindow: target)
+                configuration.width = max(1, Int(target.frame.width.rounded()))
+                configuration.height = max(1, Int(target.frame.height.rounded()))
+            } else {
+                // 3.12：排除列表 = 所有解析结果为「不采集」的运行中应用
+                // （内置默认清单 + 用户改档 + 今日临时暂停都在 resolve 里合过了）。
+                // 顺带把没见过的 bundle id 登记进 app_policies，第二轮的应用清单窗口要用。
+                let excluded = content.applications.filter {
+                    self.policy.resolve(bundleID: $0.bundleIdentifier).mode == .none
+                }
+                filter = SCContentFilter(display: display,
                                          excludingApplications: excluded,
                                          exceptingWindows: [])
-            let configuration = SCStreamConfiguration()
-            configuration.width = display.width           // 点尺寸 = 1x
-            configuration.height = display.height
+                configuration.width = display.width           // 点尺寸 = 1x
+                configuration.height = display.height
+            }
             configuration.captureDynamicRange = .SDR
             configuration.pixelFormat = kCVPixelFormatType_32BGRA
             configuration.colorSpaceName = CGColorSpace.sRGB
@@ -420,7 +487,8 @@ final class CaptureController: NSObject, @unchecked Sendable {
                                                                    configuration: configuration)
             let elapsedMs = Date().timeIntervalSince(started) * 1000
             analyze(image, displayID: display.displayID, reason: reason,
-                    pointWidth: display.width, elapsedMs: elapsedMs)
+                    pointWidth: configuration.width, elapsedMs: elapsedMs,
+                    window: target.map { (id: $0.windowID, frame: $0.frame) })
         } catch {
             let nsError = error as NSError
             let permissionLost = !Permissions.snapshot().screenRecording
@@ -432,13 +500,26 @@ final class CaptureController: NSObject, @unchecked Sendable {
     }
 
     /// 像素只在这里用一次：dHash + 32×32 网格，然后随 CGImage 一起丢弃。
+    /// - Parameter window: 这张图是**某个窗口**而不是整块显示器时，它的 id 与 AX 矩形。
+    ///   `frame` 会一路传给 `handleFrame` 当作"这张图覆盖的 AX 范围"——
+    ///   裁剪那套换算对显示器和窗口是同一套（只差原点与缩放），所以不用改。
     private func analyze(_ image: CGImage, displayID: UInt32, reason: String,
-                         pointWidth: Int, elapsedMs: Double) {
+                         pointWidth: Int, elapsedMs: Double,
+                         window: (id: CGWindowID, frame: CGRect)? = nil) {
         let hash = hasher.hash(cgImage: image)
         let grid = hasher.luminanceGrid(cgImage: image)
 
+        var targetChanged = false
         let (hamming, changedCells, changedRatio, gated, count) = withStateLock {
             () -> (Int?, Int?, Double?, Bool, Int) in
+            // 换了目标窗口（或在窗口 / 显示器两种取法之间切换）就把基线清掉：
+            // 拿上一个窗口的 dHash 跟这一个比毫无意义，第一帧必然判成"大幅变化"。
+            if previousWindowID != window?.id {
+                previousWindowID = window?.id
+                previousHash = nil
+                previousGrid = nil
+                targetChanged = true
+            }
             let hamming = (hash != nil && previousHash != nil) ? previousHash!.hamming(to: hash!) : nil
             var cells: Int? = nil
             var ratio: Double? = nil
@@ -471,10 +552,20 @@ final class CaptureController: NSObject, @unchecked Sendable {
         // `bundleID` 一路带进 `handleFrame`：上下文是上一次 AX 扫描留下的，
         // 而私密浏览 / AX 超时那几支根本不扫描，前台却已经换了人——不核身份就会串台。
         let bundleID = withStateLock { frontmostBundleID }
+        // 只在目标真的换了的时候记（换窗口 / 在窗口与显示器两种取法之间切换），不是每帧。
+        if targetChanged {
+            recorder.logEvent(kind: "capture_target_changed",
+                              detail: "bundle=\(bundleID ?? "(unknown)") "
+                                    + (window.map { "mode=window id=\($0.id) "
+                                        + "size=\(Int($0.frame.width))x\(Int($0.frame.height))" }
+                                       ?? "mode=display display=\(displayID)"))
+        }
         coordinator.noteFrameGate(bundleID: bundleID, gated: gated)
+        // 窗口定向截图时这张图覆盖的是**窗口**而不是显示器，裁剪的参照要跟着换。
         let ocrRegions = coordinator.handleFrame(image, displayID: displayID, recorder: recorder,
                                                  gated: gated, trigger: reason,
-                                                 bundleID: bundleID)
+                                                 bundleID: bundleID,
+                                                 displayBoundsOverride: window?.frame)
 
         recorder.recordCaptureStat(displayID: displayID,
                                    status: "complete",

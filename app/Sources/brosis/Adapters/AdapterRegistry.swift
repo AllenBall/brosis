@@ -133,7 +133,8 @@ enum AdapterRegistry {
                            minWidth: 240, minHeight: 120,
                            fallback: RelativeRect(x: 0.22, y: 0.08,
                                                   width: 0.78, height: 0.70))),
-                       read: .ocr, ocrFallback: false, required: true, clipToViewport: true),
+                       read: .ocr, ocrFallback: false, required: true, clipToViewport: true,
+                       pane: .chatPanel),
             RegionRule(name: "conversation_title", kind: .title,
                        locator: .insetRect(WindowInset(
                            left: resolvePoints(wechatSidebarKey,
@@ -144,18 +145,28 @@ enum AdapterRegistry {
                            fallback: RelativeRect(x: 0.22, y: 0.0,
                                                   width: 0.78, height: 0.08))),
                        read: .ocr, ocrFallback: false, required: false, clipToViewport: true,
-                       maxChars: 256),
+                       maxChars: 256, pane: .conversationTitle),
         ],
         chatLayout: ChatLayout(),
         limits: AX.BFSLimits(maxNodes: 300, maxDepth: 6),
         notes: "原生应用但 AX 正文为空（M0：0 字符、6 条里 2 条超时），所以 AX 一路都不走。"
-             + "区域按点数内缩（侧栏 340 / 标题条 60 / 输入框 180，均可用 defaults 校准）；"
-             + "M2 之前用的是比例，在 1085 pt 宽的窗口上把半个会话列表当成了聊天面板。"
+             + "截图走窗口定向（capturesWindow）：只截微信自己的焦点窗口，别的应用不进图；"
+             + "代价是 desktopIndependentWindow 会连**被别的窗口盖住的部分**一起采，"
+             + "放宽了 3.3「只入库视口内实际显示的内容」——2026-09-08 用户明确选的。"
+             + "分栏边界每帧从窗口图像现场量（PaneDetector）；量不到才退回点数兜底"
+             + "（侧栏 340 / 标题条 60 / 输入框 180，均可用 defaults 校准）。"
+             + "M2 之前是写死的比例，在 1085 pt 宽的窗口上把半个会话列表当成了聊天面板。"
              + "气泡归属按坐标：单聊左 = 对方、右 = 自己；群聊取气泡上方昵称，"
              + "是不是群聊由会话名的人数后缀「（29）」判定（AX 与窗口标题都给不出这个信号）。"
              + "语音只记 [语音]；图片、表情、视频、小程序只记画面上显示的文字。"
              + "用户拖过会话列表分隔线、或开了免打扰浮层，仍需重新校准侧栏宽度；"
-             + "支付 / 转账 / 红包界面与聊天一起记录，不特殊处理（D14 已定）。")
+             + "支付 / 转账 / 红包界面与聊天一起记录，不特殊处理（D14 已定）。",
+        paneFallback: PaneFallback(
+            sidebar: resolvePoints(wechatSidebarKey, default: wechatSidebarDefault, maximum: 900),
+            titleBar: resolvePoints(wechatTitleBarKey, default: wechatTitleBarDefault, maximum: 200),
+            composer: resolvePoints(wechatComposerKey,
+                                    default: wechatComposerDefault, maximum: 500)),
+        capturesWindow: true)
 
     // MARK: - 兜底
 
