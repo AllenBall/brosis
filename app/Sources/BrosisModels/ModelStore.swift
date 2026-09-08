@@ -3,13 +3,18 @@ import Foundation
 // =============================================================================
 // 模型目录（计划 3.11 / D18）
 //
-// **存放位置（D18）**：默认在**数据目录旁**的 `models/`，与加密库同级但不在库里：
-//     <数据目录>/../models/<模型 id>/
+// **存放位置（D18）**：默认在**数据目录里**的 `models/`，与加密库同级但不在库里：
+//     <数据目录>/models/<模型 id>/
 // 权重是公开的，所以**不加密、不进 iCloud 同步**（D18 原话）。
 // 可以用 `BROSIS_MODELS_DIR` 或 UserDefaults 的 `models.directory` 换路径。
 //
+// **2026-09-08 改过一次**：原来是"数据目录**旁**"（`<数据目录>/../models`），落到默认数据目录上
+// 就是 `~/Library/Application Support/models` —— 名字通用、在 brosis 文件夹外面、卸载时清不干净。
+// 挪进数据目录后 D18 的实质约束一条没变（库外、不加密、不同步；数据目录本身就禁止放同步盘，D16）。
+// 旧路径由 `migrateLegacyDefaultRoot` 在启动时一次性搬过来。
+//
 // 与 tools/e9 的 `ModelStore.swift` 的差别只有三处：
-//   1. 默认根目录换成"数据目录旁的 models/"（e9 是 ~/Library/Application Support/brosis-m0/models）；
+//   1. 默认根目录换成"数据目录里的 models/"（e9 是 ~/Library/Application Support/brosis-m0/models）；
 //   2. public 化；
 //   3. `importLocal` 多返回一个"每个文件的 sha256"，界面上要显示校验明细。
 // 断点续传、staging 复用、files 为空必须拒绝这几条 E9 验收发现都原样保留。
@@ -37,9 +42,55 @@ public enum ModelStore {
     /// UserDefaults 覆盖键（app 用；写绝对路径）。
     public static let directoryDefaultsKey = "models.directory"
 
-    /// 由数据目录推出模型目录：`<数据目录>/../models`（D18「默认在数据目录旁的 models/」）。
+    /// 由数据目录推出模型目录：`<数据目录>/models`（D18 的 models/，2026-09-08 起在数据目录**里**）。
     public static func defaultRoot(dataDirectory: URL) -> URL {
+        dataDirectory.appending(path: "models", directoryHint: .isDirectory)
+    }
+
+    /// 旧的默认模型根目录（0.2.0 及以前）：`<数据目录>/../models`。只给迁移和自检用。
+    public static func legacyDefaultRoot(dataDirectory: URL) -> URL {
         dataDirectory.deletingLastPathComponent().appending(path: "models", directoryHint: .isDirectory)
+    }
+
+    /// 一次性迁移：把旧默认根目录里已装好的模型搬进新的默认根目录。
+    ///
+    /// 规矩（旧路径 `~/Library/Application Support/models` 是个通用名字，不能整目录搬走）：
+    ///  - 只在**用默认根目录**时做：有 `BROSIS_MODELS_DIR` 或 `models.directory` 覆盖就一步不动；
+    ///  - 只搬**目录里有 `installed.json`** 的模型目录，旧根目录里别的东西一概不碰；
+    ///  - 新根目录已有同 id 就跳过（不覆盖已装模型），旧的留在原地等人工处置；
+    ///  - 搬完旧根目录只剩隐藏文件（`.DS_Store`、半截 `.staging-*`）才删它。
+    ///
+    /// 幂等：旧根目录不存在时立刻返回。返回搬过去的模型 id（按字典序）。
+    @discardableResult
+    public static func migrateLegacyDefaultRoot(dataDirectory: URL,
+                                                defaults: UserDefaults = .standard) throws -> [String] {
+        let resolved = resolveRoot(dataDirectory: dataDirectory, defaults: defaults)
+        guard resolved.source == "default" else { return [] }
+        let target = resolved.url
+        let legacy = legacyDefaultRoot(dataDirectory: dataDirectory)
+        guard legacy.standardizedFileURL != target.standardizedFileURL else { return [] }
+        let fm = FileManager.default
+        var isDirectory: ObjCBool = false
+        guard fm.fileExists(atPath: legacy.path, isDirectory: &isDirectory), isDirectory.boolValue else {
+            return []
+        }
+        var moved: [String] = []
+        for child in (try? fm.contentsOfDirectory(at: legacy, includingPropertiesForKeys: nil)) ?? [] {
+            let id = child.lastPathComponent
+            guard !id.hasPrefix(".") else { continue }
+            guard fm.fileExists(atPath: child.appending(path: "installed.json").path) else { continue }
+            let destination = directory(root: target, id: id)
+            guard !fm.fileExists(atPath: destination.path) else { continue }
+            try fm.createDirectory(at: target, withIntermediateDirectories: true)
+            try fm.moveItem(at: child, to: destination)
+            moved.append(id)
+        }
+        let leftovers = (try? fm.contentsOfDirectory(at: legacy, includingPropertiesForKeys: nil)) ?? []
+        let onlyHidden = !leftovers.contains { !$0.lastPathComponent.hasPrefix(".") }
+        if onlyHidden, !moved.isEmpty || leftovers.isEmpty {
+            try? fm.removeItem(at: legacy)
+        }
+        return moved.sorted()
     }
 
     /// 解析实际使用的模型根目录，并说明来源（自检与界面要显示）。

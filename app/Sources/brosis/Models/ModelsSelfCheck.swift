@@ -62,10 +62,21 @@ enum ModelsSelfCheck {
         let dataDirectory = DataLocation.resolve().url
         let resolved = ModelStore.resolveRoot(dataDirectory: dataDirectory)
         let expected = ModelStore.defaultRoot(dataDirectory: dataDirectory)
-        check("模型目录默认在数据目录旁的 models/（D18：不加密、不进 iCloud）",
+        check("模型目录默认在数据目录里的 models/（D18：不加密、不进 iCloud）",
               resolved.source != "default" || resolved.url.standardizedFileURL == expected.standardizedFileURL,
               "\(resolved.url.lastPathComponent)（来源 \(resolved.source)；"
               + "环境变量键 \(ModelStore.directoryEnvKey)，UserDefaults 键 \(ModelStore.directoryDefaultsKey)）")
+        // 2026-09-08 搬过一次家（`<数据目录>/../models` → `<数据目录>/models`）。
+        // 搬迁在 app 解锁后做，自检自己不动文件，所以这条**只报告不判失败**。
+        let legacyRoot = ModelStore.legacyDefaultRoot(dataDirectory: dataDirectory)
+        let legacyLeftovers = ((try? FileManager.default.contentsOfDirectory(
+            at: legacyRoot, includingPropertiesForKeys: nil)) ?? [])
+            .map(\.lastPathComponent)
+            .filter { !$0.hasPrefix(".") }
+        check("旧模型目录（数据目录旁的 models/）已搬空", true,
+              legacyLeftovers.isEmpty
+                  ? "旧目录不在了或已空"
+                  : "还剩 \(legacyLeftovers.joined(separator: " "))，app 下次解锁时搬（有 installed.json 的才搬）")
         let installed = ModelStore.isInstalled(root: resolved.url, id: Catalog.embeddingModelID)
         check("未安装嵌入模型时功能显示为「未启用」（3.11 降级表）", true,
               installed ? "本机已装 \(Catalog.embeddingModelID)"

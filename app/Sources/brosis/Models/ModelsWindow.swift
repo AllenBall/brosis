@@ -63,6 +63,23 @@ final class ModelsWindowController: NSObject, NSWindowDelegate,
         if EmbeddingScheduler.shared.isEnabled { EmbeddingScheduler.shared.start() }
     }
 
+    /// 模型根目录搬家（2026-09-08）：默认位置从 `<数据目录>/../models` 挪进 `<数据目录>/models`。
+    /// 由 AppDelegate 在**库解锁后**调一次（那时 `logEvent` 才写得进库）；幂等，
+    /// 有 `BROSIS_MODELS_DIR` / `models.directory` 覆盖时什么都不做。
+    func migrateModelsRootIfNeeded() {
+        // 用 DataLocation 而不是打开着的库：解析规则同一套（LockController 也走它），
+        // 而且库没开的时候也能算得出来。
+        let dataDirectory = DataLocation.resolve().url
+        do {
+            let moved = try ModelStore.migrateLegacyDefaultRoot(dataDirectory: dataDirectory)
+            guard !moved.isEmpty else { return }
+            recorder?.logEvent(kind: "models_dir_migrated",
+                               detail: "count=\(moved.count) ids=\(moved.joined(separator: ","))")
+        } catch {
+            recorder?.logEvent(kind: "models_dir_migrate_failed", detail: "\(error)")
+        }
+    }
+
     // MARK: - 状态（纯读，界面与菜单共用）
 
     struct PanelState {

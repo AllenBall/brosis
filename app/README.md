@@ -1397,9 +1397,13 @@ app **不内置、不自动下载**任何模型。清单 `catalog.json` 随包�
 下载器代码在 `BrosisModels/Downloader.swift`（E9 实测过：直连 12.3 MiB/s、镜像续传 HTTP 206），
 面板上的下载入口要显式打开 `models.allowDownload` 才出现。
 
-**存放位置（D18）**：默认 `<数据目录>/../models/<模型 id>/`，也就是数据目录**旁边**，
+**存放位置（D18）**：默认 `<数据目录>/models/<模型 id>/`，也就是数据目录**里面**，
 不在库里、**不加密、不进 iCloud 同步**（权重是公开的）。
 可用 `BROSIS_MODELS_DIR` 或 `defaults write com.brosis.app models.directory -string <路径>` 换。
+2026-09-08 之前默认在数据目录**旁边**（`<数据目录>/../models`，落到默认数据目录上就是
+`~/Library/Application Support/models`）；app 解锁时会把旧目录里带 `installed.json` 的模型
+搬进新目录一次（`ModelStore.migrateLegacyDefaultRoot`，事件 `models_dir_migrated`），
+旧目录里别的东西不碰。
 
 ### 13.3 夜间嵌入任务的门控（3.1 / D27 / 4.3）
 
@@ -1437,7 +1441,7 @@ app **不内置、不自动下载**任何模型。清单 `catalog.json` 随包�
 | `embedding.gpuSecondsUsed` / `embedding.gpuSecondsDay` | — | 今日 GPU 台账（本机策略，不进库、不同步） |
 | `embedding.overnightGPUSecondsUsed` / `embedding.overnightGPUSecondsDay` | — | **整晚建索引单独的一本账**（M2 d / T15，不占上面那 600 s 预算） |
 | `retrieval.vectorsEnabled` | false | 检索里用不用向量。**M2 d / T15 起解锁时会从这里恢复到 `store.retrieval`**（模型没装则强制关，3.11） |
-| `models.directory` | — | 模型根目录（不设就是数据目录旁的 `models/`） |
+| `models.directory` | — | 模型根目录（不设就是数据目录里的 `models/`） |
 | `models.allowDownload` | false | 面板里是否显示下载入口 |
 
 ### 13.5 打包（`build_app.sh` 新增的三件事）

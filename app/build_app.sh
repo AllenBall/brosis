@@ -434,7 +434,16 @@ if [ -d "$GATE_DIR" ]; then
   # 真实模型在的话再跑一次 selftest：它会加载 tokenizer 与权重，
   # 顺带把 swift-transformers 的 Hub.bundle 那条路也走一遍。没装模型时
   # selftest 自己打印 skipped 并以 0 退出，所以不用另外判断。
-  GATE_MODELS="${BROSIS_MODELS_DIR:-$HOME/Library/Application Support/brosis-m0/models}"
+  # 没有 BROSIS_MODELS_DIR 时按「新默认 → 旧默认」探测（2026-09-08 模型目录搬进了数据目录）。
+  GATE_MODELS="${BROSIS_MODELS_DIR:-}"
+  if [ -z "$GATE_MODELS" ]; then
+    for candidate in "$HOME/Library/Application Support/brosis/models" \
+                     "$HOME/Library/Application Support/models"; do
+      # 注意 set -e：这里必须写 if/fi，`[ -d x ] && …` 在不命中时整条列表返回 1，会打断构建。
+      if [ -d "$candidate" ]; then GATE_MODELS="$candidate"; break; fi
+    done
+    GATE_MODELS="${GATE_MODELS:-$HOME/Library/Application Support/brosis/models}"
+  fi
   if [ -d "$GATE_MODELS" ]; then
     if "$APP_BUNDLE/Contents/MacOS/brosis-embed" selftest --models-dir "$GATE_MODELS" \
          > "$SCRATCH/gate_embed_selftest.json" 2>&1; then

@@ -56,6 +56,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                     detail: "timeout=\(AX.messagingTimeout)s scope=process(system-wide) "
                           + "AXError=\(axTimeoutError.rawValue)"
                           + (axTimeoutError == .success ? "(success)" : "(FAILED)"))
+                // 模型根目录 2026-09-08 从 `<数据目录>/../models` 挪进 `<数据目录>/models`，
+                // 本进程搬一次（幂等；库这时已开，所以事件写得进去）。
+                ModelsWindowController.shared.migrateModelsRootIfNeeded()
             }
             self.syncSubsystems()
         }
