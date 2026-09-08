@@ -46,12 +46,16 @@ final class QueryEmbedderService: @unchecked Sendable {
     /// **开关的持久化在这里补上**（c 批只写了 UserDefaults，重启后 `store.retrieval` 回默认关，
     /// 面板显示与实际一致但用户上次的选择丢了）。恢复时仍然尊重 3.11 的
     /// 「未安装模型时强制关」：模型不在就不恢复，`search` 继续走 `disabled`。
+    /// 装了模型且用户没显式关过时**默认开**（2026-09-08 用户要求）。
     func attach(recorder: Recorder, store: Store) {
         let root = ModelStore.resolveRoot(dataDirectory: store.directory).url
         // D30：装了哪个尺寸由面板的当前选择决定，这里只问"有没有一个能用的"。
         let modelID = EmbeddingSelection.effectiveID(catalog: try? Catalog.load(), root: root)
         let installed = modelID.map { ModelStore.isInstalled(root: root, id: $0) } ?? false
-        let wanted = UserDefaults.standard.bool(forKey: Self.vectorsEnabledKey)
+        // 2026-09-08 用户要求：**有可用模型时默认打开**。
+        // 用户显式关过就尊重那次选择（键里有值），从没设过就当开；
+        // 3.11「未安装模型时强制关」仍然守着，所以还要 && installed。
+        let wanted = UserDefaults.standard.object(forKey: Self.vectorsEnabledKey) as? Bool ?? true
         store.retrieval.vectorsEnabled = wanted && installed
 
         lock.lock()

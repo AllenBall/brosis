@@ -191,7 +191,8 @@ enum ModelsSelfCheck {
             check("schema v4：chunks / vec_chunks 建好了", status0.tablePresent && status0.chunks == 0,
                   "维度 \(status0.dimension)（\(status0.elementType)），"
                   + "sqlite-vec \(status0.sqliteVecVersion)，已注册 \(status0.extensionRegistered)")
-            check("向量检索开关默认关（3.4 / 4.3）", !store.retrieval.vectorsEnabled)
+            check("core 里新开的库向量开关默认关（3.4 / 4.3；app 解锁时按 retrieval.vectorsEnabled 恢复，"
+              + "装了模型且用户没显式关过就默认开）", !store.retrieval.vectorsEnabled)
 
             // 运行时拼出来的稀有词，不让它以字面量形式留在二进制里
             let marker = "自检向量标记" + ["Z", "Q", String(4_217)].joined()

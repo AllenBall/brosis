@@ -1478,7 +1478,7 @@ D29 叙述下架后清单里没有生成模型；**D30（2026-09-08）起嵌入�
 | `embedding.batchSize` | 16 | 每批块数（D27 实测过的档） |
 | `embedding.gpuSecondsUsed` / `embedding.gpuSecondsDay` | — | 今日 GPU 台账（本机策略，不进库、不同步） |
 | `embedding.overnightGPUSecondsUsed` / `embedding.overnightGPUSecondsDay` | — | **整晚建索引单独的一本账**（M2 d / T15，不占上面那 600 s 预算） |
-| `retrieval.vectorsEnabled` | false | 检索里用不用向量。**M2 d / T15 起解锁时会从这里恢复到 `store.retrieval`**（模型没装则强制关，3.11） |
+| `retrieval.vectorsEnabled` | **未设 = 开** | 检索里用不用向量。解锁时恢复到 `store.retrieval`；**2026-09-08 起：装了可用模型且你没显式关过就默认开**，模型没装仍强制关（3.11） |
 | `models.directory` | — | 模型根目录（不设就是数据目录里的 `models/`） |
 | `models.embedding.current` | — | 当前生效的嵌入模型 id（D30；不设就取第一个装着的） |
 | `embedding.autoIndex` | **true** | 自动建索引总开关（D32：打开时 + 每小时） |

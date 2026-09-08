@@ -256,6 +256,8 @@ final class LockController {
     private(set) var directorySource: String
     private var store: Store?
     private var diskTimer: Timer?
+    /// 温度通知的 block 观察者 token（这条不能走 selector，见 `start()` 里的注释）。
+    private var thermalObserver: NSObjectProtocol?
     /// `locking` 期间到达、要等关库完成后才能补做的开库触发。
     private var pendingUnlock: LockTrigger?
     private let defaults: UserDefaults
@@ -296,9 +298,19 @@ final class LockController {
         distributed.addObserver(self, selector: #selector(screensaverStopped(_:)),
                                 name: Notification.Name("com.apple.screensaver.didstop"), object: nil)
 
-        NotificationCenter.default.addObserver(
-            self, selector: #selector(thermalChanged(_:)),
-            name: ProcessInfo.thermalStateDidChangeNotification, object: nil)
+        // 温度通知**不能用 selector 直接挂**（2026-09-08 实测崩溃两次）：
+        // `NSProcessInfoNotifyThermalState` 在后台队列上派发
+        // （com.apple.root.user-interactive-qos.overcommit），而这个类是 @MainActor，
+        // 一进 `@objc thermalChanged` 就撞上 Swift 的执行器断言 → SIGTRAP 直接杀进程。
+        // 其余几条（NSWorkspace、分布式通知）都是主线程派发的，所以只有这条要特殊处理。
+        // 改用 block 版观察者显式回主线程；`observers` 里存 token，`stop()` 负责摘掉。
+        thermalObserver = NotificationCenter.default.addObserver(
+            forName: ProcessInfo.thermalStateDidChangeNotification, object: nil, queue: nil
+        ) { [weak self] _ in
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated { self?.thermalChanged() }
+            }
+        }
 
         // 进程可能在已锁屏 / 屏保中启动：用现查的会话字典初始化暂停原因。
         if SystemState.screenLocked() { snapshot.pauseReasons.insert(.screenLocked) }
@@ -316,6 +328,10 @@ final class LockController {
         NSWorkspace.shared.notificationCenter.removeObserver(self)
         DistributedNotificationCenter.default().removeObserver(self)
         NotificationCenter.default.removeObserver(self)
+        if let thermalObserver {
+            NotificationCenter.default.removeObserver(thermalObserver)
+            self.thermalObserver = nil
+        }
         diskTimer?.invalidate()
         diskTimer = nil
     }
@@ -328,7 +344,8 @@ final class LockController {
     @objc private func screensaverStarted(_ note: Notification) { apply(.screensaverStarted) }
     @objc private func screensaverStopped(_ note: Notification) { apply(.screensaverStopped) }
 
-    @objc private func thermalChanged(_ note: Notification) {
+    /// 温度变化。**不再是 @objc**：它只能从上面那个 block 观察者里、在主线程上调。
+    private func thermalChanged() {
         let state = ProcessInfo.processInfo.thermalState
         recorder.logEvent(kind: "thermal_state", detail: "state=\(Self.describe(state))")
         if state == .critical { apply(.thermalCritical) }
