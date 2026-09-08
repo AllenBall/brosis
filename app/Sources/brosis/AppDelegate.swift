@@ -76,6 +76,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         AutoIndexScheduler.shared.configure(recorder: recorder)
         // D33：MCP 集成窗口（把 brosis 注册进各家 harness 的用户级配置 + 发 grant）。
         MCPIntegrationWindowController.shared.configure(recorder: recorder)
+        // D34：设置窗口 + 配额执行。配额此前只显示不执行（expireWithNotice 没人调），这里接上。
+        SettingsWindowController.shared.configure(recorder: recorder)
         // 2026-09-08：用户决定不要叙述功能，夜间叙述调度器**不再接线、不再启动**，
         // 菜单里也没有入口。core / app 里的叙述代码原样留着（休眠，自检仍跑它的纯逻辑用例），
         // 将来要恢复：装回生成模型、把清单条目加回 catalog.json、恢复这两行与 narrativeMenuItem()。
@@ -87,6 +89,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let exportController = ExportController()
         exportController.install(recorder: recorder)
         self.exportController = exportController
+        // D34：配额执行接在导出控制器之后——到线且通知未确认时它要弹加密导出窗口。
+        QuotaScheduler.shared.configure(recorder: recorder, exporter: exportController)
         _ = HotKeys.shared.install(recorder: recorder,
                                    onPause: { [weak lock] in lock?.togglePause() },
                                    onLock: { [weak lock] in lock?.lockNow() })
@@ -182,8 +186,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // 其余状态一律停"踢"，正在跑的任务由 OvernightIndexPolicy 的 locked_* / paused 收尾。
         if lock.snapshot.isRecording {
             AutoIndexScheduler.shared.start()
+            QuotaScheduler.shared.start()
         } else {
             AutoIndexScheduler.shared.stop()
+            QuotaScheduler.shared.stop()
         }
 
         if recording && permissions.screenRecording {
@@ -197,6 +203,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private func stopSubsystems(reason: String) {
         AutoIndexScheduler.shared.stop()
+        QuotaScheduler.shared.stop()
         events?.stop()
         events = nil
         guard let capture else { return }
@@ -466,6 +473,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(.separator())
         menu.addItem(ModelsMenu.menuItem())
         menu.addItem(MCPIntegrationWindowController.menuItem())
+        menu.addItem(SettingsWindowController.menuItem())
         let syncItem = NSMenuItem(title: "跨设备同步…（\(sync?.status.enabled == true ? "已开启" : "未开启")）",
                                   action: #selector(openSyncWindow), keyEquivalent: "")
         syncItem.target = self

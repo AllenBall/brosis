@@ -464,6 +464,9 @@ final class LockController {
         // E6 实测写入 ×1.38，D25 定为可选严格项；必须在**本进程第一次开库之前**设置才可靠，
         // 所以放在这里（这是采集端唯一的开库点）。
         options.cipherMemorySecurity = defaults.bool(forKey: "store.cipherMemorySecurity")
+        // D34：配额由设置窗口控制（口径是原文净载荷，不是数据库文件大小）。
+        // 运行时改了也会经 Store.setQuotaBytes 立刻生效，这里是开库时的初值。
+        options.quotaBytes = Settings.quotaBytes
         let provider = KeychainKeyProvider()
         Task.detached(priority: .userInitiated) {
             do {

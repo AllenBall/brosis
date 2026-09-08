@@ -1319,6 +1319,7 @@ enum SelfCheck {
         // 它不加载任何模型（向量那段用确定性伪嵌入），所以没装模型的机器上照样应该全过。
         failures += ModelsSelfCheck.run()
         failures += MCPIntegrationSelfCheck.run()
+        failures += SettingsSelfCheck.run()
 
         // ------------------------------------ 9. 夜间叙述（M2 c / T12，4.3 / 3.7 / 3.10 / D19）
         // 实现在 Models/NarrativeSelfCheck.swift（本文件同样只加这一行）。
