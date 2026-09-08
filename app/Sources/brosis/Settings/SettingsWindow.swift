@@ -63,7 +63,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         static let hintHeight = 16.0
         static let usageHeight = 34.0
         static let rowGap = 10.0
-        static let sectionGapAbove = 20.0
+        static let sectionGapAbove = 16.0
         static let sectionHeaderHeight = 18.0
         static let sectionGapBelow = 10.0
     }
@@ -101,15 +101,16 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
             top += height + Metrics.rowGap
         }
 
-        /// 灰色小字说明，挂在上一行控件正下方。
-        func hint(_ text: String) {
+        /// 灰色小字说明，挂在上一行控件正下方。长的给 2 行，别截成「…」。
+        func hint(_ text: String, lines: Int = 1) {
             top -= Metrics.rowGap - 2
-            let label = NSTextField(labelWithString: text)
+            let label = NSTextField(wrappingLabelWithString: text)
             label.font = .systemFont(ofSize: 11)
             label.textColor = .secondaryLabelColor
-            label.lineBreakMode = .byTruncatingTail
-            place(label, x: Metrics.controlX, width: Metrics.controlWidth, height: Metrics.hintHeight)
-            top += Metrics.hintHeight + Metrics.rowGap
+            label.maximumNumberOfLines = lines
+            let height = Metrics.hintHeight * Double(lines)
+            place(label, x: Metrics.controlX, width: Metrics.controlWidth, height: height)
+            top += height + Metrics.rowGap
         }
 
         private func place(_ view: NSView, x: Double, width: Double, height: Double,
@@ -155,13 +156,16 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         quotaRow.addSubview(stepper)
         quotaRow.addSubview(unitLabel)
         layout.row("最多占用磁盘", quotaRow, height: Metrics.controlHeight)
-        layout.hint("口径是原文净载荷——FTS 索引、向量、WAL 都不算在内，磁盘上的文件会比这个数大")
+        layout.hint("口径是原文净载荷——FTS 索引、向量、WAL 都不算在内，所以磁盘上的实际文件会比这个数大",
+                    lines: 2)
 
-        let usage = NSTextField(labelWithString: "")
+        // labelWithString("") 会把自己缩成几个 pt 宽，进 row() 后文字被裁到一个字不剩，
+        // 所以这里**显式给足宽度**（0.2.5 的「当前用量」和底部状态就是这么消失的）。
+        let usage = NSTextField(wrappingLabelWithString: "")
         usage.font = .systemFont(ofSize: 11)
         usage.textColor = .secondaryLabelColor
-        usage.lineBreakMode = .byWordWrapping
         usage.maximumNumberOfLines = 2
+        usage.frame = NSRect(x: 0, y: 0, width: Metrics.controlWidth, height: Metrics.usageHeight)
         usageLabel = usage
         layout.row("当前用量", usage, height: Metrics.usageHeight)
 
@@ -215,11 +219,11 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         layout.hint("夜间增量任务用；「现在开始建索引」另有一本账")
 
         // ---------------------------------------------------------------- 底部状态
-        let note = NSTextField(labelWithString: "")
+        let note = NSTextField(wrappingLabelWithString: "")
         note.font = .systemFont(ofSize: 11)
         note.textColor = .secondaryLabelColor
-        note.lineBreakMode = .byWordWrapping
         note.maximumNumberOfLines = 2
+        note.frame = NSRect(x: 0, y: 0, width: Metrics.controlWidth, height: 30)
         noteLabel = note
         layout.row(nil, note, height: 30)
 
