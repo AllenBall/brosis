@@ -145,6 +145,7 @@ extension Store {
         var thumbsDeleted = 0
         var sessionsStale = 0
         var ledgersStale = 0
+        var chunksDeleted = 0
 
         if !ids.isEmpty {
             for chunk in ids.chunked(into: 400) {
@@ -171,10 +172,12 @@ extension Store {
                 occDeleted += try conn.run("""
                     DELETE FROM occurrences WHERE device_id = ? AND observation_id IN (\(marks));
                     """, binds)
-                // 3) 无剩余引用的 text_version（+ 4) FTS 行，在同一个函数里显式删）
+                // 3) 无剩余引用的 text_version（+ 4) FTS 行 + v4 的 chunks / vec_chunks，
+                //    都在同一个函数里显式删）
                 let swept = try sweepOrphanVersions(candidates, conn: conn)
                 tvDeleted += swept.deleted
                 bytesFreed += swept.bytes
+                chunksDeleted += swept.chunks
                 // 6) 缩略图文件
                 thumbsDeleted += removeThumbnails(thumbs)
             }
@@ -189,18 +192,23 @@ extension Store {
         // 7) 审计行
         let deletionID = counters.deletion
         counters.deletion += 1
+        // D17 / 3.9：用户删除要能在另一台机器上作用于**同一批记录**，所以把目标按来源设备
+        // 分组、区间压缩后写进 `targets`（schema v5 的新列）。只有 `reason = 'user'` 写它——
+        // 配额过期是本机策略，不同步（3.8）。`targets` 在这里算，是因为再往后 `ids` 里
+        // 那些观察的 origin 列还在（墓碑只改 deleted_at，不删行）。
+        let targets = reason == .user ? try syncTargets(for: ids, conn: conn) : nil
         try conn.run("""
             INSERT INTO deletions(device_id, id, kind, reason, params, applied_at,
                                   observations_affected, occurrences_deleted, text_versions_deleted,
                                   fts_rows_deleted, sessions_stale, ledgers_stale,
-                                  thumbs_deleted, bytes_freed)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?);
+                                  thumbs_deleted, bytes_freed, targets)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?);
             """, [
                 .text(deviceID), .int(deletionID), .text(kind.rawValue), .text(reason.rawValue),
                 .text(try jsonObject(params)), .int(ts),
                 .int(Int64(obsMarked)), .int(Int64(occDeleted)), .int(Int64(tvDeleted)),
                 .int(Int64(ftsDeleted)), .int(Int64(sessionsStale)), .int(Int64(ledgersStale)),
-                .int(Int64(thumbsDeleted)), .int(Int64(bytesFreed)),
+                .int(Int64(thumbsDeleted)), .int(Int64(bytesFreed)), .optionalText(targets),
             ])
         try persistCounters()
 
@@ -208,7 +216,8 @@ extension Store {
                                observationsAffected: obsMarked, occurrencesDeleted: occDeleted,
                                textVersionsDeleted: tvDeleted, ftsRowsDeleted: ftsDeleted,
                                sessionsStale: sessionsStale, ledgersStale: ledgersStale,
-                               thumbsDeleted: thumbsDeleted, bytesFreed: bytesFreed)
+                               thumbsDeleted: thumbsDeleted, bytesFreed: bytesFreed,
+                               chunksDeleted: chunksDeleted)
     }
 
     // MARK: - 配额过期（3.8「自动过期」）
@@ -252,6 +261,7 @@ extension Store {
         var thumbsDeleted = 0
         var sessionsStale = 0
         var ledgersStale = 0
+        var chunksDeleted = 0
         var batches = 0
         var oldestTS: Int64?
         var newestTS: Int64?
@@ -295,6 +305,7 @@ extension Store {
             let swept = try sweepOrphanVersions(candidates, conn: conn)
             tvDeleted += swept.deleted
             bytesFreed += swept.bytes
+            chunksDeleted += swept.chunks
             let stale = try markDerivedStale(ids, conn: conn)
             sessionsStale += stale.sessions
             ledgersStale += stale.ledgers
@@ -329,7 +340,8 @@ extension Store {
                                       observationsAffected: obsDeleted, occurrencesDeleted: occDeleted,
                                       textVersionsDeleted: tvDeleted, ftsRowsDeleted: ftsDeleted,
                                       sessionsStale: sessionsStale, ledgersStale: ledgersStale,
-                                      thumbsDeleted: thumbsDeleted, bytesFreed: bytesFreed)
+                                      thumbsDeleted: thumbsDeleted, bytesFreed: bytesFreed,
+                                      chunksDeleted: chunksDeleted)
         return ExpireReport(quotaBytes: quota, beforeBytes: before, afterBytes: remaining,
                             warningThresholdCrossed: warn, summary: summary,
                             oldestDeletedTS: oldestTS, newestDeletedTS: newestTS, batches: batches)
@@ -337,10 +349,17 @@ extension Store {
 
     // MARK: - 共用小件
 
-    /// 删掉候选里已经没有任何 occurrence 的文本版本，并**显式**删对应的 FTS 行（D22：没有触发器）。
-    func sweepOrphanVersions(_ candidates: [Int64], conn: SQLiteConnection) throws -> (deleted: Int, bytes: Int) {
+    /// 删掉候选里已经没有任何 occurrence 的文本版本，并**显式**删对应的 FTS 行（D22：没有触发器）
+    /// 与向量行（v4：`vec_chunks` 是 `vec0` 虚拟表，外键管不到它）。
+    ///
+    /// v4 起的级联顺序：`chunks` 靠外键 `ON DELETE CASCADE` 跟着 `text_versions` 走，
+    /// 但要**先**把这些块的 `vrow` 取出来删 `vec_chunks`——否则块行没了就再也找不到向量行，
+    /// 留下一批永远查得到、却指向不存在的块的向量（`integrityReport` 里那两项就是钉这个的）。
+    func sweepOrphanVersions(_ candidates: [Int64], conn: SQLiteConnection) throws
+        -> (deleted: Int, bytes: Int, chunks: Int) {
         var deleted = 0
         var bytes = 0
+        var chunksDeleted = 0
         for tvID in candidates.sorted() {
             let left = try conn.scalarInt("""
                 SELECT COUNT(*) FROM occurrences WHERE device_id = ? AND text_version_id = ?;
@@ -352,13 +371,21 @@ extension Store {
             guard try st.step(), let vrow = st.int(0) else { st.finalize(); continue }
             let byteLen = Int(st.int(1) ?? 0)
             st.finalize()
+            // 先清向量行（虚拟表没有外键），再删版本让 chunks 随 CASCADE 走。
+            let chunkRows = try conn.intColumn("""
+                SELECT vrow FROM chunks WHERE device_id = ? AND text_version_id = ?;
+                """, [.text(deviceID), .int(tvID)])
+            for chunkVRow in chunkRows {
+                try conn.run("DELETE FROM vec_chunks WHERE chunk_rowid = ?;", [.int(chunkVRow)])
+            }
+            chunksDeleted += chunkRows.count
             try conn.run("DELETE FROM text_versions WHERE device_id = ? AND id = ?;",
                          [.text(deviceID), .int(tvID)])
             try conn.run("DELETE FROM text_fts WHERE rowid = ?;", [.int(vrow)])
             deleted += 1
             bytes += byteLen
         }
-        return (deleted, bytes)
+        return (deleted, bytes, chunksDeleted)
     }
 
     /// 派生结果只要证据命中被删观察就标 `stale` 待重算（3.8）。

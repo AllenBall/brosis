@@ -1074,7 +1074,7 @@ core 的 `brosis-store serve` 有个 `BROSIS_IPC_SKIP_CODESIGN=1` 的测试开�
 `brosis-mcp` 在 bundle 里：`/Applications/brosis.app/Contents/MacOS/brosis-mcp`
 （本轮还没装到 `/Applications`，路径按你实际放的位置写）。
 
-**第一步：建第一份 grant。** 没有 grant 的客户端**六个工具全拒**，这是 3.6 的口径，
+**第一步：建第一份 grant。** 没有 grant 的客户端**九个工具全拒**，这是 3.6 的口径，
 不是"先能用再收紧"。
 
 ```sh
@@ -1120,9 +1120,27 @@ claude mcp add brosis-lark --env BROSIS_CLIENT_ID=claude-code-lark \
        -- /Applications/brosis.app/Contents/MacOS/brosis-mcp
 ```
 
-**六个工具**：`search` / `get_evidence` / `get_context` / `get_timeline` / `get_day_ledger` /
-`get_item`，全部 `readOnlyHint = true`，参数与返回见 `core/README.md` 的
-「本地 IPC 与 `brosis-mcp`」一章。典型用法是 `search` 拿 `evidenceID`，再 `get_evidence` 展开原文。
+**九个工具**，全部 `readOnlyHint = true`（3.6：这只是给客户端看的提示，不是隔离；
+真正的只读保证在服务端——`StoreMCPService` 只调 `Store` 的查询方法，没有任何写入入口）。
+参数与返回见 `core/README.md` 的「本地 IPC 与 `brosis-mcp`」一章。
+
+| 工具 | 干什么 | 典型用法 |
+|---|---|---|
+| `search(q, start, end, app, limit)` | 三通道检索，每条 ≤ 100 token 摘要 + `evidenceID` | 找东西的入口 |
+| `get_evidence(ids)` | 按 `evidenceID` 展开原文与出现上下文 | 接在 `search` 后面；**受 grant 的 `fields` 限制** |
+| `get_context(hours, max_tokens)` | 最近 N 小时的活动摘要 + 正文片段，按 token 预算截断 | "我刚才在干什么" |
+| `get_timeline(start, end, granularity)` | hour / day / week 分桶的活动时间线 | 画趋势 |
+| `get_day_ledger(date)` | 某一自然日的确定性台账 | "上周三我一天怎么过的" |
+| `get_item(url \| path \| app)` | 某个 URL / 文件 / 应用的汇总 | "这个文档我看过几次" |
+| **`get_week_ledger(week)`**（M2） | 某一 ISO 周的台账（7 个日台账聚合），含 7 行按天分布 | "上周整体怎么样" |
+| **`get_patterns(start, end)`**（M2） | 星期 × 小时热力、每应用常用时段、会话长度与打断率、最常切换对、连续工作块 | "我一般几点效率最高" |
+| **`recent_activity(minutes, max_items)`**（M2） | 最近 N 分钟的应用聚合 + 会话 + ≤ 100 token 的观察摘要 | 最轻的一条"现在在干什么" |
+
+典型用法是 `search` 拿 `evidenceID`，再 `get_evidence` 展开原文。
+后三个是 M2 c 批 / T14 补的（3.6 里写明"放 M2"的那三样），**全部确定性、不经过任何模型**；
+台账上的 `narrative` 字段是另一条可选的夜间叙述任务贴的标注，与台账分开标注（3.7），
+没跑过就是 `null`。**应用白名单生效时 `get_patterns` 是换输入重算**（热力图 / 切换对 / 工作块
+都只用白名单内应用的观察），返回值里的 `appFilter` 与 `scopeNote` 会说明这一点。
 
 **排查**：
 
@@ -1243,3 +1261,300 @@ claude mcp add brosis-lark --env BROSIS_CLIENT_ID=claude-code-lark \
   但没有真去发 Apple 事件（浏览器 URL 目前只走 AX）。
 - **AX 0.5 s 超时**仍只验到「SDK 文档 + 对 system-wide 元素返回 `.success`」，没有端到端计时证据。
 - 路径型 TCC 可见性、剪贴板 `accessBehavior` 都没碰。
+
+## 12. 跨设备同步（3.9 / D17，M2 c 批 / T13）
+
+### 12.1 三个新文件，`AppDelegate.swift` 一行没改
+
+| 文件 | 干什么 |
+|---|---|
+| `SyncController.swift` | 开关、定时循环、状态数据、事件记录；`install(lock:recorder:)` 挂到锁定状态机上 |
+| `SyncWindow.swift` | 设置窗口：开关、目录、配对口令、状态显示、「立即同步」 |
+| `SyncSelfCheck.swift` | 自检里的两库往返冒烟（无 GUI、无 TCC、不碰钥匙串） |
+
+**接入方式（由主会话加，两行 + 一个菜单项）**：
+
+```swift
+// AppDelegate.applicationDidFinishLaunching(_:)，lock 建好之后：
+sync = SyncController()
+sync.install(lock: lock, recorder: recorder)
+
+// 菜单里加一项（可选；窗口也能从 sync.presentWindow() 打开）：
+menu.addItem(NSMenuItem(title: "跨设备同步…", action: #selector(openSync), keyEquivalent: ""))
+@objc private func openSync() { sync?.presentWindow() }
+```
+
+`install` 会**链式保留** `LockController` 原有的 `onUnlocked` / `onLocking` 回调，不覆盖，
+所以加这两行不改变现有行为。自检那边也只加了一行 `failures += SyncSelfCheck.run()`。
+
+### 12.2 循环什么时候跑
+
+- 只在 `phase == .unlocked` 跑——库开着才有得读写；`locked` / `locking` / `unlocking` 全停。
+- **`paused` 不停同步**：暂停的是"采集新内容"，同步只是把已经采集到的东西搬进搬出，
+  不产生新观察、不看屏幕。这是一条判断，不是疏忽。
+- 默认 5 分钟一轮（3.9「定期（如每 5 分钟或每 N 条）」），一轮 = 入站 → 出站 → 清理。
+- 文件 I/O 与加密全在一条 utility 串行队列上，不占主线程；一轮没跑完不会再起一轮。
+
+### 12.3 UserDefaults 键
+
+| 键 | 默认 | 说明 |
+|---|---|---|
+| `sync.enabled` | `false` | 开关，3.9「默认关」 |
+| `sync.directory` | `~/Library/Mobile Documents/com~apple~CloudDocs/brosis-sync` | 高级选项可改成任意同步盘 / NAS |
+| `sync.intervalSeconds` | `300` | 下限 30 s |
+| `sync.deviceName` | 电脑名 | 只写进同步目录的 `devices/<id>.json`，**不入库** |
+
+### 12.4 打开开关时会发生什么（3.9「打开时的流程」）
+
+1. 目录路径含 `com~apple~CloudDocs` 但 iCloud Drive 目录不存在 → 报"iCloud 没登录 / 没启用"，开关保持关。
+2. 目录里没有 `manifest.json` → 建目录、生成同步密钥、写 manifest 与 `keyring/<本机>.wrapped`，
+   弹一次「配对口令（只显示这一次）」的对话框，可拷贝。**口令不存任何地方**，忘了只能重新配对。
+3. 目录里已有 `manifest.json` → 要求输入配对口令解开同步密钥；口令错就不加入（开关弹回关）。
+   加入成功后把同步密钥留在**本机加密库**里，以后重开 app 不再问口令。
+4. 写 `devices/<本机>.json`（设备名、加入时间、最后出站 seq），起循环。
+
+关掉开关：停两个循环，**本机已合并的数据保留**。"退出并删除本机段文件"是另一个独立操作，本轮没做。
+
+### 12.5 状态显示（3.9）
+
+窗口里有：上次同步时间、待导出条数（观察 / 删除）、待导入段数、本机段文件个数与目录字节、
+每台其他设备的「已导入到第几段 / 待导入几段 / 最后出现时间 / 错误」。
+错误分得细，能看出是**缺段**、**校验失败**（文件坏了）、**解密失败**（密钥不对）还是 **iCloud 还没下载**。
+
+### 12.6 事件
+
+同步的每一步都写 `jobs` 表的 `runtime_event:*`（与其他运行期事件一个口径）：
+`sync_folder_created` / `sync_joined` / `sync_enabled` / `sync_disabled` / `sync_round` /
+`sync_export` / `sync_import` / `sync_missing_segment` / `sync_import_failed` /
+`sync_manifest_conflict` / `sync_cleanup` / `sync_open_failed`。
+`sync_enabled` 只记目录**种类**（`icloud_drive` / `icloud_container` / `custom`），不记路径——
+路径里可能有用户名。
+
+### 12.7 需要你在两台真机上验证的
+
+见第 11 节新增的几条：真机同步延迟、iCloud 占位符驱逐后的下载等待、配对口令的一次性显示、
+两台机器同时首次打开时的 manifest 冲突提示。
+
+
+---
+
+## 13. 模型管理器与向量检索（3.4 / 3.11 / D18 / D27，M2 c 批 / T11）
+
+### 13.1 三个新文件 + 一个新目标，`AppDelegate.swift` 一行没改
+
+| 位置 | 是什么 |
+|---|---|
+| `Sources/BrosisModels/`（**新的库目标**） | 模型清单 `Catalog`、下载器 `HFDownloader`、模型目录 `ModelStore`、本地嵌入运行时 `MLXEmbeddingProvider`、D27 内存策略 `MLXMemoryPolicy`、GPU 冒烟 `MLXSmoke`。依赖 mlx-swift-lm **3.31.4** 与 swift-transformers **1.3.4**（版本固定，与 E9 实测过的那两个相同） |
+| `Sources/brosis/Models/ModelsWindow.swift` | 「模型与向量检索」面板 + 菜单接入点 `ModelsMenu` |
+| `Sources/brosis/Models/EmbeddingScheduler.swift` | 夜间嵌入任务的门控与调度 |
+| `Sources/brosis/Models/ModelsSelfCheck.swift` | 第 4 节自检的第 8 组（`SelfCheck.swift` 只加了一行） |
+| `Sources/brosis-embed/`（**新的可执行目标**） | 嵌入任务与查询向量的命令行入口，供 `tools/eval` 的 D8 实验与验收使用 |
+
+**为什么 mlx 放在 app 包而不是 core 包**：core 要保持零 mlx 依赖，
+`swift test --package-path core` 才不必解析、编译 mlx-swift（几分钟 + 数 GiB），
+`brosis-mcp` 也不会因此从 1 MiB 变成 40 MiB。core 只定义 `EmbeddingProvider` 协议
+（计划 3.10 的提供方抽象），这里给它一个本地实现。
+
+**接入方式（留给主会话，两行）**：
+
+```swift
+// AppDelegate.applicationDidFinishLaunching 里，recorder 与 lock 都就绪之后：
+ModelsWindowController.shared.configure(
+    recorder: recorder,
+    lockSnapshot: { [weak self] in self?.lock.snapshot ?? LockSnapshot() })
+// AppDelegate.refreshMenu() 里，「应用采集清单…」那一项后面：
+menu.addItem(ModelsMenu.menuItem())
+```
+
+菜单项标题自带状态后缀，不打开面板也能一眼看出向量检索开没开：
+`未启用：未安装嵌入模型` / `已装模型，尚未建索引` / `已建索引 N 块，检索开关关着` /
+`向量检索已开（N 块）`。
+
+### 13.2 默认零模型，未安装时功能显示为「未启用」（3.11）
+
+app **不内置、不自动下载**任何模型。清单 `catalog.json` 随包，**运行时不联网拉清单**；
+里面三项：`Qwen3-Embedding-0.6B-8bit`（嵌入，619.02 MiB，最低 8 GiB）、
+`Qwen3.5-4B-MLX-4bit`（生成，2.85 GiB，最低 16 GiB）、
+`gemma-4-26B-A4B-it-QAT-MLX-4bit`（最低 64 GiB，本机置灰并说明原因）。
+
+面板里能做四件事：**从本地目录导入**（复制进来 + 逐文件校验 sha256，只复制不引用）、
+**重新校验**、**移除**、**现在跑一次嵌入任务**。
+本轮**没有跑过任何下载**：两个模型是你此前已批准并下载好的，走的是本地导入。
+下载器代码在 `BrosisModels/Downloader.swift`（E9 实测过：直连 12.3 MiB/s、镜像续传 HTTP 206），
+面板上的下载入口要显式打开 `models.allowDownload` 才出现。
+
+**存放位置（D18）**：默认 `<数据目录>/../models/<模型 id>/`，也就是数据目录**旁边**，
+不在库里、**不加密、不进 iCloud 同步**（权重是公开的）。
+可用 `BROSIS_MODELS_DIR` 或 `defaults write com.brosis.app models.directory -string <路径>` 换。
+
+### 13.3 夜间嵌入任务的门控（3.1 / D27 / 4.3）
+
+九条判定全在 `EmbeddingGatePolicy.decide`（**纯函数**，自检整段跑 14 条用例），
+顺序有意义——先报你自己能改的那一条：
+
+| 顺序 | 不跑的原因 | 判据 |
+|---|---|---|
+| 1 | `disabled_by_user` | 面板里的「夜间自动建索引」没打开（**默认关**） |
+| 2 | `model_not_installed` | 嵌入模型没装 |
+| 3 | `nothing_pending` | 没有待办的块 |
+| 4 | `locked_*` | 锁定状态机不是 `unlocked` |
+| 5 | `paused` | 采集暂停（锁屏 / 用户暂停）——**锁定态不跑** |
+| 6 | `on_battery` | 没接电（`IOPSCopyPowerSourcesInfo`，不需要任何权限） |
+| 7 | `not_idle` | 空闲不足 **5 分钟**（`CGEventSource.secondsSinceLastEventType`，只问"多久没动"，不读事件内容） |
+| 8 | `thermal_*` | `ProcessInfo.thermalState != .nominal` —— **fair 就暂停**（D27：无风扇 Air 持续负载 2 分 10 秒转 fair，吞吐掉 33.6%） |
+| 9 | `gpu_budget_exhausted` | 今天的 GPU 预算用完（默认 **600 s = 10 分钟**，对应 4.3 验收「日均 GPU < 10 分钟」） |
+
+跑起来之后**每批再问一次**同样的条件，所以转 fair、拔电、你回来动鼠标都会当场干净停下，
+已经写进去的块保留（任务是幂等的，下次接着捡）。
+
+**内存（D27）**：加载模型**之前**设 `MLX.Memory.cacheLimit = 256 MiB`，任务结束
+`MLX.Memory.clearCache()`。批 16。本轮实测见结果文件。
+
+**事件**：每次运行往 `jobs` 写一行 `runtime_event:embedding_run`，
+`input_ref` 里有块数、剩余、GPU 秒数、**今日累计 GPU 秒数**、预算、停止原因、峰值 footprint、热状态。
+
+### 13.4 UserDefaults 键
+
+| 键 | 默认 | 说明 |
+|---|---|---|
+| `embedding.enabled` | false | 夜间自动建索引 |
+| `embedding.dailyGPUSeconds` | 600 | 日均 GPU 预算（秒） |
+| `embedding.batchSize` | 16 | 每批块数（D27 实测过的档） |
+| `embedding.gpuSecondsUsed` / `embedding.gpuSecondsDay` | — | 今日 GPU 台账（本机策略，不进库、不同步） |
+| `retrieval.vectorsEnabled` | false | 检索里用不用向量 |
+| `models.directory` | — | 模型根目录（不设就是数据目录旁的 `models/`） |
+| `models.allowDownload` | false | 面板里是否显示下载入口 |
+
+### 13.5 打包（`build_app.sh` 新增的三件事）
+
+1. **现编 `mlx.metallib`**（`Support/build_metallib.sh`，要 Metal Toolchain）放进
+   `Contents/Resources/mlx-swift_Cmlx.bundle/default.metallib`。
+   位置不能换：`Contents/MacOS/` 下的**任何**文件都被 codesign 当作嵌套代码去校验，
+   而 metallib 是 MTLB 格式、不是可签名的 Mach-O，放那儿必然报
+   `code object is not signed at all`（E9 实测）。
+2. 把 SwiftPM 生成的资源 bundle（`brosis_BrosisModels.bundle` 的清单、
+   `swift-transformers_Hub.bundle` 的 tokenizer 配置）拷进 `Contents/Resources`，
+   清单再平铺一份。
+3. 把 `brosis-embed` 放进 `Contents/MacOS` 并**单独签**（与 `brosis-mcp` 同一处理），
+   然后第 4c 步**从 bundle 里真跑一次 `brosis-embed env`**：GPU 冒烟必须算对、
+   sqlite-vec 必须已注册、清单至少两项，否则构建失败。
+
+### 13.6 `brosis-embed` 用法
+
+```sh
+APP=~/Library/Caches/brosis-build/<你的 scratch>/brosis.app
+"$APP/Contents/MacOS/brosis-embed" env
+"$APP/Contents/MacOS/brosis-embed" models --dir <数据目录> --list
+"$APP/Contents/MacOS/brosis-embed" models --dir <数据目录> --import \
+    --id Qwen3-Embedding-0.6B-8bit --from <已下载好的模型目录>
+"$APP/Contents/MacOS/brosis-embed" embed --dir <数据目录> --key-file <密钥> --batch 16
+"$APP/Contents/MacOS/brosis-embed" queries --file <[{"id","q"}…]> --out <向量表.json> \
+    --models-dir <模型目录>
+```
+
+`queries` 出的向量表喂给 `brosis-store search-batch --vectors --query-vectors <向量表>`，
+就是 D8 实验的那条路（见 `tools/eval/run_d8.sh`）。
+
+### 13.7 `brosis-embed selftest`：**用真实模型**的那一组断言
+
+core 的 `swift test` 一条都不碰模型（那边用确定性伪嵌入），所以「真实模型到底对不对」
+只能在这里验。**模型没装时打印 `skipped` 并以退出码 0 结束**，CI 上没有模型也不会红。
+
+```sh
+"$APP/Contents/MacOS/brosis-embed" selftest --models-dir <模型目录>
+```
+
+六条断言，本机（Qwen3-Embedding-0.6B-8bit）实测全过：
+
+| 断言 | 实测 |
+|---|---|
+| 维度 = 512（MRL 截断自 1024） | `[512, 512, 512]` |
+| 截断后重新 L2 归一化 | `1.000000` × 3 |
+| 同一批构造下两次嵌入逐位相同 | 逐位相同 |
+| **换批大小只改动 1e-3 量级**（E9 已知限制，不是 bug） | 批 1 vs 批 3 的余弦 **0.999997** |
+| 近义句余弦 > 无关句余弦 + 0.2 | **0.8370 vs 0.2920**（E9 在 Max 上是 0.87 / 0.24） |
+| int8 量化后余弦误差 < 0.01 且排序不变 | 0.8370→0.8373、0.2920→0.2918 |
+
+模型加载 **0.998 s**，单次查询工作负载 peak footprint **799.9 MiB**。
+
+---
+
+## 14. 夜间叙述（4.3 / 3.7 / 3.10 / D19 / D27，M2 c 批 / T12）
+
+### 14.1 四个新文件，`AppDelegate.swift` 一行没改
+
+| 文件 | 做什么 |
+|---|---|
+| `Sources/BrosisModels/MLXGenerationProvider.swift` | 本地生成运行时（mlx-swift-lm 的 `LLMModelFactory` + `ChatSession`），实现 core 的 `GenerationProvider` |
+| `Sources/brosis/Models/NarrativeScheduler.swift` | 夜间叙述任务的门控与调度（复用 T11 的环境采集与 GPU 预算账） |
+| `Sources/brosis/Models/NarrativeSelfCheck.swift` | 自检第 9 组（门控 15 条、提示裁剪、忠实度 6 条、端到端）——`SelfCheck.swift` **只加一行** |
+| `Sources/brosis/Models/NarrativeSmoke.swift` | `--narrative-smoke`：用**真实模型**跑一次（`main.swift` 只加三行） |
+
+`Package.swift` 只多一行：`BrosisModels` 加 `MLXLLM` 产品（同一个固定的 mlx-swift-lm 3.31.4）。
+
+**主会话接入**（两行，放在 `AppDelegate` 起 `EmbeddingScheduler` 的地方旁边）：
+
+```swift
+NarrativeScheduler.shared.configure(recorder: recorder, lockSnapshot: { lockController.snapshot })
+NarrativeScheduler.shared.start()      // 开关关着时 start() 里的定时器不做事
+```
+
+界面上要显示状态就调 `NarrativeScheduler.shared.statusLine()`，
+它已经把「未启用（没装生成模型 …）」「等待接电」「机器偏热，暂停」这类话翻译好了。
+
+### 14.2 门控：与嵌入任务同一套，同一本 GPU 账
+
+判定顺序与 `EmbeddingGatePolicy.decide` 逐条对齐（用户没开 → 模型没装 → 没有待办 →
+库锁着 → 已暂停 → 用电池 → 空闲不足 5 分钟 → 热状态非 nominal → GPU 预算用完）。
+
+**预算共用一本账**：4.3 验收写的是「日均 GPU < 10 分钟（若启用嵌入与叙述）」，
+那是两个任务**合起来**的一个预算，所以 `NarrativeScheduler` 直接用 T11 的 `GPUBudgetLedger`
+与同一组 UserDefaults 键（`embedding.dailyGPUSeconds` / `embedding.gpuSecondsUsed`）。
+叙述任务的定时器比嵌入任务晚 60 s 起跑，免得同一分钟里抢 GPU。
+
+一次 tick 最多写 4 篇，**每篇之前重新过一遍门控**（转 fair、拔电、用户回来动鼠标都当场停）。
+
+### 14.3 UserDefaults 键
+
+| 键 | 默认 | 含义 |
+|---|---|---|
+| `narrative.enabled` | `false` | 夜间叙述总开关 |
+| `narrative.daily` | `true` | 每天一次日叙述 |
+| `narrative.weekly` | `true` | 每周一次周叙述 |
+| `narrative.maxInputTokens` | 8000 | 输入上限，**只允许往小里调**（8,000 是 D19 实测的 TTFT 上界） |
+| `embedding.dailyGPUSeconds` | 600 | 与嵌入任务共用的日均 GPU 预算 |
+
+### 14.4 三条硬约束写死在代码里，不看调用方给什么
+
+1. **`enable_thinking = false`**（D19：思考模式在 Air 上 4,000 token / 124 s 不收敛，一个答案都没有）；
+2. **温度 0**（3.10）；
+3. 两道保险：墙钟超时（默认 60 s）中止；万一输出里真的出现 `<think>`，
+   再过 48 个 token 还没见到 `</think>` 就当场中止（`stopReason = thinking_not_closed`），
+   而且核对里 `thinking_detected` 直接判不通过。
+
+D27 照旧：加载前 `Memory.cacheLimit = 256 MiB`，任务结束 `clearCache()`。
+
+### 14.5 `--narrative-smoke`：用真实模型的那一次
+
+`--self-check` 里那一组用脚本化假提供方，几毫秒跑完、不碰 GPU、没装模型也全过。
+真实模型要 8–30 s，所以单独一个子命令，**不进默认自检**：
+
+```sh
+"$APP/Contents/MacOS/brosis" --narrative-smoke \
+    --dir <数据目录> --key-file <密钥文件> --models-dir <模型目录> \
+    --date 2026-08-23 --tz UTC --repeat 2 --out result.json
+```
+
+默认**不写库**（只生成 + 核对），加 `--commit` 才真的入库。
+输出里有 TTFT、tok/s、输入 token（分词器真值与估算器的比值）、峰值 footprint、
+热状态、两次生成是否逐字相同、以及忠实度核对的逐条结果。
+
+本机（M4 Air / 16 GiB / 无风扇）在 T3 的 1 个月合成库上实测，数字见
+`tools/bench/results/m2_c_narrative_2026-09-08.md`。
+
+### 14.6 体积
+
+加了 `MLXLLM` 之后 app 从 89.14 MiB 涨到 **99.79 MiB**
+（主程序 41.80 → 47.14、`brosis-embed` 40.23 → 45.52、metallib 2.99 不变）。
+`brosis-embed` 那一份是**可选的**（评估与验收工具，不是产品必需）：
+`build_app.sh` 里拷它那一行去掉，app 回到 54.27 MiB。

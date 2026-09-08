@@ -14,7 +14,16 @@ public enum Schema {
     /// - v3（M1 R2 / T8）：`capture_audit`（3.3「采样审计：AX 非空的观察每 N 次取一次全窗口 OCR
     ///   对照，计算覆盖率写入审计表」）+ `occurrences` 两个可空列 `confidence` / `note`
     ///   （视口 OCR 的片段置信度与低置信 token 计数，D24）。两处都是纯新增，老库 ALTER 就地迁移。
-    public static let version = 3
+    /// - v4（M2 c / T11）：`chunks` + `vec_chunks`（3.4「向量检索」、4.3「若 D8 通过：嵌入任务、
+    ///   sqlite-vec、混合检索」）。SQL 与口径见 `SchemaV4`；两张表都是**本机派生数据**，
+    ///   删了能重建、不参与 D17 同步。纯新增，老库就地补建。
+    /// - v5（M2 c / T13）：D17 跨设备同步（3.9）。`sync_state` / `sync_peers` 两张新表、
+    ///   `observations` 的 `origin_device` / `origin_id` 两个可空列、`deletions.targets`
+    ///   一个可空列、三个索引。SQL 与口径（尤其是"入站记录用哪一个 (device_id, id)"）
+    ///   见 `SyncSchema`。纯新增，老库 ALTER 就地迁移。
+    /// - v6（M2 c / T12）：`ledgers.narrative_meta`（4.3「可选叙述」、3.7「输出与台账分开标注」）。
+    ///   一列可空 TEXT，存 `NarrativeMeta` 的 JSON。SQL 与口径见 `SchemaV6`。纯新增，老库 ALTER。
+    public static let version = 6
 
     /// 页大小（D23：16384，比 4096 省约 10%）。加密库用 `cipher_page_size`。
     public static let pageSize = 16384
@@ -94,6 +103,11 @@ public enum Schema {
       frame_hash     TEXT,                          -- dHash，只用于是否触发内容检查
       thumb_ref      TEXT,                          -- 缩略图相对路径，删除时一并清理
       deleted_at     INTEGER,                       -- 用户删除墓碑（毫秒）；NULL = 有效
+      -- v5 / D17：这条记录的**来源**。NULL = 本机产生（出站集合、会话构建集合都是它）；
+      -- 非 NULL = 从别的设备导入的副本，(origin_device, origin_id) 是它的全局身份。
+      -- 为什么入站记录不直接沿用源设备的 (device_id, id)：见 SyncSchema.swift 的文件头。
+      origin_device  TEXT,
+      origin_id      INTEGER,
       PRIMARY KEY (device_id, id)
     );
     CREATE INDEX idx_obs_ts      ON observations(ts);
@@ -173,6 +187,9 @@ public enum Schema {
       ledger      TEXT NOT NULL,              -- JSON：确定性台账
       narrative   TEXT,                       -- 可选叙述，与台账分开标注（3.7）
       model       TEXT,
+      -- v6 / T12：叙述的标注（JSON）——生成时刻、输入 token 数、忠实度核对、
+      -- 以及"依据哪一版台账写的"。定义见 `NarrativeMeta`；台账重算时与 narrative 一起置 NULL。
+      narrative_meta TEXT,
       evidence    TEXT NOT NULL,              -- JSON：D23 用区间表示
       stale       INTEGER NOT NULL DEFAULT 0 CHECK (stale IN (0,1)),
       computed_at INTEGER NOT NULL,
@@ -198,6 +215,10 @@ public enum Schema {
       ledgers_stale         INTEGER NOT NULL DEFAULT 0,
       thumbs_deleted        INTEGER NOT NULL DEFAULT 0,
       bytes_freed           INTEGER NOT NULL DEFAULT 0,   -- 释放的原文 UTF-8 字节
+      -- v5 / D17：这次删除具体作用在哪些记录上，按来源设备分组、区间压缩的 JSON
+      -- （`[{"d":设备,"r":[[lo,hi],…]},…]`）。只有 reason = 'user' 写它：对端要靠它
+      -- 精确删掉**同一批**记录，而不是拿 params 在自己库上重放谓词。
+      targets               TEXT,
       PRIMARY KEY (device_id, id)
     );
     CREATE INDEX idx_deletions_at ON deletions(applied_at);
@@ -340,18 +361,19 @@ public enum Schema {
     );
     """
 
-    /// D8 通过后才建。本版本不建、不注册 sqlite-vec，只保证它静态链接进来（3.4）。
-    static let createVec = """
-    CREATE VIRTUAL TABLE vec_text USING vec0(
-      text_rowid INTEGER PRIMARY KEY,
-      embedding int8[512]
-    );
-    """
+    // MARK: - v4 迁移：分块与向量索引
+    //
+    // SQL 与全部口径（512 维的依据、int8 + cosine 的依据、删除级联）见 `SchemaV4`。
+    // v3 及更早这里放的是一张占位的 `vec_text`，从来没建过；v4 起真的建 `chunks` / `vec_chunks`，
+    // 占位的那份已删掉，免得留两套不一致的定义。
 
     /// 3.2 里必须存在的表（含 3.12 的 app_policies 与本包自加的三张），`Store.open` 用它自检。
+    /// v4 起再加 `chunks` / `vec_chunks`（`SchemaV4.expectedTables`）；
+    /// v5 起再加 `sync_state` / `sync_peers`（`SyncSchema.tables`）。
     public static let expectedTables = [
-        "apps", "app_policies", "capture_audit", "capture_stats", "deletions", "files", "grants",
-        "jobs", "ledgers", "mcp_audit", "meta", "migrations", "observations", "occurrences",
-        "sessions", "text_fts", "text_versions", "urls", "windows",
+        "apps", "app_policies", "capture_audit", "capture_stats", "chunks", "deletions", "files",
+        "grants", "jobs", "ledgers", "mcp_audit", "meta", "migrations", "observations",
+        "occurrences", "sessions", "sync_peers", "sync_state", "text_fts", "text_versions",
+        "urls", "vec_chunks", "windows",
     ]
 }

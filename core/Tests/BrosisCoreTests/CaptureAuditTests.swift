@@ -196,7 +196,8 @@ final class CaptureAuditTests: XCTestCase {
             try conn.exec("DROP TABLE capture_audit;")
             try conn.exec("ALTER TABLE occurrences DROP COLUMN confidence;")
             try conn.exec("ALTER TABLE occurrences DROP COLUMN note;")
-            try conn.run("DELETE FROM migrations WHERE version = 3;")
+            // 夹具的库是按当前 schema 建的：要装成 v2，v3 及之后的审计行都得抹掉。
+            try conn.run("DELETE FROM migrations WHERE version >= 3;")
             try conn.run("UPDATE meta SET value = '2' WHERE key = 'schema_version';")
         }
         try fixture.reopen()
@@ -205,7 +206,9 @@ final class CaptureAuditTests: XCTestCase {
         let version = try reopened.withLock { conn in
             try conn.scalarText("SELECT value FROM meta WHERE key = 'schema_version';")
         }
-        XCTAssertEqual(version, "3")
+        // 迁移会从 v2 一路补到**当前** schema 版本，所以这里跟着 Schema.version 走，
+        // 不写死版本号（M2 c 批同时有 v4 / v5 两个新版本落地）。
+        XCTAssertEqual(version, String(Schema.version))
         let columns = try reopened.withLock { conn in
             try conn.textColumn("SELECT name FROM pragma_table_info('occurrences');")
         }
@@ -214,7 +217,8 @@ final class CaptureAuditTests: XCTestCase {
         let notes = try reopened.withLock { conn in
             try conn.textColumn("SELECT note FROM migrations ORDER BY version;")
         }
-        XCTAssertEqual(notes.count, 3)
+        // 重开时 migrateIfNeeded 从 v2 一路补到当前版本，每版留一条审计行。
+        XCTAssertEqual(notes.count, Schema.version)
         XCTAssertTrue(notes[2].contains("capture_audit"))
 
         // 老数据原样在，新表可写

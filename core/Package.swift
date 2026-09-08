@@ -87,6 +87,10 @@ let package = Package(
         .executable(name: "brosis-store", targets: ["brosis-store"]),
         // 3.6 的薄 MCP（stdio）。不持钥、不开库、不写库，只把 tools/call 转成 IPC 请求。
         .executable(name: "brosis-mcp", targets: ["brosis-mcp"]),
+        // D17 / 3.9 跨设备同步：段文件格式、AES-GCM、配对口令与 keyring、同步目录与循环。
+        // 依赖 BrosisCore（要用 Store 的出站取数与入站落库），反过来 BrosisCore 不依赖它——
+        // 不开同步的构建里一行同步代码都不会跑到库的写入路径上。
+        .library(name: "BrosisSync", targets: ["BrosisSync"]),
     ],
     targets: [
         // SQLCipher v4.18.0 amalgamation。
@@ -146,9 +150,21 @@ let package = Package(
             path: "Sources/BrosisCore",
             swiftSettings: [.swiftLanguageMode(.v6)]
         ),
+        // D17 / 3.9：文件格式 + 加密 + 目录 + 两个循环。库侧的取数与落库在 BrosisCore 的
+        // Store+Sync.swift；这里一行 SQL 都没有，那边一个文件操作都没有。
+        .target(
+            name: "BrosisSync",
+            dependencies: ["BrosisCore"],
+            path: "Sources/BrosisSync",
+            swiftSettings: [.swiftLanguageMode(.v6)],
+            linkerSettings: [
+                // SecRandomCopyBytes（口令与盐的随机数）
+                .linkedFramework("Security"),
+            ]
+        ),
         .executableTarget(
             name: "brosis-store",
-            dependencies: ["BrosisCore", "BrosisIPC"],
+            dependencies: ["BrosisCore", "BrosisIPC", "BrosisSync"],
             path: "Sources/brosis-store",
             swiftSettings: [.swiftLanguageMode(.v6)]
         ),
@@ -161,7 +177,7 @@ let package = Package(
         ),
         .testTarget(
             name: "BrosisCoreTests",
-            dependencies: ["BrosisCore", "BrosisIPC", "SQLCipher"],
+            dependencies: ["BrosisCore", "BrosisIPC", "BrosisSync", "SQLCipher"],
             path: "Tests/BrosisCoreTests",
             swiftSettings: [.swiftLanguageMode(.v6)]
         ),

@@ -185,6 +185,10 @@ public struct DeletionSummary: Sendable, Codable {
     public var ledgersStale: Int
     public var thumbsDeleted: Int
     public var bytesFreed: Int
+    /// v4（M2 c / T11）：随文本版本一起消失的分块数。`chunks` 有 `ON DELETE CASCADE`，
+    /// `vec_chunks` 是虚拟表、没有外键，由 `sweepOrphanVersions` 显式删（与 `text_fts` 同一处理）。
+    /// 有默认值，是为了不破坏已有的构造点（与 `MaintenanceReport.captureAuditPruned` 同一写法）。
+    public var chunksDeleted: Int = 0
 }
 
 // MARK: - 统计
@@ -279,6 +283,11 @@ public struct MaintenanceReport: Sendable, Codable {
     public var mcpAuditPruned: Int
     /// 按 `StoreOptions.captureAuditRetentionDays` 滚动清掉的采样审计行数（3.3）。
     public var captureAuditPruned: Int = 0
+    /// v4（M2 c / T11）：`vec_chunks` 里有行、`chunks` 里没有 → 已删掉的孤儿向量行数。
+    /// 与 FTS 对账同一个理由：虚拟表没有外键，只能夜间自己对。
+    public var orphanVectorRowsDeleted: Int = 0
+    /// v4：`chunks` 标了 `embedded_at` 却没有向量行 → 已改回待办的块数（下次任务会重嵌）。
+    public var reEnqueuedChunks: Int = 0
     public var elapsedMS: Double
 }
 

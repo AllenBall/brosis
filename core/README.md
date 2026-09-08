@@ -33,14 +33,14 @@ core/
 │   │   └── include -> ../../Vendor/SQLCipher/include（相对符号链接，只暴露 sqlite3.h）
 │   ├── CBrosisSQLite/            薄 C 垫片：volatile 清零、sqlite-vec 注册入口、SQLITE_TRANSIENT
 │   ├── BrosisIPC/                T5：本地 IPC（**不依赖 BrosisCore**）
-│   │   ├── Protocol.swift        请求 / 响应 / 错误码 / 六个工具名 / 编解码
+│   │   ├── Protocol.swift        请求 / 响应 / 错误码 / 九个工具名 / 编解码
 │   │   ├── JSONValue.swift       Sendable 且 Codable 的 JSON 值（严格并发下要跨线程传）
 │   │   ├── LineStream.swift      换行分隔框架 + sockaddr_un 地址
 │   │   ├── IPCServer.swift       socket 服务端：accept、对端校验、限流、一连接一线程
 │   │   ├── IPCClient.swift       socket 客户端（brosis-mcp 用）；只在"请求肯定没送到"时重发
 │   │   ├── PeerIdentity.swift    getpeereid + audit token + SecCodeCheckValidity
 │   │   ├── RateLimiter.swift     按客户端的滑动窗口（单调时钟，时钟回拨不放大配额）
-│   │   └── ToolCatalog.swift     六个工具的 JSON Schema 与 readOnlyHint
+│   │   └── ToolCatalog.swift     九个工具的 JSON Schema 与 readOnlyHint
 │   ├── BrosisCore/
 │   │   ├── Store.swift           开 / 关库、连接序言、身份与计数器、buildInfo
 │   │   ├── Store+Write.swift     record / 批量写 / 规范化对象 upsert / 文本版本 + FTS / 策略 / 遥测
@@ -53,7 +53,12 @@ core/
 │   │   ├── Store+Search.swift    T3：三通道 search（精确字段两步式 / FTS / 1–2 字扫描）
 │   │   ├── Store+Evidence.swift  T3：getEvidence / getItem / getContext + grants
 │   │   ├── Store+Sessions.swift  T3：会话切分（三常量、双屏、增量构建）
-│   │   ├── Store+Ledger.swift    T3：getDayLedger / getTimeline
+│   │   ├── Store+Ledger.swift    T3：getDayLedger / getTimeline（T14 加了缓存内容指纹）
+│   │   ├── Store+WeekLedger.swift T14：getWeekLedger（7 个日台账聚合、增量、stale 联动）
+│   │   ├── Store+Patterns.swift  T14：getPatterns（热力 / 常用时段 / 会话 / 切换对 / 工作块）
+│   │   │                         与 recentActivity（最近 N 分钟）
+│   │   ├── PatternTypes.swift    T14：周台账 / 活动模式 / 最近活动的结果类型
+│   │   ├── PatternCalendar.swift T14：ISO 周与整点边界（DayCalendar 配置的复制品，有对照用例）
 │   │   ├── Store+Bench.swift     T3：四类查询的压测计划（参数从库里真实取）
 │   │   ├── RetrievalTypes.swift  T3：检索 / 证据 / 会话 / 台账的入参与结果 + token 口径
 │   │   ├── Retrieval+Support.swift T3：查询路由、LIKE 转义、日历、区间并集、三类时间归属
@@ -73,7 +78,9 @@ core/
 │   └── brosis-mcp/main.swift     T5：stdio 上的 MCP + admin 子命令（只链接 BrosisIPC）
 └── Tests/
     ├── mcp_client.py             T5：只用标准库的 MCP 客户端（端到端测试与手跑都用它）
-    └── BrosisCoreTests/          132 个用例（T2 的 39 + T3 的 32 + T5 的 42 + T8 的 13 + T9 的 6）
+    └── BrosisCoreTests/          **209 个用例**（M1 的 132 + M2 c 批新增：T11 向量 19、
+                                  T13 同步 15、T12 叙述 24、T14 周台账 / 模式 / 最近活动 18，
+                                  外加既有套件里补的用例）
 ```
 
 **项目目录里没有任何构建产物**：SQLCipher 的 9.30 MiB amalgamation 与 sqlite-vec 都在
@@ -365,7 +372,7 @@ bigram 从 2 字起才有 token，单个汉字在 bigram 索引里基本命中�
 这是**估算不是分词**：3.6 的「每条 ≤ 100 token 摘要」按这个口径就是**每条摘要 ≤ 200 个字符**，
 `get_context(max_tokens)` 也按它截断。要精确计数得引入分词器，M1 不做。
 
-### 3.6 六个工具的数据层
+### 3.6 九个工具的数据层
 
 | 工具（3.6） | 本包的方法 | 说明 |
 |---|---|---|
@@ -375,6 +382,9 @@ bigram 从 2 字起才有 token，单个汉字在 bigram 索引里基本命中�
 | `get_item(url \| path \| app)` | `Store.getItem` | 两步式；给首末次、按天分布、应用分布、标题样本、最近证据 id 与时长 |
 | `get_context(hours, max_tokens)` | `Store.getContext` | 应用聚合 + 会话汇总 + 最近正文片段，按 token 预算截断 |
 | `get_day_ledger(date)` | `Store.getDayLedger` | 见下一章 |
+| `get_week_ledger(week)`（M2 / T14） | `Store.getWeekLedger(weekStart:)` | **7 个日台账的聚合**：三类时间、应用 / 站点 / 文件排行、切换与打断、7 行按天分布；增量（只重算变过的那几天）、stale 联动 |
+| `get_patterns(start, end)`（M2 / T14） | `Store.getPatterns(start:end:apps:options:)` | 确定性模式：星期 × 小时热力（附按小时 / 按星期两张边际表）、每应用常用时段、会话平均长度与打断率、最常切换对、连续工作块 |
+| `recent_activity(minutes, max_items)`（M2 / T14） | `Store.recentActivity(minutes:maxItems:apps:endingAt:)` | 最近 N 分钟的应用聚合 + 会话 + ≤ 100 token 的观察摘要；只看本机产生的观察 |
 
 `grants` 表的读写是 `setGrant` / `grant(clientID:)` / `allGrants()` / `removeGrant(clientID:)`。
 这一章说的是**数据层**；把一条 IPC 请求变成一次这样的调用、按 grant 裁剪返回值、写审计，
@@ -483,15 +493,85 @@ WHERE device_id = ? AND start >= ? - <最长会话> AND start < ? AND "end" > ?
 - 切换次数、打断数、会话数、观察数；
 - `evidence` 按 **D23 的区间表示** `[[lo, hi], …]`；
 - `sessionConfig`：算这份台账用的三个常量；
-- **`narrative` 恒为 `null`、`model` 恒为 `null`**——3.7 要求台账与叙述分开标注，叙述是 M2 的可选夜间任务。
+- **`narrative` / `model` / `narrativeMeta` 三个字段是叙述的标注**——3.7 要求台账与叙述分开标注。
+  M1 里它们恒为 `null`；M2 c / T12 起夜间叙述任务可能给它们赋值，见本文末的「可选叙述」一节。
+  它们**不在 `ledgers.ledger` 那份 JSON 里**，而是 `ledgers` 表的三个独立列。
 
 台账是**确定性**的（同样的观察算出同样的数，不经过任何模型），所以已有且不是 `stale` 的直接读回，
-缺失 / `stale` / `recompute: true` 时才重算并覆盖（重算时 `narrative` 与 `model` 一并置回 NULL：
-台账变了，旧叙述不再对得上）。
+缺失 / `stale` / `recompute: true` 时才重算并覆盖（重算时 `narrative` / `model` / `narrative_meta`
+三列一并置回 NULL：台账变了，旧叙述不再对得上）。
 
 跨日边界的时间片按天裁开：23:59:20 那条观察的 90 s 里，40 s 记在当天、50 s 记到第二天。
 
 ---
+
+## 周台账、活动模式与最近活动（3.6 / 3.7 / 4.3，M2 c 批 / T14）
+
+3.6 把 `recent_activity`、`get_patterns`、周台账三样明确"放 M2"，这一章是它们的实现口径。
+**三样全是确定性的**：同样的观察算出同样的数，一行模型都不用，每个数字都能顺着
+`evidence` 的观察 id 走回原始证据。
+
+### 周台账 = 7 个日台账之和
+
+`getWeekLedger(weekStart:)` 接受 `YYYY-Www`（ISO 周，周一起算）或**周内任意一天**的
+`YYYY-MM-DD`，落进 `ledgers` 表的 `level = 'week'` 行（表结构 M1 就留好了，本任务**没有加迁移**）。
+
+它**不在一条连续的周观察流上重算**，而是把该周 7 个日台账加起来。这样换来两件事：
+
+1. **「周 = 7 天逐字段之和」是可断言的不变量**（`brosis-store week-ledger --check` 直接打出对照，
+   `WeekLedgerPatternsTests` 逐字段断言）；
+2. **增量成立**：只有变过的那几天要重算，其余天读日台账缓存。返回值里的
+   `daysRecomputed` 就是这一次真正重算了哪几天，`servedFromCache` 说明整份周台账是不是原样读回的。
+
+三处**定义差异**（不是误差，写在这里免得被当成 bug）：
+
+- `switches`：7 天各自「切入次数」的和。同一个应用跨午夜连续使用时，两天各记一次切入。
+- `sessions`：7 天各自会话数的和。跨午夜的会话在相邻两天各记一次（`sessionRows` 按
+  「start 落在窗口内 **或** 尾巴伸进窗口」取行，日台账本来就是这个口径）。
+- `onlineUnionS`：7 天并集之和。天与天不重叠，所以它**等于**整周的并集，这一项没有差异。
+
+### 日台账的缓存指纹（本任务顺带堵的一个洞）
+
+M1 的 `getDayLedger` 只在**删除**时因为 `stale` 标记而重算（3.8 的级联）。新观察写进来
+**不会**碰 `ledgers` 行——于是"今天"的台账一旦算过一次就被永久缓存，当天后来的活动全看不见。
+周台账要按天聚合、还要谈增量，这个洞必须先堵：`DayLedger.contentFingerprint` 记下
+「算的时候这一天有哪些观察」（`n=<条数>,max=<最大 id>`，口径与算进台账的那批观察完全一致：
+本机产生、没被删、`ts` 落在当天），读缓存时拿它跟库里现算的一份比，不一致就重算。
+老库（v1–v3 写下的台账行）没有这个字段，读回来是 nil，按"验不了 → 重算"处理。
+
+### `get_patterns` 的五个口径
+
+| 项 | 口径 |
+|---|---|
+| 星期 × 小时热力 | 观察时间片按**当地整点**分桶（走日历加法，跨夏令时那天是 23 或 25 个格子），再按 (星期, 小时) 归并。每格带 `slots`（这个格子在区间里出现过几次）与 `meanDwellS`，好让长度不同的区间能比较。另给 `byHour`（24 行）与 `byWeekday`（7 行）两张**定长**边际表 |
+| 每应用常用时段 | 同一批格子按应用拆开，取 dwell 最多的前 `topHoursPerApp`（默认 3）个小时，附各自占该应用总 dwell 的比例 |
+| 会话平均长度与打断率 | 直接读 `sessions` 表（3.7 的三个常量切出来的）。时长 = `end - start`（含打断期间，打断不切会话）。给均值 / 中位数 / p90 / 最长、`interruptionsPerSession`、`sessionsWithInterruption` 与 `interruptionRate` |
+| 最常切换对 A→B | **同一块屏**上相邻两条观察的应用不同、且间隔 ≤ 停留上限（90 s）。加这个上界是因为超过它就没有证据说明中间发生了什么——那不是一次切换，是一段空白之后重新开始 |
+| 连续工作块 | **同一块屏**上的极大观察序列，满足：相邻观察间隔 **< 打断阈值**（3.7 的 20 s，"离开正好 20 s 也算打断"所以是严格小于）、序列里**没有 `unknown` 观察**（权限丢失 / 超时 / 锁定期间没有证据说明人在工作）、块长 ≥ `focusBlockMinMinutes`（4.3 的 25 分钟）。**块内允许换应用**（3.7 的"打断"是离开、不是换应用；换应用本身记在切换对里），想看"全程一个应用"的块用 `singleAppBlocks` |
+
+块长的算法是 `最后一条观察的时间片终点 − 第一条观察的 ts`。最后一条观察按 3.7 的停留上限
+最多代表 90 s，所以块尾可能比最后一条观察晚 90 s——这与 dwell 的记账口径完全一致，
+不是把块"拉长"了。
+
+`ActivityPatterns` 把算它用到的**全部常量**（`options` 与 `sessionConfig`）一起交回去，
+数字离开这个函数之后还能复核。
+
+### `recent_activity`
+
+最近 N 分钟的应用聚合 + 会话汇总 + 最多 `max_items` 条观察摘要（每条 ≤ 100 token，
+口径见 `TokenBudget`）。**只看本机产生的观察**（`origin_device IS NULL`）：这是"这台机器最近在干什么"，
+D17 从别的设备导入的副本不该混进同一条时间线（与 3.9 里 sessions / ledgers 的口径一致；
+要找别的设备的内容走 `search` / `get_evidence`）。摘要格式与 `search` 的命中摘要**同一份代码路径的同一种排版**：
+应用 · 标题 · 时间 · 正文开头。
+
+### 一个月合成库上的耗时
+
+见 `tools/bench/results/m2_c_patterns_2026-09-08.md`。要点（E7 最坏口径的 1 个月合成库，
+8640 条/天 × 30 天 = 25.9 万条观察，热 p95）：周台账走缓存 **3.4 ms**、七天全量重算 **67.1 ms**、
+`recent_activity` **0.9 / 2.1 ms**（30 min 20 条 / 60 min 50 条），都在 3.4 的「报表类 ≤ 50 ms」之内
+（全量重算除外，它一周最多真算一次）；`get_patterns` 的代价随区间**线性**（按定义要扫区间内全部观察），
+约 **4.3 ms/天**，7 天 30.6 ms、30 天 130.1 ms。真实作息的 4 周库（6.4 万条观察）上快约 4 倍。
+无风扇的 Air 上这组数会随机器温度浮动 25–45%，结果文件 §4.3 有说明。
 
 ## 本地 IPC 与 `brosis-mcp`（3.1 / 3.6，M1 R2 / T5）
 
@@ -520,7 +600,7 @@ brosis.app 里的 MCPIPCService   ← 产品路径；LockController 持有 Store
 
 | 目标 | 依赖 | 干什么 |
 |---|---|---|
-| `BrosisIPC`（库） | 只有 Foundation + Security | 协议类型与编解码、换行分隔框架、Unix domain socket 客户端 / 服务端、对端 uid 与代码签名校验、按客户端限流、六个工具的 JSON Schema |
+| `BrosisIPC`（库） | 只有 Foundation + Security | 协议类型与编解码、换行分隔框架、Unix domain socket 客户端 / 服务端、对端 uid 与代码签名校验、按客户端限流、九个工具的 JSON Schema |
 | `BrosisCore`（+= `BrosisIPC`） | — | `StoreMCPService`（一条请求 → 一次查询 → 按 grant 裁剪 → 写审计）、`MCPGate`（3.5 相位门）、`mcp_audit` 表 |
 | `brosis-mcp`（可执行） | 只有 `BrosisIPC` | stdio 上的 MCP；`admin` 子命令管 grant |
 
@@ -624,11 +704,14 @@ brosis.app 里的 MCPIPCService   ← 产品路径；LockController 持有 Store
 `MCPEndToEndTests` 的 `testServeSurvivesClientHangUpMidRequest`、
 `testServeShutsDownCleanlyOnSIGTERM`、`testMCPSurvivesServerRestartMidSession`。
 
-### 六个工具与 grant 的关系（3.6）
+### 九个工具与 grant 的关系（3.6）
+
+3.6 的 v1 是六个工具；**M2 c 批 / T14 补上了 3.6 里写明"放 M2"的三个**：
+`get_week_ledger`、`get_patterns`、`recent_activity`。
 
 `grants` 表一个客户端一行：`mode ∈ {strict_local, remote_allowed}`、应用白名单、
 时间窗（默认 30 天）、`fields ∈ {summary, evidence}`（默认 summary）。
-**没有 grant 的客户端，六个工具全拒**（`no_grant`），一个字节都不回。
+**没有 grant 的客户端，九个工具全拒**（`no_grant`），一个字节都不回。
 
 | 工具 | 时间窗 | 应用白名单 `apps != ["*"]` 时 | `fields = summary` 时 |
 |---|---|---|---|
@@ -638,12 +721,27 @@ brosis.app 里的 MCPIPCService   ← 产品路径；LockController 持有 Store
 | `get_timeline` | `start` 被抬到窗口起点；整段落在窗口外报 `denied_by_grant` | 每个桶的应用分布过滤后，桶的 dwell / active / unknown / 观察数 / 切换数**按留下的应用重算**；`onlineUnionS` 算不回来，置 0 并列进 `droppedFields` | — |
 | `get_day_ledger` | 整天落在窗口外报 `denied_by_grant`；**窗口起点落在这一天里面时，返回的仍是整天的聚合**（台账按自然日预聚合，切不成半天），用 `coversBeforeWindowStart = true` 如实标出来 | `apps` 过滤 + 汇总重算；`sites` / `files` / `onlineUnionS` / `perDisplayDwellS` / `sessions` / `interruptions` / `evidence` **整段丢掉**并列进 `droppedFields` | — |
 | `get_item` | `start` 被抬到窗口起点 | `app` 选择子不在白名单直接拒；`url` / `path` 选择子过滤 `apps` 并丢掉 `firstSeen` / `lastSeen` / `days` / `titles` / `recentEvidenceIDs` | — |
+| `get_week_ledger`（T14） | 整周落在窗口外报 `denied_by_grant`；窗口起点落在这一周里面时返回的仍是**整周**的聚合，用 `coversBeforeWindowStart = true` 标出来（与 `get_day_ledger` 同一条口径） | `apps` 过滤 + 汇总重算；`sites` / `files` / `onlineUnionS` / `perDisplayDwellS` / `sessions` / `interruptions` / `evidence` / `dayTotals` / `activeDays` **整段丢掉**并列进 `droppedFields` | — |
+| `get_patterns`（T14） | `start` 被抬到窗口起点；整段落在窗口外报 `denied_by_grant`；区间超过 `maxPatternDays`（默认 180 天）报 `bad_request` | **白名单下推到 core**：热力图、切换对、连续工作块都在"只含白名单应用"的观察流上**重算**（`appFilter` 标出来，`scopeNote` 说明这是换了输入不是裁短结果） | — |
+| `recent_activity`（T14） | `minutes` 被窗口封顶，`minutesClampedByGrant` 报是否截过 | 同样下推到 core（`appFilter`） | 摘要本来就是 ≤ 100 token，不额外裁；原文只能经 `get_evidence` 展开，`fieldsNote` 把这条写在结果里 |
+
+**叙述标注（`narrative` / `model` / `narrativeMeta`，T12 的 schema v6）在两个台账工具上的处理**：
+键**永远在**（没有叙述就显式 `null`，`JSONEncoder` 默认会把 nil 的可选字段整键省掉，
+客户端就分不清"没跑叙述"和"这个版本没有这个字段"）；`narrativeIsStale = true` 时**不给正文**；
+**应用白名单生效时整段丢掉**——叙述是照整份台账写的，里面可能点名白名单之外的应用，
+按 key 裁字段裁不掉它（这与 M1 第一轮验收在 `get_evidence` 邻居上抓到的是同一类口子）。
 
 **为什么白名单下要丢字段而不是给个近似值**：`sites` / `files` 是按 URL 与路径聚合的，
 回不到"是哪个应用打开的"；`onlineUnionS` 要原始会话区间才算得出。
 给个"看起来对"的数字比不给更糟——所以宁可丢掉，并在 `droppedFields` 里如实列出来。
 
 `apps = ["*"]`（默认）时**什么都不裁**，走的是与 T3 完全相同的返回值（`get_evidence` 的邻居也只取 `neighbors` 条，不多查）。
+
+**`get_patterns` 的白名单为什么下推而不是事后裁**：热力图的每一格、每一对切换、每一个连续工作块
+都是**在整条观察流上**算出来的，白名单外的应用一旦参与过，就没法从结果里减回去
+（一个块中间夹着白名单外的应用，去掉它之后这个块该不该断？只有重算才知道）。
+所以 `Store.getPatterns(apps:)` 直接换输入，代价是**同一段时间在两份 grant 下会给出不同的块数与切换数**——
+这是定义差异，`appFilter` 与 `scopeNote` 把它写在返回值里。
 
 **出现上下文这条口子**：M1 第一轮验收在这里抓到过——`get_evidence` 的 `before` / `after` 当时直接透传 core 的结果，白名单生效时仍会带出别的应用的 bundle id 与窗口标题。现在过滤做在 `Store.neighborRows` 里（不是 MCP 那一层），所以任何带 grant 调 `getEvidence` 的调用方都拿不到白名单外的邻居。
 
@@ -854,6 +952,20 @@ $BIN bench    --dir $W/db --key-file $W/db.key --cold-rounds 20 --hot-reps 20 --
 $BIN fts-only --dir $W/db --key-file $W/db.key --q 存储服务      # T2 的最小 FTS 通道，对照用
 ```
 
+周台账、活动模式与最近活动（T14 新增，3.6 / 3.7 / 4.3）：
+
+```sh
+$BIN week-ledger --dir $W/db --key-file $W/db.key --weeks            # 有观察的 ISO 周
+$BIN week-ledger --dir $W/db --key-file $W/db.key --week 2026-W37    # 或 --week 2026-09-09
+$BIN week-ledger --dir $W/db --key-file $W/db.key --week 2026-W37 --check      # 周 vs 7 天之和
+$BIN week-ledger --dir $W/db --key-file $W/db.key --week 2026-W37 --recompute  # 七天全算
+$BIN patterns --dir $W/db --key-file $W/db.key --start T0 --end T1 \
+              --focus-minutes 25 --max-transitions 20 --max-apps 20 --apps a,b --no-heatmap
+$BIN recent   --dir $W/db --key-file $W/db.key --minutes 30 --max-items 20 --at T1
+# 三条都支持 --reps N：同一连接上跑 1 + N 次，报冷（第一次）与热 p50 / p95
+$BIN patterns --dir $W/db --key-file $W/db.key --start T0 --end T1 --reps 20
+```
+
 本地 IPC（T5，**测试替身**——产品路径的服务端在 `brosis.app` 里）：
 
 ```sh
@@ -929,9 +1041,14 @@ $BIN mcp-audit --dir $W/db --key-file $W/db.key --limit 20
 
 ## 测试
 
-`swift test` 下 **132 个用例**，十二个套件（T2 的 39 + T3 的 32 + T5 的 42 + T8 的 13 + T9 的 6：
-`IPCProtocolTests` 14 + `MCPServiceTests` 17 + `MCPEndToEndTests` 11 + `CaptureAuditTests` 13 +
-`AppInventoryTests` 6）：
+`swift test` 下 **209 个用例**（2026-09-08 T14 收尾时实测；M2 c 批四个任务是并行落地的，
+总数还会随另外几个任务再动，以 `swift test` 的实际输出为准），十六个套件：
+`AppInventoryTests` 6、`BigramFTSTests` 9、`CaptureAuditTests` 13、`CrashRecoveryTests` 2、
+`CryptoAndBuildTests` 12、`E3ScenarioTests` 7、`IPCProtocolTests` 14、`MCPEndToEndTests` 12、
+`MCPServiceTests` 17、`NarrativeTests` 24、`RetrievalTests` 20、`SessionLedgerTests` 12、
+`StoreAPITests` 9、`SyncTests` 15、`VectorTests` 19、`WeekLedgerPatternsTests` 18。
+其中 M1 是 132 个，M2 c 批新增：T11 `VectorTests` 19、T13 `SyncTests` 15、T12 `NarrativeTests` 24、
+**T14 `WeekLedgerPatternsTests` 18 + 给 `MCPEndToEndTests` 补的 1 条**：
 
 | 套件 | 覆盖 |
 |---|---|
@@ -941,17 +1058,172 @@ $BIN mcp-audit --dir $W/db --key-file $W/db.key --limit 20
 | `BigramFTSTests` | bigram 与 Python 参考实现的黄金用例、**原文逐字节入库**（sha256 / byte_len 都按原文）、**全角与半角是两个版本但共用同一串 FTS bigram、两种写法互相都能命中**、中英混排往返（写入 → 短语命中 → 删除 → 不再命中）、单字限制、FTS 对账、空间回收 |
 | `StoreAPITests` | schema 全表自检与 D17 / D23 的列级核对、`device_id` 稳定性、`app_policies` 三档、运行期事件与遥测、dbstat 分项口径、多片段按 ord 重建、`deleteByObject` 各变体、半开区间、空删除也留审计 |
 | `RetrievalTests`（T3，20 个） | bigram 命中 / 未命中 / 跨句边界；子串复核滤掉分词假阳性（含反向对照）；**全角原文用半角 / 全角查询都能过 FTS 通道的子串复核**、**全角原文用半角查询也能被 1–2 字扫描通道命中**；1–2 字扫描的默认 7 天窗口、显式区间、限应用、窗口可配置、**上界半开**、**纯汉字两字不开扫描通道而召回不变**、**≤2 字含非汉字仍然要扫**；五个字段前缀的两步式与「命中 0 行第一步就空集返回」；**`EXPLAIN QUERY PLAN` 对照**一条 JOIN 与两步式的计划差别；带路径 URL 不退回 host；摘要 ≤ 100 token；时间与应用过滤（半开区间）；删除后 search / getEvidence / getContext / 台账四个入口都不再返回内容；**FTS 候选被截断 + 早期时间窗会漏召回、且 `ftsCandidatesTruncated` 必须报 true**；grant 的字段级 / 应用白名单 / 时间窗（**含出现上下文：白名单外与窗口外的相邻观察不给、`droppedNeighbors` 计数，并有「不加 grant 时它们确实在」的反向对照**）；getItem / getContext 预算 / getTimeline 分桶；查询路由 |
-| `IPCProtocolTests`（T5，14 个） | `JSONValue` 往返（> 2^53 的整数、全角、正文里的换行必须被转义成 `\n`）；请求 / 响应往返；六种坏输入都不被当成合法请求；换行分隔框架跨 read 边界与超长行；socket 路径超 104 字节报错；限流的滑动窗口、按客户端隔离、客户端数上限；六个工具的 schema 与 `readOnlyHint`；**真 socket 往返**（0600 权限、uid、同连接连发）、坏 JSON 与错协议版本都到不了处理器、**限流时处理器返回的结果被丢弃**、**对端发完请求就挂断时服务端不死**（必须看到 `ipc_write_error`，否则这条用例算没验到） |
-| `MCPServiceTests`（T5，17 个） | 没有 grant 时**六个工具全拒且不带任何数据**；`fields` 控制原文（summary 不回 `text` / 逐片段正文，evidence 回）；summary 时 `get_context` 片段截到 ≤ 100 token 且 `text` 重拼；应用白名单对 search / get_evidence / get_item / 台账 / 时间线各自的效果（含「桶的 dwell 按留下的应用重算」、**`get_evidence` 的 `before` / `after` 里不能出现白名单外的 bundle id 与窗口标题**、以及 `apps = ["*"]` 下它们确实在的反向对照）；时间窗是硬下界（`appliedStart` 被抬高、窗口外的日期与证据被拒、`hours` 被封顶）；**删除后 search / get_evidence / get_context / get_day_ledger 都不再返回内容**（3.8）；审计只记形状不记查询串且同一条查询摘要可复现；`maintenance` 滚动清理审计；未知工具与七种坏参数；时间参数三种写法；**`MCPGate` 的 locked / paused 与审计补写**；传输层拒绝也进审计；admin 生命周期（含"签名没过的对端不能改授权"）；**v1 → v2 schema 迁移**；**被 grant 丢掉的相邻观察不占 `neighbors` 的名额**（白名单外的邻居密集时 `before` / `after` 仍各拿满，附「不加白名单时紧邻的都在白名单外」的反向对照）；**时间窗起点落在某天中间时 `get_day_ledger` 标 `coversBeforeWindowStart`**（同一天 `get_timeline` 只回窗口之后的观察，两个数字的差就是这个标记要提醒的事；整天在窗口里的那天标 false） |
-| `MCPEndToEndTests`（T5，11 个） | **四个真进程**（XCTest → python3 客户端 → `brosis-mcp` → `brosis-store serve`）：initialize / tools/list / 六个工具各一次真实调用；没有 grant 全拒且提示怎么授权；**闭环「记录 → 找回 → 展开原文 → 删除后四个入口都消失」**；summary 与 evidence 两档的差别（长正文尾部标记在不在）；白名单与时间窗（**含真链路上 `get_evidence` 的出现上下文不漏白名单外应用**）；locked / paused 拒绝且审计补写；限流；admin 与审计形状；服务端不在时的错误提示；**连接层的抗打击**：客户端中途挂断时 `serve` 不死、`serve` 收到 SIGTERM 走完收尾（退出码 0、socket 文件删掉）、**服务端在会话中途整个重启之后 `brosis-mcp` 还活着且下一次调用自己重连成功** |
+| `IPCProtocolTests`（T5，14 个） | `JSONValue` 往返（> 2^53 的整数、全角、正文里的换行必须被转义成 `\n`）；请求 / 响应往返；六种坏输入都不被当成合法请求；换行分隔框架跨 read 边界与超长行；socket 路径超 104 字节报错；限流的滑动窗口、按客户端隔离、客户端数上限；**九个工具的 schema 与 `readOnlyHint`，且 `tools/list` 的顺序 == `MCPTool.allCases` 的顺序**；**真 socket 往返**（0600 权限、uid、同连接连发）、坏 JSON 与错协议版本都到不了处理器、**限流时处理器返回的结果被丢弃**、**对端发完请求就挂断时服务端不死**（必须看到 `ipc_write_error`，否则这条用例算没验到） |
+| `MCPServiceTests`（T5，17 个） | 没有 grant 时**九个工具全拒且不带任何数据**（审计条数 = `MCPTool.allCases.count`）；`fields` 控制原文（summary 不回 `text` / 逐片段正文，evidence 回）；summary 时 `get_context` 片段截到 ≤ 100 token 且 `text` 重拼；应用白名单对 search / get_evidence / get_item / 台账 / 时间线各自的效果（含「桶的 dwell 按留下的应用重算」、**`get_evidence` 的 `before` / `after` 里不能出现白名单外的 bundle id 与窗口标题**、以及 `apps = ["*"]` 下它们确实在的反向对照）；时间窗是硬下界（`appliedStart` 被抬高、窗口外的日期与证据被拒、`hours` 被封顶）；**删除后 search / get_evidence / get_context / get_day_ledger 都不再返回内容**（3.8）；审计只记形状不记查询串且同一条查询摘要可复现；`maintenance` 滚动清理审计；未知工具与七种坏参数；时间参数三种写法；**`MCPGate` 的 locked / paused 与审计补写**；传输层拒绝也进审计；admin 生命周期（含"签名没过的对端不能改授权"）；**v1 → v2 schema 迁移**；**被 grant 丢掉的相邻观察不占 `neighbors` 的名额**（白名单外的邻居密集时 `before` / `after` 仍各拿满，附「不加白名单时紧邻的都在白名单外」的反向对照）；**时间窗起点落在某天中间时 `get_day_ledger` 标 `coversBeforeWindowStart`**（同一天 `get_timeline` 只回窗口之后的观察，两个数字的差就是这个标记要提醒的事；整天在窗口里的那天标 false） |
+| `MCPEndToEndTests`（T5 11 个 + T14 1 个 = 12 个） | **四个真进程**（XCTest → python3 客户端 → `brosis-mcp` → `brosis-store serve`）：initialize / tools/list / **九个工具各一次真实调用**（T14 的三个另有一条专门的用例，核对周台账 7 行按天分布、热力图 / 边际表长度、每条摘要 ≤ 100 token、审计里三条 ok）；没有 grant 全拒且提示怎么授权；**闭环「记录 → 找回 → 展开原文 → 删除后四个入口都消失」**；summary 与 evidence 两档的差别（长正文尾部标记在不在）；白名单与时间窗（**含真链路上 `get_evidence` 的出现上下文不漏白名单外应用**）；locked / paused 拒绝且审计补写；限流；admin 与审计形状；服务端不在时的错误提示；**连接层的抗打击**：客户端中途挂断时 `serve` 不死、`serve` 收到 SIGTERM 走完收尾（退出码 0、socket 文件删掉）、**服务端在会话中途整个重启之后 `brosis-mcp` 还活着且下一次调用自己重连成功** |
 | `CaptureAuditTests`（T8，13 个） | **schema v3**：覆盖率口径七条（完全一致 = 1；**全角 / 半角与空白差异不扣分**；**NFKC 折叠这一步单独有用例**——全角字母数字 `ＯＣＲ １００` 对上半角 `OCR 100`，标点那条测不出折叠，因为全角标点不折叠也会被当分隔符丢掉；OCR 多出的内容不扣分；只读到一半时介于 0 和 1 之间；AX 全空时 = 0 而不是 NaN；重复 token 只计一票）；`capture_audit` 写入 / 倒序读回 / 按应用过滤 / 按应用聚合；**观察被配额过期删掉之后审计行还在**（弱引用）；`maintenance()` 按保留天数滚动清理；`occurrences.confidence` / `note` 往返（AX 片段是 nil、OCR 片段有值）与**老写法 `TextFragment(text:region:)` 的向后兼容**；**v2 → v3 就地迁移**（把库改回 v2 的形状再重开，老数据一字不差、`migrations` 留三条审计、新表可写） |
 | `AppInventoryTests`（T9，6 个） | 3.12 应用采集清单的数据层：按应用的观察数与完整性四态分布（**四态之和 == 总数**、窗口外的观察不算、**墓碑行不算**、`since = 0` 就是全库）；**只算本机**（直接写一行 `device_id = 'another-device'` 的观察，它不进本机统计）；**`EXPLAIN QUERY PLAN` 必须走 `idx_obs_live` 部分索引**（这三个查询存在的理由就是不让采集端扫全表）；`app_policies` 全表往返与 UPSERT 不加行；`appNames()`；**降档删数据的闭环**（`deleteByApp(reason: .policy)` 之后统计行消失、`appObservationCount` 归零、策略行原样保留） |
+| `WeekLedgerPatternsTests`（T14，18 个） | **周台账**：`PatternCalendar` 与 `DayCalendar` 在三个时区上逐时刻对齐（复制品的兜底用例）、`YYYY-Www` 与 `YYYY-MM-DD` 两种写法与坏输入；**周 = 7 个日台账逐字段之和**（含应用排行逐 key 对账、证据区间合并且覆盖全部观察）；**增量**（第一次七天全算 → 什么都没变时整份走缓存 → 只往周四写新观察时只有周四重算、其余六天 `computedAt` 不变 → 与 `--recompute` 全量重算逐字段相等）；**新观察让日台账缓存失效**（内容指纹）；**删除让日 / 周台账都标 stale、重算后脏行清零**。**get_patterns**：热力峰值落在生成器设定的工作时段（按小时边际表唯一峰值 = 生成器安排的"五个工作日都在"的那一小时，夜间与周日恒为 0）；每应用常用时段与生成器一致；最常切换对（含"隔了两小时的应用变化不算切换"与第二块屏各算各的）；连续工作块要连续也要够长（40 分钟连续算一个、中间挖 60 s 空白与插一条 `unknown` 都断开，放宽下限到 10 分钟后断成 5 段）；会话统计与 `sessions` 表逐项对账；**应用白名单是换输入不是裁输出**。**recent_activity**：摘要 ≤ 100 token、最近的在前、`truncated`、应用过滤、空窗口。**MCP**：三个新工具的白名单裁剪与审计形状、时间窗与六种坏参数、**叙述标注（T12 的三列）透传与白名单下整段丢掉** |
 | `SessionLedgerTests`（T3，12 个） | 三个会话常量的**边界**（299 s vs 300 s、90 s 封顶、15 s vs 25 s 打断）与可配置性；三类时间分列；双屏焦点归属 vs 区间并集；增量构建（只扫新观察、结果与全量一致、延长最后一个会话、**两块屏边界不对齐 + 一次打断时幂等且与全量重建逐字段相等**、**同一块屏上同毫秒的两条观察也不能被分进两个会话**）；删除标 stale → 重算清掉且证据里不再有被删的观察；日台账形状与确定性；跨日边界裁剪 |
 
 测试数据落在 `~/Library/Caches/brosis-build/m1-core-tests/`，每个用例一个临时目录，用完删掉；
 不启动任何 GUI、不碰钥匙串、不触发 TCC。
 
 ---
+
+## 跨设备同步（3.9 / D17，M2 c 批 / T13）
+
+两台机器**各自一个本地库**，之间只传**加密的追加日志段文件**；数据库文件本体永远不进同步目录
+（D16 两个方向都拦，见下）。
+
+### 分层
+
+| 层 | 位置 | 管什么 | 不管什么 |
+|---|---|---|---|
+| 库侧 | `BrosisCore/Store+Sync.swift`、`SyncTypes.swift`、`SyncSchema.swift` | 出站取数、入站落库、级联、水位线、对端状态 | 文件、加密、目录 |
+| 文件侧 | `BrosisSync`（新 target） | JSON Lines 编解码、AES-256-GCM、目录布局、占位符下载、ack 与清理、两个循环 | 一行 SQL 都没有 |
+
+`BrosisSync` 依赖 `BrosisCore`，反过来不依赖：不开同步的构建里，同步代码一行都跑不到写入路径上。
+
+### 同步范围
+
+**同步**：`observations`、`text_versions`、`occurrences`、`deletions` 里 `reason = 'user'` 的墓碑。
+
+**不同步**，各有各的理由：
+
+| 不同步的东西 | 理由 |
+|---|---|
+| `capture_stats` / `capture_audit` / `mcp_audit` | 本机运行质量的度量，不是证据 |
+| `app_policies` / `grants` | 3.9「grants、config 等少量可变配置各机独立」 |
+| `sessions` / `ledgers` | 派生结果，各机按自己的屏幕时间算（见下面的会话口径） |
+| `deletions` 里 `reason = 'quota'` | 3.8：配额是**本机策略**，另一台机器的配额可以不一样 |
+| `thumb_ref` | 缩略图是本机文件（D10 默认关） |
+
+### 入站记录落在哪个 (device_id, id)：本任务最重要的一条口径
+
+schema 从 M1 起就是 `PRIMARY KEY (device_id, id)`，这一点没变。变的是**入站记录用哪一对**：
+
+> 入站记录以 `device_id = 本机`、`id = 本机计数器新分配的值` 落库，
+> 来源 `(origin_device, origin_id)` 记在 `observations` 的两个新列上（schema v5），
+> 由部分唯一索引 `idx_obs_origin` 保证同一条来源记录只落一次。
+
+为什么不原样沿用源设备的 `(device_id, id)`：M1 的检索层与 3.6 的 MCP 协议把 observation 的句柄
+定死成**一个 Int64**（`SearchHit.evidenceID`、`getEvidence(ids:)`、内部的 `Set<Int64>` 去重）。
+两台机器的 id 都从 1 开始，原样写入之后 `(A,7)` 与 `(B,7)` 在检索层是同一个 Int64——
+搜索去重会把两条不同的证据当成一条，`get_evidence` 会返回错的那一条。
+要原样写就得把整个检索层与 MCP 协议的 id 换成复合键。
+
+换成本机 id 空间之后：
+
+- 检索层**一行都不用改**，入站记录自动被 `search` / `get_evidence` / `get_item` / `get_context` 查得到；
+- 全局身份仍然唯一，只是它叫 `(origin_device, origin_id)`，写在列上而不是主键里；
+- 出站只发 `origin_device IS NULL` 的行（本机自己产生的），所以**不会把别人的记录转发回去**，
+  两台机器之间不会来回打转；
+- 墓碑用 `(origin_device, origin_id)` 指目标，对端能精确定位到自己的那一份副本。
+
+代价：同一条记录在两台机器上的**本机 id 不同**（要跨机器对同一条记录说话，用 origin 两列）。
+
+### 会话与台账只用本机观察
+
+`Store+Sessions` 的三条取数加了 `origin_device IS NULL`。3.7 的 `dwell_s` / `active_s` / `unknown_s`
+是"这台机器的屏幕时间"；把另一台机器的观察混进同一条时间线，会造出根本没发生过的应用切换，
+并把同一段墙钟时间记两遍。入站**墓碑**仍然会让本机的 sessions / ledgers 标 `stale`（3.8 的级联）。
+跨设备合并台账不在本轮范围内。
+
+### 段文件格式
+
+```text
+0..5    magic "BRSSEG"
+6       格式版本（1）
+7       保留，恒 0
+8..11   UInt32（大端）段头 JSON 字节数
+12..    段头 JSON（明文，不含密钥）
+...     AES-GCM combined（12 字节 nonce + 密文 + 16 字节 tag）
+```
+
+明文是 JSON Lines，行首 `k` 是类型：`h` 段头摘要、`t` 正文、`o` 观察（含它的 occurrence）、`d` 墓碑。
+
+三层校验各管一件事，报错要能分辨（3.9 的状态显示要求把"缺段、校验失败、未下载"分开）：
+
+1. `checksum`（段头里记的密文 SHA-256）→ **文件坏了**（`SyncError.checksumMismatch`）；
+2. GCM tag，AAD = 去掉 checksum 的段头骨架 → **密钥不对，或段头被改过**（`decryptFailed`）；
+   把 `5.seg` 改名成 `3.seg`、或改段头里的 device / seq，都会在这里失败，而不是"解开了但错位"；
+3. `plainBytes` 与三个计数 → 明文与段头声明不一致（`corruptSegment`）。
+
+**段是自包含的**：段里的 occurrence 引用某个 sha 时，这个段就带上它的正文，哪怕更早的段发过。
+代价是跨段重复（实测数字见结果文件），换来的是"任何一个段都能独立导入"，以及
+"对端把那条正文删掉之后，后面的段也不会永远解析不了"。段内按 sha 去重。
+
+没有压缩：本轮不引入第三方依赖（系统里没有 zstd），而段文件是**用完即删**的传输载体。
+
+### 密钥（3.9「密钥」）
+
+三把不同的东西：
+
+| | 是什么 | 存在哪 | 用途 |
+|---|---|---|---|
+| 库密钥 | 256 位随机 | data-protection 钥匙串 | SQLCipher 开库 |
+| 同步密钥 | 256 位随机 | **加密库里**（`sync_state.sync_key`，base64） | 只封段文件 |
+| 配对口令 | 24 字符 / 120 bit | **哪都不存**（首台显示一次） | 解开 `keyring/*.wrapped` |
+
+同步密钥放进库而不是再要一个钥匙串条目：钥匙串写入会弹授权框（本轮不允许触发）；
+库本身已经是 SQLCipher 加密的；只有一个持钥者（存储服务）。
+代价是拿到库密钥的人也能拿到同步密钥——但拿到库密钥本来就能读全部原文，
+同步密钥保护的是它的**子集**，边界没有降低。
+
+包裹参数：PBKDF2-HMAC-SHA256、迭代 600,000（OWASP 2023 建议值）、每份包裹自己的 16 字节随机盐、
+输出 32 字节，再经 HKDF-SHA256（info `brosis-sync/1 keywrap`）域分离，最后 AES-256-GCM 包裹，
+AAD 绑 `格式 | wrap | device_id`（把 A 的 wrapped 改名成 B 的会解不开）。
+不用 Argon2id 是因为本轮不引第三方依赖，系统里只有 CommonCrypto 的 PBKDF2。
+
+口令字母表 32 个字符（去掉 `0/O`、`1/I/L`），6 组 × 4 字符 = **120 bit**；
+`256 % 32 == 0`，所以对随机字节直接取模没有偏置。输入时大小写与分隔符都无所谓，
+字母表外的字符直接判非法（不去做 60 万次 PBKDF2）。
+
+### 目录（3.9 原文）
+
+```text
+<root>/manifest.json                   格式版本、创建时间、加密参数（不含密钥）
+<root>/keyring/<device_id>.wrapped     口令包裹的同步密钥副本，供新设备加入
+<root>/devices/<device_id>.json        设备名、加入时间、最后出站 seq
+<root>/segments/<device_id>/<seq>.seg  加密段文件，写一次不改（seq 补零到 12 位）
+<root>/acks/<device_id>.json           本机已导入各设备到哪个 seq
+```
+
+**每台机器只写自己的那几个文件**，这是整套设计不需要跨机器加锁的原因，
+也是"可以换成任意文件同步盘或 NAS"的原因。
+
+- **占位符**：iCloud 没下载的文件在目录里显示成 `.<真名>.icloud`。列目录时还原成真名
+  （"有这一段"与"下没下载"是两件事），导入前调 `startDownloadingUbiquitousItem` 并轮询
+  `ubiquitousItemDownloadingStatus == .current`，超时报 `downloadTimeout`。
+- **manifest 冲突副本**（3.9「边界情况」）：两台机器几乎同时首次打开会各写一个 manifest。
+  检测两路——根目录里出现 `manifest 2.json` 之类的旁支文件，或 `NSFileVersion` 报未解决冲突。
+  命中就**停下来让用户选**，不自动合并。
+- **D16 的两个方向**：`DataDirectory.validate` 拦"库放进同步盘"（`brosis-sync` 已在名单里）；
+  `SyncFolder.validate(against:)` 拦反方向——同步目录与数据目录重叠、或目录里出现 `*.db` / `-wal` / `-shm`。
+
+### 两个循环
+
+- **出站** `exportOnce()`：`syncExportNext` 取一批 → 封段 → 原子写文件 → `syncCommitExport` 推水位线。
+  顺序是**先写文件、再推水位线**：反过来的话写文件失败会把那批记录永久漏掉；
+  现在的失败模式是"可能重复出一个段"，而重复段在对端是幂等的。
+- **入站** `importOnce()`：按 `seq` 连续导入，**缺一段就停在那里**，绝不跳过（3.9「校验」）。
+  每个对端独立：一个对端缺段不影响另一个继续导。整段一个事务，中途失败整体回滚。
+- **清理** `cleanup()`：段的主人读所有对端的 ack，取对本机 seq 的**最小值**作水位线，删 ≤ 它的段。
+  一台对端都没有时不删（第二台机器还没加入，段得留着等它）。
+
+### `brosis-store` 的同步子命令
+
+```bash
+brosis-store sync-init    --dir <库> --key-file <钥> --sync-dir <目录> [--passphrase <口令>] [--device-name <名字>]
+brosis-store sync-status  --dir <库> --key-file <钥> --sync-dir <目录>
+brosis-store sync-export  --dir <库> --key-file <钥> --sync-dir <目录> [--max-segments 8]
+brosis-store sync-import  --dir <库> --key-file <钥> --sync-dir <目录>
+brosis-store sync-cleanup --dir <库> --key-file <钥> --sync-dir <目录>
+brosis-store sync-run     --dir <库> --key-file <钥> --sync-dir <目录>   # 入站 → 出站 → 清理
+```
+
+`sync-init` 在**建目录那一次**打印 `pairing_passphrase`，之后任何命令都再也拿不到它。
 
 ## 已知限制
 
@@ -1041,6 +1313,17 @@ $BIN mcp-audit --dir $W/db --key-file $W/db.key --limit 20
     把它写死成恒真或恒假都会让用例变红。
 18. **`locked` 期间的审计是补写的**：库关着写不进去，先攒内存（上限 200 条），
     解锁后补写；进程在这期间被杀就会丢，丢多少有一条溢出说明但不精确到条。
+20. **跨设备同步（3.9 / D17）的四条边界**（M2 c / T13）：
+    ① 入站记录用**本机 id 空间** + `origin_device` / `origin_id` 两列记来源，
+       所以同一条记录在两台机器上的本机 id 不同（理由见同步章节）；
+    ② `sessions` / `ledgers` 只用本机产生的观察构建，**不合并另一台机器的屏幕时间**；
+    ③ 段是自包含的，跨段会重复发同一段正文（换"任何一个段都能独立导入"）；
+    ④ iCloud 钥匙串自动同步密钥这一便利选项**没做**（要真人点钥匙串授权），接口留在
+       `SyncEngine.openOrCreate` 的 `passphrase` 参数上，将来加一条"从钥匙串取"的分支即可。
+21. **同步没有真机实测**：两台机器之间的实际同步延迟、iCloud 占位符驱逐的真实频率、
+    大目录下的 `contentsOfDirectory` 开销，都要在两台真机上跑一段时间才有数。
+    本轮全部用本地临时目录模拟，占位符那条路径（`ensureDownloaded`）只有非 iCloud 分支被测到。
+
 19. **MCP 的读并发没有专门优化**：`Store` 内部仍然是一条连接一把锁，
     MCP 查询与采集写入互相串行。个位数并发下够用，多连接读留给 M2（同已知限制 3）。
 
@@ -1052,3 +1335,233 @@ Developer ID + hardened runtime 但没有 application-identifier / keychain-acce
 登录钥匙串条目不进 iCloud 钥匙串同步，默认 ACL 只信任创建它的签名身份（换签名身份会弹一次授权框）。
 `fetchKey(backend:)` 回传实际用的是哪条钥匙串。要真正用上 data-protection 钥匙串，需要在 developer.apple.com
 建 Developer ID 描述文件并把两个权利签进 app（分发管线任务）。
+
+---
+
+## 向量检索、分块与嵌入任务（3.4 / 4.3，schema v4，M2 c 批 / T11）
+
+**默认关**。v4 把两张表建出来（`chunks` / `vec_chunks`），但
+`RetrievalOptions.vectorsEnabled` 默认 `false`，没跑过嵌入任务的库里一个块都没有，
+`search` 的行为与 v3 逐位相同（`SearchResult.fusion == "union"`）。
+计划 3.11 的降级表要求的「未安装模型时向量检索显示为未启用，精确字段与 FTS 不受影响」，
+在这一层就是 `SearchResult.vectorsUnavailable = true` 加一个原因字符串。
+
+### core 不加载任何模型
+
+计划 3.10 的提供方抽象在这里只有一个协议：
+
+```swift
+public protocol EmbeddingProvider: AnyObject, Sendable {
+    var descriptor: EmbeddingModelDescriptor { get }
+    func embed(_ texts: [String]) throws -> [[Float]]   // 已 L2 归一化，长度 = descriptor.dimension
+}
+```
+
+真正的 mlx-swift 实现在 **app 包**的 `BrosisModels` 目标里（`MLXEmbeddingProvider`）。
+这样 core 保持零 mlx 依赖：`swift test --package-path core` 不必解析、编译 mlx-swift
+（那是几分钟与数 GiB 的事），`brosis-mcp` / `brosis-store` 也不会因此变成 40 MiB。
+本包只带一个 `HashEmbeddingProvider`——**确定性伪嵌入，没有语义**，只给测试与
+`brosis-store vec-embed --provider hash` 用，不能拿它出任何检索质量结论。
+
+按用户 2026-09-08 的指示，**线上嵌入适配器不写**（3.10 本来也规定 v1 嵌入只本地）。
+
+### 两张表（`SchemaV4`）
+
+| 表 | 是什么 | 删除时怎么走 |
+|---|---|---|
+| `chunks` | 「`text_versions` 的第 ord 块是哪一段」。`offset` / `len` 是**原文 UTF-8 字节**偏移与长度，与 `byte_len` 同口径；不复制正文 | 外键 `ON DELETE CASCADE` 跟着 `text_versions` 走 |
+| `vec_chunks` | sqlite-vec 的 `vec0` 虚拟表，`chunk_rowid` 对齐 `chunks.vrow` | **虚拟表没有外键**，由 `sweepOrphanVersions` 显式删（与 `text_fts` 同一处理），`maintenance()` 夜间再对一次账 |
+
+两张表都是**本机派生数据**，语义与 `text_fts` 同级：删了能重建、**不参与 D17 同步**、不是证据。
+
+**与 D17 同步的关系（v5，T13）**：入站记录以 `device_id = 本机` 落库
+（来源记在 `origin_device` / `origin_id` 两列），所以分块的
+`WHERE device_id = ?` 自动覆盖到从另一台机器同步过来的正文——
+**不用为同步内容另写一条路**，夜间任务下一轮就会把它们也嵌进来。
+反过来，向量本身**不出站**（它是派生数据，两台机器各建各的）。
+
+**维度 512、元素 int8、距离 cosine**，理由分别是：
+
+* **512**：E9 实测 Qwen3-Embedding-0.6B 的 MRL 截断保真——原生 1024 维，截到 512 维
+  Recall@10 = 0.925、256 维 0.90（`tools/bench/results/e9_runtime_2026-09-07.md`、
+  报告 11.2 第 7 条）。512 在几乎不掉保真的前提下把向量体积减半。
+  截断口径 = 取前 512 维再重新 L2 归一化。
+* **int8**：512 维 float32 是 2 KiB/块、int8 是 512 B/块，1 个月库上是 200 MiB 与 50 MiB 的差别，
+  直接影响 D21 的 0.6 GiB/月目标。sqlite-vec v0.1.9 只有 float32 / int8 / bit 三种元素类型，**没有 float16**。
+* **量化能这么做的原因**：`vec0` 的 `distance_cosine_int8` 是 `1 - dot/(|a||b|)`，
+  **对整体缩放不敏感**，所以每条向量各自用 `s = 127 / max|v_i|` 缩放到满量程再取整
+  （`EmbeddingVector.quantizeInt8`）。固定乘 127 会很糟：L2 归一化的 512 维向量分量典型只有
+  ±0.04，乘完只剩十来个量化档。
+
+**注册**：`Store.sqliteVecRegistered` 在建第一条连接之前跑一次 `sqlite3_auto_extension`。
+v3 之前 sqlite-vec 只是静态编入「保证能链接」，v4 起真的注册——`vec_chunks` 是虚拟表，不注册连表都建不出来。
+
+**一个坑**：SQLite 的 subtype **不跨子查询传播**。
+`INSERT INTO vec_chunks SELECT vec_int8(embedding) FROM vec_chunks` 会报
+`expected int8, but float32 was provided`；产品路径写的是
+`VALUES (?, vec_int8(?))`，把函数调用直接放在 `VALUES` 里。
+
+### 分块（`Chunker`，确定性）
+
+1. **先按段落切**（换行为界，连续换行算一次）。屏幕正文的自然单元就是行 / 段，
+   AX 与 OCR 两条采集路径都按行给文本。
+2. **再按目标长度攒**：连续段落往当前块里塞，塞到再加一段就超过 `targetCharacters`（默认 500）为止。
+   段与段之间补回被吃掉的 `\n`，所以按 `offset` / `len` 取回来与原文逐字节相同。
+3. **超长段落走固定字符窗**：单段超过 `maxCharacters`（默认 700）时按窗切开，
+   窗与窗留 `overlapCharacters`（默认 80）字符重叠，免得答案正好被切在缝上。
+4. 丢掉纯空白与 `< minCharacters`（默认 8）的块；每个版本最多 `maxChunksPerVersion`（默认 64）块。
+
+没有随机数，同一段输入永远切出逐位相同的块（`VectorTests.testChunkerIsDeterministic`）。
+参数指纹写进 `meta.embed_chunk_config`，改了参数再跑会直接报错要你先 `rebuildEmbeddings()`。
+
+### 嵌入任务（3.2「可停止、可重建的处理任务」）
+
+```swift
+let report = try store.runEmbeddingJob(provider: provider,
+                                       options: EmbeddingJobOptions(batchSize: 16),
+                                       gate: { thermalOK ? nil : "thermal_fair" })
+```
+
+* **可停止**：每批之前问一次 `gate`，返回非 nil 就干净停下，已写进去的块保留。
+* **幂等**：待办队列就是 `chunks.embedded_at IS NULL`，重跑只捡剩下的；
+  再跑一次已经做完的库，`chunksEmbedded == 0`。
+* **不持锁调模型**：取一批正文（持锁，很快）→ **放开锁**调 provider（GPU，一秒上下）→
+  拿回锁把向量与 `embedded_at` 在**同一个事务**里落。所以采集线程整晚不会被卡住，
+  也不会出现「`chunks` 说嵌过了但 `vec_chunks` 没有」的半条状态——
+  实测把进程 `kill` 在批中间，重开库 `embeddedChunks == vectorRows`、`check` 全过。
+* **可重建**：`rebuildEmbeddings()` 清空两张表与四个 meta 键，下次从头再来。
+  换模型不先重建会被拒（报错里直接告诉你要调什么）。
+* 每次运行在 `jobs` 表留一行（`type = 'embed'`），`output_ref` 里有块数、批数、
+  provider 秒数与停止原因。
+
+### 混合检索：加权 RRF
+
+向量通道有三道门，**顺序有意义**（先看开关，所以关着的时候连一次 `COUNT` 都不查）：
+
+| 原因 | 什么时候 |
+|---|---|
+| `disabled` | `retrieval.vectorsEnabled == false`（默认） |
+| `no_query_vector` | 调用方没给 `SearchRequest.queryVector`（core 不算向量） |
+| `no_index` | 库里一条 `embedded_at` 都没有（＝模型没装 / 没跑过任务） |
+| `field_prefix` | 查询带 `app:` / `host:` / `path:` / `url:` / `title:` 前缀——问的是"这个对象的全部观察"，不是"跟这句话像的内容"，向量插一脚只会稀释精确结果 |
+| `empty_query` / `app_not_in_database` | 查询串是空的 / 指定的应用库里没有，直接空结果 |
+
+四条通道都参与时按**加权 Reciprocal Rank Fusion** 合并：
+
+```
+score(d) = Σ_c  w_c / (k + rank_c(d))       k = rrfK = 60
+w = 1.0（精确字段 / 1–2 字扫描 / FTS）   w = 0.5（向量，vectorWeight）
+```
+
+* 为什么是 RRF 而不是分数加权：四条通道的分数没有可比量纲——精确字段通道压根没有分数、
+  FTS 这里不用 bm25（E7 §10.2 换成了 rowid 倒序）、向量给的是余弦距离。RRF 只用名次。
+* 为什么向量的权重减半：前三条是**精确子串**语义，命中即真命中；向量是相似度。
+  减半之后「两边都命中」的证据一定排在「只有向量命中」的前面，原来的题不会被向量挤下去
+  （`VectorTests.testHybridKeepsExactHits` 钉这条）。
+* 同分按**并集顺序**（精确 → 扫描 → FTS → 向量）打破，所以结果是确定性的。
+* **向量关着时走老口径**（`fusion == "union"`），与 v3 逐位相同。
+* `vectorMaxDistance`（**默认 0.40**）挡掉「库里根本没有相关内容」的查询，
+  否则负例题会被塞满 10 条不相干的证据（草稿规定「编造一次即失败」）。
+  0.40 是 M2 c / T11 的阈值扫描选出来的，表见
+  `tools/bench/results/m2_c_vectors_2026-09-08.md` 第 5.4 节。
+  **已知限制：它不随索引规模自适应**——同一套题、同一个阈值，索引从 37% 建到 66% 时
+  负例误报就从 0 涨到 2（块越多，"库里没有的内容"的最近邻也越近）。
+  它是**要随语料规模复核的常量**，不是一劳永逸的分界线。
+* **逐条命中的距离**写在 `SearchHit.vectorDistance` 上（语义是「向量通道也找到了它，距离是这么多」，
+  与 `channel` 标了哪条无关）。`StoreMCPService` 直接把 `SearchResult` 与 `[SearchHit]` 编码出去，
+  所以这个字段**自动随 MCP 的 `search` 返回**——等 app 侧的 IPC 服务端能算查询向量之后
+  （见结果文件第 9 节第 1 条），MCP 客户端不用改协议就能拿到可信度信号。
+* **向量通道按文本版本轮转**：一个版本平均被 2–3 条观察引用，直接按名次排会让前 10 条
+  被 3 个版本吃光；轮转之后前 10 条来自 10 个不同版本，实测改写题 Recall@10 从 0.170 升到 0.214。
+  FTS 通道不这么做——它是精确子串语义，同一段正文的多次出现本身就是证据。
+
+### `brosis-store` 的向量子命令
+
+| 命令 | 作用 |
+|---|---|
+| `vec-status` | 分块 / 向量 / 模型状态 + 最近的嵌入任务行 |
+| `vec-plan` | 只分块不嵌入 |
+| `vec-embed --provider hash` | 用**确定性伪嵌入**跑一遍任务（没有语义，只给测试 / 复现用） |
+| `vec-rebuild` | 清空两张表与 meta，索引从头再来 |
+| `vec-search --vector-file … \| --text …` | 纯向量 kNN |
+| `search` / `search-batch` 加 `--vectors` | 打开向量通道；查询向量走 `--vector-file` / `--query-vectors`，或 `--hash-query` 现算（测试用） |
+
+**真实模型的那条路在 app 包的 `brosis-embed`**：它算好向量，检索仍然走这里的
+`search-batch`，所以 D8 实验量到的是产品行为，不是另写一套。
+
+### 一致性检查与夜间对账
+
+`integrityReport()` 从 13 项加到 **16 项**，新增：
+「chunk 指向不存在的 text_version」「向量行没有对应的 chunk」「标了已嵌入却没有向量行的 chunk」。
+`maintenance()` 相应多做两件事：删孤儿向量行、把「标了已嵌入却没有向量行」的块改回待办。
+
+---
+
+## 可选叙述（4.3 / 3.7 / 3.10 / D19，M2 c 批 / T12）
+
+**一句话**：叙述是**贴在台账上的一层标注**——台账仍然是确定性的，叙述由本地模型写、
+过一遍**确定性的忠实度核对**才入库，没过的一个字都不留。
+
+### schema v6：一列 `ledgers.narrative_meta`
+
+`ledgers` 从 v1 起就有 `narrative` 与 `model`。v6 再加**一列可空 TEXT**，存 `NarrativeMeta` 的 JSON：
+模型 id、生成时刻、输入 / 输出 token 数、token 数是分词器给的还是估算的、提示的压缩等级、
+忠实度核对过没有、核对里比了几个数字与应用、有没有因为汉字数上限被截断、
+**这条叙述是依据哪一版台账写的**（`ledgerComputedAt`），以及热状态与峰值 footprint。
+纯新增可空列，老库 `ALTER` 就地迁移（`SchemaV6`）。
+
+三列都**不进 `ledgers.ledger` 那份 JSON**，台账一重算就一起置回 NULL。
+
+### 四个入口
+
+| 入口 | 做什么 |
+|---|---|
+| `narrativeDayInput(date:)` / `narrativeWeekInput(week:)` | 台账 → 确定性的叙述输入（含会话与屏幕文本摘录） |
+| `narrativeBacklog(config:now:)` | 挑出「已经过完、还没写叙述 / 叙述已过期」的日与周 |
+| `runNarrative(_:provider:config:)` | 构造 → 裁剪 → 生成（失败重试一次）→ 核对 → 入库 / 丢弃 |
+| `narrativeRecord(level:period:)` / `saveNarrative` / `clearNarrative` | 读写那三列 |
+
+`GenerationProvider` 是 3.10 的 `generate` 侧抽象。core 里只有协议与一个**脚本化假提供方**
+（`ScriptedGenerationProvider`），本地 mlx 实现在 app 的 `MLXGenerationProvider`——
+**core 保持零 mlx 依赖**，所以 `swift test` 不编译 mlx 就能把整条叙述路走完。
+**线上适配器本轮不写**（用户指示：不接线上模型）。
+
+### 提示与 8,000 token 闸门（D19）
+
+D19 实测：预填约 340 tok/s，8,000 token 输入的 TTFT 约 23.5 s，262K 的名义上下文在 Air 上不可用。
+所以提示按**五级压缩**逐级往下走，第一个落在闸门内的等级就是最终等级：
+
+| 等级 | 内容 |
+|---|---|
+| `full` | 概览 + 全部应用 + 站点 / 文件各前 10 + 全部会话（窗口标题 + 摘录 160 字符） |
+| `trimmed` | 应用前 12、站点 / 文件各前 5、会话前 12，摘录裁到 3/4 |
+| `session_summary` | 应用前 10，去掉站点与文件，会话**按应用合并**（只留最长一段的摘录） |
+| `app_summary` | 应用前 8，只留概览 + 应用表 + **待办清单**（≤ 5 条，规则 2 全靠它） |
+| `minimal` | 概览 + 应用前 5，没有会话 |
+
+core 里没有分词器，闸门按 `NarrativeTokens.estimate` 判：汉字 1、ASCII 字母数字 0.5、
+空白 1/3、其余 1，再加 48 的模板开销。口径是**只高不低**——
+D19 三份真实提示（837 / 3,664 / 5,354 token）上分别估成 1,046 / 4,046 / 5,568，比值 1.25 / 1.10 / 1.04。
+app 那边能拿到真实分词器时优先用真值（`NarrativeMeta.inputTokenSource = "tokenizer"`）。
+
+### 忠实度核对：四条确定性规则
+
+| 规则 | 抓什么 | 依据 |
+|---|---|---|
+| `fabricated_number` | 叙述里出现**提示正文里没有**的阿拉伯数字（归一：去前导 0、去小数末尾 0） | 4.3 |
+| `fabricated_app` | 叙述里出现台账里没有的应用（按别名词表判组） | 4.3 |
+| `todo_claimed_done` | 一句话里同时出现「解决 / 完成 / 修复…」与**待办关键词** | D19 偏差 1 |
+| `wrong_time_band` | 一句话把某应用放进它当天没有活动的时段（上午 / 下午 / 晚上…） | D19 偏差 2 |
+| `thinking_detected` / `empty` | 输出里出现 `<think>` 段；叙述为空 | D19 硬性约束 |
+
+待办关键词的命中条件是「一个 ≥ 3 字的词，或**两个不同的** 2 字词」——
+D19 那句「解决了锁屏切换漏事件的问题」同时命中「锁屏」「切换」「事件」，走后者；
+而「完成 34 项测试」只蹭到一个「测试」，不算违规（单个 2 字词的重合在中文里太常见，按它判会误杀）。
+
+**已知边界**（写在这里免得被当成没做）：只查阿拉伯数字，中文数字不查；
+应用名靠别名词表 + 台账自己的展示名识别，词表外**且**台账里也没有的生造名字抓不到；
+中文别名只收「基本不会当普通名词用」的那些（「预览」「照片」「音乐」故意不收，
+收了会把一句正常的叙述判成编造）。
+
+长度按**汉字数**在代码里截断（默认 150，优先切在句末符号上），
+不只写在提示词里——D19 结论 5 说得很清楚，只靠提示词管不住。

@@ -330,7 +330,8 @@ final class E3ScenarioTests: XCTestCase {
         _ = try store.maintenance()
 
         let report = try store.integrityReport()
-        XCTAssertEqual(report.danglingChecks.count, 13, "E3 的 13 项悬空检查一项不少")
+        // 13 = E3 的 S7 原班项；+3 = v4（M2 c / T11）的 chunks / vec_chunks 悬空检查。
+        XCTAssertEqual(report.danglingChecks.count, 16, "E3 的 13 项 + v4 的 3 项悬空检查一项不少")
         for item in report.danglingChecks {
             XCTAssertEqual(item.value, item.expected, "悬空检查未通过：\(item.name) = \(item.value)")
         }

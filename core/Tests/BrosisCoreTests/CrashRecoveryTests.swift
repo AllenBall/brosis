@@ -60,7 +60,8 @@ final class CrashRecoveryTests: XCTestCase {
         XCTAssertEqual(try store.count(table: "occurrences"), committed)
 
         let report = try store.integrityReport()
-        XCTAssertEqual(report.danglingChecks.count, 13)
+        // 13（E3 S7）+ 3（v4 的 chunks / vec_chunks）
+        XCTAssertEqual(report.danglingChecks.count, 16)
         for item in report.danglingChecks {
             XCTAssertEqual(item.value, item.expected, "崩溃恢复后悬空检查失败：\(item.name)")
         }
@@ -147,7 +148,8 @@ final class CrashRecoveryTests: XCTestCase {
 
         let check = try run(["check", "--dir", dir, "--key-file", key])
         XCTAssertEqual(check["all_passed"] as? Bool, true)
-        XCTAssertEqual((check["dangling"] as? [[String: Any]])?.count, 13)
+        // 13（E3 S7）+ 3（v4 的 chunks / vec_chunks）
+        XCTAssertEqual((check["dangling"] as? [[String: Any]])?.count, 16)
 
         // 错密钥必须失败（退出码非 0）
         let wrongKey = root.appendingPathComponent("wrong.key")

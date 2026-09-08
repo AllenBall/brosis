@@ -56,6 +56,9 @@ public enum SearchChannel: String, Sendable, Codable, CaseIterable {
     case fts
     /// 1–2 字查询：限时 / 限应用的 `LIKE` 扫描（3.4）
     case scan
+    /// v4（M2 c / T11）：查询向量 → `vec_chunks` kNN → 块 → 文本版本 → 展开到观察（3.4「向量检索」）。
+    /// **默认关**（`RetrievalOptions.vectorsEnabled`），没装嵌入模型时强制关。
+    case vector
 }
 
 /// `search(q, start, end, app, limit)`（3.6 工具签名）。
@@ -69,14 +72,20 @@ public struct SearchRequest: Sendable {
     /// 应用过滤：`apps.bundle_id` 等值（列上有 COLLATE NOCASE）。
     public var app: String?
     public var limit: Int
+    /// v4（M2 c / T11）：查询串的嵌入向量。**由调用方算好传进来**——
+    /// core 不加载任何模型（3.10 的提供方抽象在 `EmbeddingProvider`，本地实现在 app 侧）。
+    /// 为 nil、或 `RetrievalOptions.vectorsEnabled` 为 false、或库里一条向量都没有时，
+    /// 向量通道不参与，`SearchResult.vectorsUnavailable` 会说明是哪一种。
+    public var queryVector: [Float]?
 
     public init(q: String, start: Int64? = nil, end: Int64? = nil,
-                app: String? = nil, limit: Int = 20) {
+                app: String? = nil, limit: Int = 20, queryVector: [Float]? = nil) {
         self.q = q
         self.start = start
         self.end = end
         self.app = app
         self.limit = limit
+        self.queryVector = queryVector
     }
 }
 
@@ -96,6 +105,17 @@ public struct SearchHit: Sendable, Codable {
     /// ≤ `RetrievalOptions.summaryTokenBudget` token 的一行摘要：应用 · 标题 · 时间 · 命中片段。
     public var summary: String
     public var summaryTokens: Int
+    /// v4（M2 c / T11）：这条**观察**在向量通道里的余弦距离（0 = 完全一致、1 = 正交）。
+    ///
+    /// 语义是「向量通道也找到了它，距离是这么多」，与 `channel` 最终标了哪条通道无关：
+    /// 一条 FTS 精确命中同时被向量通道找到时照样有值（那正是调用方想知道的）。
+    /// 向量通道压根没返回这条观察时是 nil；向量通道没参与时全都是 nil。
+    ///
+    /// 它是给调用方（MCP 客户端、Agent）的**可信度信号**：`channel == .vector` 且距离偏大的命中
+    /// 是「相似」不是「命中」。D8 的实验数据表明，单一距离阈值分不开
+    /// 「库里没有这个内容」与「换了个说法的真命中」（见结果文件的阈值扫描），
+    /// 所以这一层如实把距离交出去，由上层决定要不要展开成证据。
+    public var vectorDistance: Double?
 }
 
 public struct SearchResult: Sendable, Codable {
@@ -116,6 +136,23 @@ public struct SearchResult: Sendable, Codable {
     public var scanFromTS: Int64?
     public var scanToTS: Int64?
     public var elapsedMS: Double
+
+    // ---- v4（M2 c / T11）向量通道 ----
+
+    /// 向量通道这次**没有**参与。`true` 时 `vectorUnavailableReason` 说明原因，
+    /// 三条精确 / 扫描 / FTS 通道照常工作（3.11「未安装模型时向量检索显示未启用」）。
+    public var vectorsUnavailable: Bool = true
+    /// `disabled`（开关关）/ `no_query_vector`（调用方没给向量）/ `no_index`（库里没有向量）/
+    /// `error:<原因>`；参与时为 nil。
+    public var vectorUnavailableReason: String?
+    /// kNN 取回的块数（合并之前）。
+    public var vectorCandidates: Int = 0
+    /// 向量通道展开到观察后的条数。
+    public var vectorObservations: Int = 0
+    /// 最好的一条余弦距离（0 = 完全一致；没走向量通道时为 nil）。
+    public var vectorBestDistance: Double?
+    /// 这次的合并方式：`union`（三通道并集，向量关时的老口径）或 `rrf`（加权 RRF，向量开时）。
+    public var fusion: String = "union"
 }
 
 /// 检索层的可配置参数。开库后、开始查询前设置；不是线程安全的。
@@ -138,6 +175,39 @@ public struct RetrievalOptions: Sendable {
     public var snippetContext: Int = 40
     /// 台账 / 时间线 / `getItem` 的日历时区。默认本机时区；测试与验收用 UTC 保证确定性。
     public var timeZone: TimeZone = .current
+
+    // ---- v4（M2 c / T11）向量通道。全部**默认关**，模型没装时强制关 ----
+
+    /// 向量检索开关（计划 3.4「未安装时向量检索显示为未启用」、4.3「默认关闭、模型安装后可开启」）。
+    /// **默认 false**：关着的时候 `search` 一次向量调用都不发，行为与 v3 逐位相同。
+    public var vectorsEnabled: Bool = false
+    /// kNN 取多少个块（无过滤）。sqlite-vec v0.1.9 的 kNN 是全量扫描，
+    /// 代价与 k 基本无关（排序那一点点除外），所以取大一些不吃亏。
+    public var vectorK: Int = 200
+    /// kNN 取多少个块（带时间 / 应用过滤）。过滤会把候选筛掉，所以要更大的窗口，
+    /// 理由与 `filteredFTSCandidateLimit` 完全一样。
+    public var filteredVectorK: Int = 1_000
+    /// 余弦距离上界（`vec0` 的 `distance`，0 = 完全一致、1 = 正交）。超过它的块直接丢掉。
+    ///
+    /// 它挡的是**负例误报**：向量通道给的是最近邻，"库里根本没有这个内容"的查询照样能拿到
+    /// 一堆相似度不高的块，而 `docs/查询集草稿.md` 规定不可答题「编造一次即失败」。
+    ///
+    /// **0.40 是实测选出来的**（M2 c / T11 的阈值扫描，表见
+    /// `tools/bench/results/m2_c_vectors_2026-09-08.md` 第 5.4 节）：它在改写题召回
+    /// 与负例误报这两条反向曲线上取了一个偏保守的点。
+    ///
+    /// **已知限制：这个阈值不随索引规模自适应**。同一套题、同一个阈值，索引从 37% 建到 66%
+    /// 时负例误报就从 0 涨到 2——块越多，"库里没有的内容"的最近邻也越近。
+    /// 所以它是**一个需要随语料规模复核的常量**，不是一劳永逸的分界线；
+    /// 真正的解法（按查询自适应的阈值、或让调用方按 `SearchHit.vectorDistance` 自己判）
+    /// 记在结果文件第 6 节的条件里。
+    public var vectorMaxDistance: Double = 0.40
+    /// RRF 融合常数 k（Cormack 2009 的经典取值 60）。
+    public var rrfK: Double = 60
+    /// RRF 里向量通道的权重。精确字段 / 扫描 / FTS 三条都是 1.0，向量是 0.5：
+    /// 前三条是**精确子串**语义（命中就是真命中），向量是相似度，权重减半让
+    /// "两边都命中"的证据排在"只有向量命中"的前面，从而保证原 60 题不被向量挤下去。
+    public var vectorWeight: Double = 0.5
 
     public init() {}
 }
@@ -309,8 +379,13 @@ public struct LedgerEntry: Sendable, Codable {
     public var observations: Int
 }
 
-/// `get_day_ledger(date)` 的产物。**`narrative` 永远是 nil**——3.7 要求台账与叙述分开标注，
-/// 叙述是 M2 的可选夜间任务。
+/// `get_day_ledger(date)` 的产物。
+///
+/// **台账本身是确定性的**：`apps` 以下到 `computedAt` 为止的每一个数都由观察算出来，
+/// 不经过任何模型（3.7）。`narrative` / `model` / `narrativeMeta` 三个字段是
+/// **M2 的可选夜间任务**贴上去的标注，与台账分开（3.7「输出与台账分开标注」）：
+/// 它们不在 `ledgers.ledger` 那份 JSON 里，而是 `ledgers` 表的三个独立列，
+/// 台账一重算就一起置回 NULL。没跑过叙述、或者模型没装时，三个都是 nil。
 public struct DayLedger: Sendable, Codable {
     public var date: String
     public var timeZone: String
@@ -339,6 +414,34 @@ public struct DayLedger: Sendable, Codable {
     public var sessionConfig: SessionConfig
     public var stale: Bool
     public var computedAt: Int64
+    /// M2 c / T14：这份台账**算的时候**这一天有哪些观察，写成 `n=<条数>,max=<最大 id>`。
+    ///
+    /// 为什么要它：`ledgers` 行只在**删除**时被标 `stale`（3.8 的级联），
+    /// 新观察写进来不会碰它——于是"今天"的台账一旦算过一次就被永久缓存，
+    /// 当天后来的活动全部看不见（M1 的既有行为）。周台账要按天聚合、还要谈"增量"，
+    /// 这个洞必须先堵上：读缓存时拿它跟库里现算的一份比，不一致就重算。
+    ///
+    /// 可空：v1–v3 写下的老台账行没有这个字段，读回来是 nil，按"验不了 → 重算"处理。
+    public var contentFingerprint: String?
+
+    /// M2 c / T12（schema v6）：叙述的标注——模型、生成时刻、输入 token 数、忠实度核对结果。
+    ///
+    /// 它和 `narrative` / `model` 一样**不在 `ledgers.ledger` 那份 JSON 里**，
+    /// 而是 `ledgers` 表的独立列（3.7「输出与台账分开标注」），台账一重算就一起置回 NULL。
+    /// 可空：没跑过叙述、模型没装、或者叙述没通过忠实度核对被丢弃时都是 nil。
+    /// 默认 nil，这样 `computeDayLedger` 的构造点不必显式传它（台账算出来时本来就没有叙述）。
+    public var narrativeMeta: NarrativeMeta? = nil
+
+    /// 叙述是不是已经对不上现在这份台账了。
+    ///
+    /// 正常路径上永远是 false：台账重算时 `narrative` / `model` / `narrative_meta`
+    /// 一起被置成 NULL。留这个判定是**第二道保险**——万一有人绕过 `upsertLedger`
+    /// 直接改了台账行，靠 `NarrativeMeta.ledgerComputedAt` 对不上也能把旧叙述判成过期。
+    public var narrativeIsStale: Bool {
+        guard narrative != nil else { return false }
+        guard let meta = narrativeMeta else { return true }
+        return meta.ledgerComputedAt != computedAt
+    }
 }
 
 // =============================================================================

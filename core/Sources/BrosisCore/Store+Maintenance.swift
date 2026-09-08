@@ -51,6 +51,28 @@ extension Store {
                 missing = pending.count
             }
 
+            // 1b) 向量对账（v4，M2 c / T11）。`vec_chunks` 是 `vec0` 虚拟表、没有外键，
+            //     和 `text_fts` 一样只能夜间自己对：
+            //       * 有向量行、没有对应的块 → 删掉（块被级联删了，向量行漏在原地）；
+            //       * 块标了 embedded_at、却没有向量行 → 改回待办，下次嵌入任务重嵌。
+            var orphanVectors = 0
+            var reEnqueued = 0
+            try conn.transaction {
+                let orphanVecRows = try conn.intColumn("""
+                    SELECT v.chunk_rowid FROM vec_chunks v
+                     WHERE NOT EXISTS (SELECT 1 FROM chunks c WHERE c.vrow = v.chunk_rowid);
+                    """)
+                for rowid in orphanVecRows {
+                    try conn.run("DELETE FROM vec_chunks WHERE chunk_rowid = ?;", [.int(rowid)])
+                }
+                orphanVectors = orphanVecRows.count
+                reEnqueued = try conn.run("""
+                    UPDATE chunks SET embedded_at = NULL, model = NULL, dim = NULL
+                     WHERE embedded_at IS NOT NULL
+                       AND NOT EXISTS (SELECT 1 FROM vec_chunks v WHERE v.chunk_rowid = chunks.vrow);
+                    """)
+            }
+
             // 2) 遥测滚动清理
             var pruned = 0
             if options.captureStatsRetentionDays > 0 {
@@ -90,6 +112,8 @@ extension Store {
                 captureStatsPruned: pruned,
                 mcpAuditPruned: auditPruned,
                 captureAuditPruned: captureAuditPruned,
+                orphanVectorRowsDeleted: orphanVectors,
+                reEnqueuedChunks: reEnqueued,
                 elapsedMS: Date().timeIntervalSince(t0) * 1000)
         }
     }

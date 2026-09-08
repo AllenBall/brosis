@@ -10,6 +10,10 @@ import Foundation
 //   2. FTS 通道：bigram phrase → 候选 **ORDER BY rowid DESC**（§10.2：bm25 排序在 12 个月
 //      库上 225 ms，rowid 倒序 1.3 ms 且与规模无关）→ 子串复核（只对 FTS 候选）→ 展开到观察。
 //   3. 扫描通道：1–2 字查询限时（默认 7 天）/ 限应用 LIKE 扫描，不依赖 FTS。
+//   4. 向量通道（v4 / M2 c / T11，**默认关**）：调用方给的查询向量 -> vec_chunks kNN ->
+//      块 -> 文本版本 -> 展开到观察。开关是 `RetrievalOptions.vectorsEnabled`；
+//      关着、或调用方没给向量、或库里一条向量都没有时，结果里 `vectorsUnavailable = true`
+//      并给出原因，前三条通道完全不受影响（3.4 / 3.11）。
 //
 // NFKC 口径（M1 R1 之后定案）：**折叠只用于索引，正文存原文**。查询串照旧折叠，
 // 于是「原文是全角、查询是半角」这一路要在两条通道上分别补：
@@ -18,15 +22,25 @@ import Foundation
 // 为真（库里确实写进过全角 / 兼容区正文）时才展开——展开是按模式条数线性变慢的。
 // 两处的理由与实测代价分别写在 `ftsChannel`、`scanPredicate` 与 `scanChannel` 上。
 //
-// 三条通道是**并集**，按 精确 → 扫描 → FTS 的顺序合并去重，每条通道内部按 ts 倒序。
+// 合并方式两档（`SearchResult.fusion`）：
+//   * `union`（**向量关**时，与 v3 逐位相同）：三条通道并集，按 精确 -> 扫描 -> FTS 的顺序
+//     合并去重，每条通道内部按 ts 倒序。
+//   * `rrf`（**向量开**时）：加权 Reciprocal Rank Fusion，
+//     score(d) = Σ_c w_c / (k + rank_c(d))，k = `rrfK`（60）、
+//     精确 / 扫描 / FTS 的 w = 1.0、向量的 w = `vectorWeight`（0.5）。
+//     同分按"并集顺序"打破（也就是精确 -> 扫描 -> FTS -> 向量），所以是确定性的。
+//     权重减半的理由写在 `RetrievalOptions.vectorWeight` 上：前三条是精确子串语义，
+//     命中即真命中；向量是相似度，不能把真命中挤下去。
 // =============================================================================
 
 extension Store {
 
     /// 3.6 的 `search(q, start, end, app, limit)`。每条命中带 ≤ 100 token 的摘要与 evidence id。
     public func search(q: String, start: Int64? = nil, end: Int64? = nil,
-                       app: String? = nil, limit: Int = 20) throws -> SearchResult {
-        try search(SearchRequest(q: q, start: start, end: end, app: app, limit: limit))
+                       app: String? = nil, limit: Int = 20,
+                       queryVector: [Float]? = nil) throws -> SearchResult {
+        try search(SearchRequest(q: q, start: start, end: end, app: app, limit: limit,
+                                 queryVector: queryVector))
     }
 
     public func search(_ request: SearchRequest) throws -> SearchResult {
@@ -40,7 +54,8 @@ extension Store {
             return SearchResult(query: request.q, normalizedQuery: term, route: .text, channels: [],
                                 hits: [], ftsCandidates: 0, ftsCandidatesTruncated: false,
                                 ftsVerified: 0, scanFromTS: nil, scanToTS: nil,
-                                elapsedMS: Date().timeIntervalSince(t0) * 1000)
+                                elapsedMS: Date().timeIntervalSince(t0) * 1000,
+                                vectorUnavailableReason: "empty_query")
         }
         let route = field == nil ? QueryRouter.route(term) : .text
 
@@ -52,15 +67,19 @@ extension Store {
                                     channels: [], hits: [], ftsCandidates: 0,
                                     ftsCandidatesTruncated: false, ftsVerified: 0,
                                     scanFromTS: nil, scanToTS: nil,
-                                    elapsedMS: Date().timeIntervalSince(t0) * 1000)
+                                    elapsedMS: Date().timeIntervalSince(t0) * 1000,
+                                    vectorUnavailableReason: "app_not_in_database")
             }
 
             var ordered: [(Int64, SearchChannel)] = []
             var seen = Set<Int64>()
             var channels: [SearchChannel] = []
+            // 逐通道的**有序**命中表，RRF 融合要用（`ordered` 是去重后的并集，名次已经丢了）。
+            var channelLists: [(SearchChannel, [Int64])] = []
             func add(_ ids: [Int64], _ channel: SearchChannel) {
                 guard !ids.isEmpty else { return }
                 if !channels.contains(channel) { channels.append(channel) }
+                channelLists.append((channel, ids))
                 for id in ids where !seen.contains(id) {
                     seen.insert(id)
                     ordered.append((id, channel))
@@ -69,7 +88,10 @@ extension Store {
 
             // ---- 1. 精确字段通道（两步式） ----
             if let field {
-                // 带字段前缀：只走这一条通道，不经 FTS（3.4 第一条）。
+                // 带字段前缀：只走这一条通道，不经 FTS（3.4 第一条），**也不经向量**——
+                // `app:com.apple.Safari` 问的是"这个应用的全部观察"，不是"跟这句话像的内容"，
+                // 让相似度插一脚只会把精确的结果稀释掉。原因写成 `field_prefix`，
+                // 调用方能区分"开关没开"和"这类查询本来就不该走向量"。
                 let channel = try exactChannel(field: field, term: term, request: request,
                                                appID: appID, limit: limit, conn: conn)
                 add(channel.ids, channel.channel)
@@ -78,7 +100,8 @@ extension Store {
                                     channels: channels, hits: Array(hits.prefix(limit)),
                                     ftsCandidates: 0, ftsCandidatesTruncated: false, ftsVerified: 0,
                                     scanFromTS: nil, scanToTS: nil,
-                                    elapsedMS: Date().timeIntervalSince(t0) * 1000)
+                                    elapsedMS: Date().timeIntervalSince(t0) * 1000,
+                                    vectorUnavailableReason: "field_prefix")
             }
             switch route {
             case .url:
@@ -118,15 +141,185 @@ extension Store {
                                      limit: limit, candidateLimit: candidateLimit, conn: conn)
             add(fts.ids, .fts)
 
-            let hits = try makeHits(ordered, term: term, options: options, conn: conn)
+            // ---- 4. 向量通道（v4 / M2 c / T11） ----
+            //
+            // 三道门，任一不过就整条通道不参与、并在结果里写明原因：
+            //   ① `retrieval.vectorsEnabled` 开着吗（默认关）；
+            //   ② 调用方给查询向量了吗（core 不加载模型，向量必须由外面算好传进来）；
+            //   ③ 库里真的有向量吗（没装模型 / 没跑过嵌入任务 ⇒ 一条都没有）。
+            // 顺序是"先看开关"，所以**开关关着时连一次 COUNT 都不查**，更不会去调 `knn`——
+            // 「开关关闭时无向量调用」这条由它保证。
+            var vector = VectorChannelResult()
+            var vectorReason: String? = nil
+            if !options.vectorsEnabled {
+                vectorReason = "disabled"
+            } else if request.queryVector == nil {
+                vectorReason = "no_query_vector"
+            } else if (try conn.scalarInt(
+                "SELECT COUNT(*) FROM (SELECT 1 FROM chunks WHERE embedded_at IS NOT NULL LIMIT 1);")
+                ?? 0) == 0 {
+                vectorReason = "no_index"
+            } else if let queryVector = request.queryVector {
+                let vectorK = filtered ? options.filteredVectorK : options.vectorK
+                vector = try vectorChannel(queryVector: queryVector, request: request,
+                                           appID: appID, limit: limit, k: vectorK,
+                                           options: options, conn: conn)
+                add(vector.ids, .vector)
+            }
+
+            // ---- 合并 ----
+            let fused = vectorReason == nil
+            let merged = fused
+                ? Self.fuse(channelLists, options: options, unionOrder: ordered)
+                : ordered
+            let hits = try makeHits(merged, term: term, options: options,
+                                    vectorDistances: vector.distances, conn: conn)
             return SearchResult(query: request.q, normalizedQuery: term, route: route,
                                 channels: channels, hits: Array(hits.prefix(limit)),
                                 ftsCandidates: fts.candidates,
                                 ftsCandidatesTruncated: fts.truncated,
                                 ftsVerified: fts.verified,
                                 scanFromTS: scanFrom, scanToTS: scanTo,
-                                elapsedMS: Date().timeIntervalSince(t0) * 1000)
+                                elapsedMS: Date().timeIntervalSince(t0) * 1000,
+                                vectorsUnavailable: !fused,
+                                vectorUnavailableReason: vectorReason,
+                                vectorCandidates: vector.candidates,
+                                vectorObservations: vector.ids.count,
+                                vectorBestDistance: vector.bestDistance,
+                                fusion: fused ? "rrf" : "union")
         }
+    }
+
+    // MARK: - 通道 4：向量（v4 / M2 c / T11）
+
+    struct VectorChannelResult {
+        var ids: [Int64] = []
+        /// kNN 取回的块数（距离阈值筛之前）。
+        var candidates: Int = 0
+        var bestDistance: Double?
+        /// 每条观察命中的**最好**余弦距离，写进 `SearchHit.vectorDistance` 交给调用方。
+        var distances: [Int64: Double] = [:]
+    }
+
+    /// 查询向量 → `vec_chunks` kNN → 块 → 文本版本 → 展开到观察。
+    ///
+    /// 展开的写法与 FTS 通道第 ③ 步一致（`occurrences` JOIN `observations` + 时间 / 应用过滤 +
+    /// `deleted_at IS NULL`），差别只有排序：FTS 按 ts 倒序，这里**先按块的余弦距离**排，
+    /// 距离相同的再按 ts 倒序——向量通道的名次就是相似度名次，丢掉它 RRF 就没意义了。
+    func vectorChannel(queryVector: [Float], request: SearchRequest, appID: Int64?,
+                       limit: Int, k: Int, options: RetrievalOptions,
+                       conn: SQLiteConnection) throws -> VectorChannelResult {
+        let hits = try knn(queryVector: queryVector, k: k, conn: conn)
+        var out = VectorChannelResult()
+        out.candidates = hits.count
+        out.bestDistance = hits.first?.distance
+        guard !hits.isEmpty else { return out }
+
+        // 距离阈值 + 按文本版本去重（同一个版本可能有好几块命中，取最好的那块的名次）。
+        var rankOf: [Int64: Int] = [:]
+        var distanceOf: [Int64: Double] = [:]
+        var versions: [Int64] = []
+        for hit in hits where hit.distance <= options.vectorMaxDistance {
+            if rankOf[hit.textVersionID] == nil {
+                rankOf[hit.textVersionID] = versions.count
+                distanceOf[hit.textVersionID] = hit.distance
+                versions.append(hit.textVersionID)
+            }
+        }
+        guard !versions.isEmpty else { return out }
+        // 只保留最靠前的一批版本：kNN 已经按距离排好，limit = 10 时前 400 个版本绰绰有余，
+        // 这样展开就只有一次 `IN (…)`，不必分块、也不会丢排序。
+        if versions.count > 400 { versions = Array(versions.prefix(400)) }
+
+        var sql = """
+            SELECT oc.text_version_id, o.id, o.ts FROM occurrences oc
+              JOIN observations o ON o.device_id = oc.device_id AND o.id = oc.observation_id
+             WHERE oc.device_id = ? AND oc.text_version_id IN (\(placeholders(versions.count)))
+               AND o.deleted_at IS NULL
+            """
+        var binds: [SQLValue] = [.text(deviceID)] + versions.map { SQLValue.int($0) }
+        if let start = request.start { sql += " AND o.ts >= ?"; binds.append(.int(start)) }
+        if let end = request.end { sql += " AND o.ts < ?"; binds.append(.int(end)) }
+        if let appID { sql += " AND o.app_id = ?"; binds.append(.int(appID)) }
+        sql += ";"
+
+        let st = try conn.prepare(sql)
+        defer { st.finalize() }
+        try st.bind(binds)
+        // 每条观察记它命中的**最好**名次（同一条观察可能引用好几个版本）。
+        var bestRank: [Int64: (rank: Int, ts: Int64)] = [:]
+        while try st.step() {
+            guard let tv = st.int(0), let obs = st.int(1) else { continue }
+            let ts = st.int(2) ?? 0
+            let rank = rankOf[tv] ?? Int.max
+            if let existing = bestRank[obs], existing.rank <= rank { continue }
+            bestRank[obs] = (rank, ts)
+            if let distance = distanceOf[tv] { out.distances[obs] = distance }
+        }
+
+        // **按文本版本轮转，而不是把一个版本的观察一次性排完**。
+        //
+        // 一个文本版本平均被 2–3 条观察引用（同一段正文在屏幕上停留了几个采样周期）。
+        // 如果按 (版本名次, ts 倒序) 直接排，前 10 条就被最靠前的 3 个版本吃光了；
+        // 轮转之后前 10 条来自 10 个**不同的**版本，覆盖面高 3 倍——
+        // 对相似度通道来说这才是想要的：它给的是"像不像"，多看几个不同的来源比
+        // 把同一段正文的三次观察都摆出来有用得多。
+        // FTS 通道不这么做：它是精确子串语义，同一段正文的多次出现本身就是有意义的证据。
+        var byVersion: [Int: [Int64]] = [:]
+        for (obs, info) in bestRank { byVersion[info.rank, default: []].append(obs) }
+        for rank in byVersion.keys {
+            byVersion[rank]?.sort { a, b in
+                let x = bestRank[a]!, y = bestRank[b]!
+                return x.ts == y.ts ? a > b : x.ts > y.ts
+            }
+        }
+        let ranks = byVersion.keys.sorted()
+        var ordered: [Int64] = []
+        var round = 0
+        while ordered.count < bestRank.count {
+            var appended = false
+            for rank in ranks where round < (byVersion[rank]?.count ?? 0) {
+                ordered.append(byVersion[rank]![round])
+                appended = true
+            }
+            if !appended { break }
+            round += 1
+        }
+        out.ids = ordered
+        if out.ids.count > limit { out.ids = Array(out.ids.prefix(limit)) }
+        let kept = Set(out.ids)
+        out.distances = out.distances.filter { kept.contains($0.key) }
+        return out
+    }
+
+    // MARK: - 加权 RRF 融合
+
+    /// `score(d) = Σ_c w_c / (k + rank_c(d))`，同分按并集顺序（精确 → 扫描 → FTS → 向量）打破。
+    ///
+    /// 为什么是 RRF 而不是"分数加权求和"：四条通道的分数没有可比的量纲——
+    /// 精确字段通道压根没有分数、FTS 这里也不用 bm25（E7 §10.2 换成了 rowid 倒序）、
+    /// 向量给的是余弦距离。RRF 只用名次，正好不需要跨通道的分数归一化。
+    static func fuse(_ lists: [(SearchChannel, [Int64])], options: RetrievalOptions,
+                     unionOrder: [(Int64, SearchChannel)]) -> [(Int64, SearchChannel)] {
+        guard !lists.isEmpty else { return unionOrder }
+        var score: [Int64: Double] = [:]
+        for (channel, ids) in lists {
+            let weight = channel == .vector ? options.vectorWeight : 1.0
+            for (rank, id) in ids.enumerated() {
+                score[id, default: 0] += weight / (options.rrfK + Double(rank + 1))
+            }
+        }
+        var unionIndex: [Int64: Int] = [:]
+        var unionChannel: [Int64: SearchChannel] = [:]
+        for (i, item) in unionOrder.enumerated() {
+            unionIndex[item.0] = i
+            unionChannel[item.0] = item.1
+        }
+        return score.keys.sorted { a, b in
+            let sa = score[a] ?? 0, sb = score[b] ?? 0
+            if sa != sb { return sa > sb }
+            return (unionIndex[a] ?? Int.max) < (unionIndex[b] ?? Int.max)
+        }.map { ($0, unionChannel[$0] ?? .vector) }
     }
 
     // MARK: - 通道 1：精确字段（两步式）
@@ -429,7 +622,9 @@ extension Store {
     // MARK: - 摘要
 
     func makeHits(_ ordered: [(Int64, SearchChannel)], term: String,
-                  options: RetrievalOptions, conn: SQLiteConnection) throws -> [SearchHit] {
+                  options: RetrievalOptions,
+                  vectorDistances: [Int64: Double] = [:],
+                  conn: SQLiteConnection) throws -> [SearchHit] {
         guard !ordered.isEmpty else { return [] }
         let metas = try observationMetas(ordered.map(\.0), conn: conn)
         let texts = try snippetSources(ordered.map(\.0), conn: conn)
@@ -452,7 +647,8 @@ extension Store {
                                  windowTitle: meta.windowTitle,
                                  url: meta.canonicalURL ?? meta.rawLocator, host: meta.host,
                                  filePath: meta.filePath, snippet: snippet, channel: channel,
-                                 summary: summary, summaryTokens: TokenBudget.tokens(of: summary)))
+                                 summary: summary, summaryTokens: TokenBudget.tokens(of: summary),
+                                 vectorDistance: vectorDistances[id]))
         }
         return out
     }

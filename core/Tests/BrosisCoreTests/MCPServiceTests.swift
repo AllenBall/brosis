@@ -78,9 +78,9 @@ final class MCPServiceTests: XCTestCase {
         return try XCTUnwrap(response.result?.objectValue)
     }
 
-    // MARK: - 没有 grant：六个工具全拒（3.6）
+    // MARK: - 没有 grant：所有工具全拒（3.6）
 
-    func testNoGrantDeniesAllSixTools() throws {
+    func testNoGrantDeniesEveryTool() throws {
         let args: [MCPTool: [String: JSONValue]] = [
             .search: ["q": .string("知识图谱")],
             .getEvidence: ["ids": .array([.int(1)])],
@@ -89,6 +89,10 @@ final class MCPServiceTests: XCTestCase {
                            "granularity": .string("hour")],
             .getDayLedger: ["date": .string(dayString(baseTS))],
             .getItem: ["app": .string(Self.bundles[0])],
+            // M2 / T14 的三个
+            .getWeekLedger: ["week": .string(dayString(baseTS))],
+            .getPatterns: ["start": .int(baseTS), .init("end"): .int(baseTS + 3_600_000)],
+            .recentActivity: ["minutes": .int(60)],
         ]
         for tool in MCPTool.allCases {
             let response = self.tool(tool, args[tool] ?? [:])
@@ -97,7 +101,8 @@ final class MCPServiceTests: XCTestCase {
             XCTAssertNil(response.result, "\(tool.rawValue) 被拒时不能带任何数据")
         }
         let audit = try store.mcpAuditTail(limit: 20)
-        XCTAssertEqual(audit.count, 6)
+        XCTAssertEqual(audit.count, MCPTool.allCases.count)
+        XCTAssertEqual(audit.count, 9)
         XCTAssertEqual(Set(audit.map(\.decision)), [.noGrant])
         XCTAssertEqual(Set(audit.map(\.tool)), Set(MCPTool.allCases.map(\.rawValue)))
         XCTAssertEqual(Set(audit.map(\.clientID)), ["claude-code"])
@@ -588,7 +593,7 @@ final class MCPServiceTests: XCTestCase {
         let status = try payload(admin(.status))
         XCTAssertEqual(status["schemaVersion"]?.intValue, Int64(Schema.version))
         XCTAssertEqual(status["grants"]?.intValue, 1)
-        XCTAssertEqual(status["tools"]?.arrayValue?.count, 6)
+        XCTAssertEqual(status["tools"]?.arrayValue?.count, MCPTool.allCases.count)
 
         // 坏参数
         XCTAssertEqual(admin(.grantAdd, ["client_id": .string("x"),
@@ -633,9 +638,10 @@ final class MCPServiceTests: XCTestCase {
             try conn.intColumn("SELECT version FROM migrations ORDER BY version;")
         }
         // 这个夹具的库是按当前 schema 建的，这里只把 v2 之后的审计痕迹抹掉、把 mcp_audit 删掉；
-        // 重开时 migrateIfNeeded 依次跑 v2（补 mcp_audit）与 v3（capture_audit 与 occurrences
-        // 两列已经在，按"先查再做"跳过建表 / 加列），两版各留一条审计行，所以是 [1, 2, 3]。
-        XCTAssertEqual(versions, [1, 2, 3], "migrations 表要留下每一版的审计")
+        // 重开时 migrateIfNeeded 从 v2 一路补到当前版本（表与列大多已经在，按"先查再做"跳过），
+        // 每一版各留一条审计行，所以是 1…Schema.version。
+        XCTAssertEqual(versions, (1...Schema.version).map(Int64.init),
+                       "migrations 表要留下每一版的审计")
         let note = try migrating.store.withLock { conn in
             try conn.scalarText("SELECT note FROM migrations WHERE version = 2;")
         }

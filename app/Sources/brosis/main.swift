@@ -17,6 +17,11 @@ if arguments.contains("--dump-vectors") {
     exit(VectorDump.run())
 }
 
+// M2 c / T12：用**真实模型**跑一次叙述。故意不进 --self-check（要 8–30 s，见文件头）。
+if arguments.contains("--narrative-smoke") {
+    exit(NarrativeSmoke.run())
+}
+
 if arguments.contains("--dump-ocr") {
     exit(OCRDump.run())
 }

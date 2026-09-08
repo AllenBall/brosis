@@ -87,26 +87,75 @@ extension Store {
     public func getDayLedger(date: String, recompute: Bool = false) throws -> DayLedger {
         let options = retrieval
         return try withLock { conn in
-            let cal = DayCalendar(options.timeZone)
-            let bounds = try cal.dayBounds(date)
-            if !recompute, let cached = try cachedLedger(level: "day", period: date, conn: conn) {
-                return cached
-            }
-            let ledger = try computeDayLedger(date: date, bounds: bounds, cal: cal, conn: conn)
-            try conn.transaction { try upsertLedger(ledger, conn: conn) }
-            return ledger
+            try dayLedgerUnlocked(date: date, recompute: recompute,
+                                  cal: DayCalendar(options.timeZone), conn: conn)
         }
     }
 
-    private func cachedLedger(level: String, period: String,
+    /// `getDayLedger` 的去锁版本：周台账要在**同一把锁**里连算 7 天，
+    /// `Store.lock` 是 `NSLock`（不可重入），不能在锁里再调 `getDayLedger`。
+    @discardableResult
+    func dayLedgerUnlocked(date: String, recompute: Bool, cal: DayCalendar,
+                           conn: SQLiteConnection) throws -> DayLedger {
+        let bounds = try cal.dayBounds(date)
+        if !recompute,
+           let cached = try cachedLedger(period: date, bounds: bounds, conn: conn) {
+            return cached
+        }
+        let ledger = try computeDayLedger(date: date, bounds: bounds, cal: cal, conn: conn)
+        try conn.transaction { try upsertLedger(ledger, conn: conn) }
+        return ledger
+    }
+
+    /// 读回缓存的日台账。三道关，任何一道不过就返回 nil（调用方重算）：
+    /// ① 行存在且 `stale = 0`（3.8 的删除级联会把它标脏）；
+    /// ② JSON 能解出来；
+    /// ③ **内容指纹与库里现在的一致**——新观察不会标脏台账行，只有指纹能发现它们
+    ///    （见 `DayLedger.contentFingerprint` 的说明）。
+    ///
+    /// 顺带把 `narrative` / `model` 两列**透传**进结果：台账是确定性的、叙述是另一条任务
+    /// （3.7 要求两者分开标注），叙述写在列上而不是 JSON 里，所以要在这里合回去。
+    private func cachedLedger(period: String, bounds: (start: Int64, end: Int64),
                               conn: SQLiteConnection) throws -> DayLedger? {
         let st = try conn.prepare("""
-            SELECT ledger, stale FROM ledgers WHERE device_id = ? AND level = ? AND period = ?;
+            SELECT ledger, stale, narrative, model, narrative_meta FROM ledgers
+             WHERE device_id = ? AND level = 'day' AND period = ?;
             """)
         defer { st.finalize() }
-        try st.bind([.text(deviceID), .text(level), .text(period)])
+        try st.bind([.text(deviceID), .text(period)])
         guard try st.step(), let json = st.text(0), (st.int(1) ?? 0) == 0 else { return nil }
-        return try? JSONDecoder().decode(DayLedger.self, from: Data(json.utf8))
+        guard var ledger = try? JSONDecoder().decode(DayLedger.self, from: Data(json.utf8)) else {
+            return nil
+        }
+        guard let cached = ledger.contentFingerprint,
+              cached == (try dayFingerprint(bounds: bounds, conn: conn)) else { return nil }
+        ledger.narrative = st.text(2)
+        ledger.model = st.text(3)
+        // v6 / T12：叙述的标注（生成时刻、输入 token、忠实度核对）也走列、不进 JSON，
+        // 与 narrative / model 一起合回来。解不出来就当没有，不让一段坏 JSON 挡住整份台账。
+        if let metaJSON = st.text(4) {
+            ledger.narrativeMeta = try? JSONDecoder().decode(NarrativeMeta.self,
+                                                             from: Data(metaJSON.utf8))
+        }
+        return ledger
+    }
+
+    /// 一天的内容指纹：`n=<活着的本机观察条数>,max=<最大 id>`。
+    ///
+    /// 口径必须与 `computeDayLedger` 数进 `observations` / `evidence` 的那批观察完全一致：
+    /// 本机产生（`origin_device IS NULL`，D17 / 3.9）、没被删（`deleted_at IS NULL`）、
+    /// `ts` 落在 `[当天 00:00, 次日 00:00)`。走 `idx_obs_live(device_id, ts)`。
+    func dayFingerprint(bounds: (start: Int64, end: Int64),
+                        conn: SQLiteConnection) throws -> String {
+        let st = try conn.prepare("""
+            SELECT COUNT(*), COALESCE(MAX(id), 0) FROM observations
+             WHERE device_id = ? AND origin_device IS NULL AND deleted_at IS NULL
+               AND ts >= ? AND ts < ?;
+            """)
+        defer { st.finalize() }
+        try st.bind([.text(deviceID), .int(bounds.start), .int(bounds.end)])
+        guard try st.step() else { return "n=0,max=0" }
+        return "n=\(st.int(0) ?? 0),max=\(st.int(1) ?? 0)"
     }
 
     private func computeDayLedger(date: String, bounds: (start: Int64, end: Int64),
@@ -175,7 +224,8 @@ extension Store {
             evidence: Self.intervals(dayIDs),
             narrative: nil, model: nil,           // 3.7：台账与叙述分开标注，M1 不产叙述
             sessionConfig: sessionConfig, stale: false,
-            computedAt: Int64(Date().timeIntervalSince1970 * 1000))
+            computedAt: Int64(Date().timeIntervalSince1970 * 1000),
+            contentFingerprint: try dayFingerprint(bounds: bounds, conn: conn))
     }
 
     static func intervals(_ ids: [Int64]) -> [[Int64]] {
@@ -202,9 +252,11 @@ extension Store {
             SELECT id FROM ledgers WHERE device_id = ? AND level = 'day' AND period = ?;
             """, [.text(deviceID), .text(ledger.date)])
         if let existing {
-            // narrative / model 一并置回 NULL：台账重算了，旧叙述不再对得上这份台账。
+            // narrative / model / narrative_meta 一并置回 NULL：台账重算了，
+            // 旧叙述不再对得上这份台账（4.3「台账变 stale 时叙述也标 stale 并重算」）。
             try conn.run("""
                 UPDATE ledgers SET ledger = ?, narrative = NULL, model = NULL,
+                                   narrative_meta = NULL,
                                    evidence = ?, stale = 0, computed_at = ?
                  WHERE device_id = ? AND id = ?;
                 """, [.text(ledgerJSON), .text(evidenceJSON), .int(now),
@@ -214,8 +266,8 @@ extension Store {
                                          [.text(deviceID)]) ?? 0) + 1
             try conn.run("""
                 INSERT INTO ledgers(device_id, id, level, period, ledger, narrative, model,
-                                    evidence, stale, computed_at)
-                VALUES (?,?, 'day', ?, ?, NULL, NULL, ?, 0, ?);
+                                    narrative_meta, evidence, stale, computed_at)
+                VALUES (?,?, 'day', ?, ?, NULL, NULL, NULL, ?, 0, ?);
                 """, [.text(deviceID), .int(id), .text(ledger.date), .text(ledgerJSON),
                       .text(evidenceJSON), .int(now)])
         }

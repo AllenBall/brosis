@@ -34,7 +34,7 @@ public enum IPCProtocol {
 
 /// 请求的类别。
 public enum IPCOperation: String, Codable, Sendable, CaseIterable {
-    /// 3.6 的六个工具之一，`name` 是工具名。
+    /// 3.6 的工具之一，`name` 是工具名（`MCPTool`）。
     case tool
     /// grant 管理（`brosis-mcp admin …`）。只接受同 uid + 通过对端签名校验的连接。
     case admin
@@ -124,9 +124,13 @@ public struct IPCResponse: Codable, Sendable {
     }
 }
 
-// MARK: - 六个工具的名字（3.6）
+// MARK: - 工具名（3.6 的 v1 六个 + M2 的三个）
 
-/// 3.6 的 v1 工具清单。`recent_activity` / `get_patterns` / 周台账是 M2。
+/// 3.6 的工具清单。前六个是 v1；后三个是 3.6 里写明「放 M2」的那三样
+/// （M2 c 批 / T14 落地：`recent_activity`、`get_patterns`、周台账）。
+///
+/// 顺序就是 `tools/list` 的顺序与 `ping` / `status` 里 `tools` 数组的顺序，
+/// 新的一律**追加在后面**，免得客户端按下标记住了哪个是哪个。
 public enum MCPTool: String, Codable, Sendable, CaseIterable {
     case getContext = "get_context"
     case search
@@ -134,6 +138,10 @@ public enum MCPTool: String, Codable, Sendable, CaseIterable {
     case getTimeline = "get_timeline"
     case getDayLedger = "get_day_ledger"
     case getItem = "get_item"
+    // ---- M2（3.6「recent_activity、get_patterns、周台账放 M2」）----
+    case getWeekLedger = "get_week_ledger"
+    case getPatterns = "get_patterns"
+    case recentActivity = "recent_activity"
 }
 
 /// grant 管理命令（`brosis-mcp admin grant add|list|remove`）。

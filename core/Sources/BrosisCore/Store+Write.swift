@@ -130,7 +130,10 @@ extension Store {
     /// 这是有意的，代价是这类内容会各占一行原文（`text_versions` 行数与净载荷都会略高）。
     ///
     /// 返回 `(text_versions.id, 是否新建)`。
-    func upsertTextVersion(_ text: String, conn: SQLiteConnection) throws -> (id: Int64, isNew: Bool) {
+    /// - Parameter createdAt: 只有 D17 的**入站**路径会传（用源设备上的创建时刻，
+    ///   好让"这段正文是什么时候第一次出现的"跨设备保持一致）；本机写入路径不传，用当前时刻。
+    func upsertTextVersion(_ text: String, conn: SQLiteConnection,
+                           createdAt: Int64? = nil) throws -> (id: Int64, isNew: Bool) {
         let digest = TextPipeline.sha256(text)
         if let id = try conn.scalarInt("SELECT id FROM text_versions WHERE device_id = ? AND sha256 = ?;",
                                        [.text(deviceID), .blob(digest)]) {
@@ -140,7 +143,7 @@ extension Store {
         counters.textVersion += 1
         let vrow = counters.vrow
         counters.vrow += 1
-        let now = Int64(Date().timeIntervalSince1970 * 1000)
+        let now = createdAt ?? Int64(Date().timeIntervalSince1970 * 1000)
         try conn.run("""
             INSERT INTO text_versions(vrow, device_id, id, sha256, text, byte_len, created_at)
             VALUES (?,?,?,?,?,?,?);

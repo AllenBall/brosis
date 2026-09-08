@@ -28,6 +28,11 @@ public final class StoreMCPService: @unchecked Sendable {
         public var maxContextTokens = 20_000
         /// `get_timeline` 的分桶数上限，防止有人问一百年的 hour 粒度。
         public var maxTimelineBuckets = 2000
+        /// `get_patterns` 的区间上限（天）。它要扫区间内**全部**观察，
+        /// 代价随区间线性（1 个月合成库实测见 T14 结果文件），所以给个明确的上界。
+        public var maxPatternDays = 180
+        /// `recent_activity` 一次最多返回几条观察摘要。
+        public var maxRecentItems = 200
         /// 应用白名单生效时，`search` 内部多取几倍候选再过滤（过滤后再截到 limit）。
         public var whitelistOverfetch = 5
         public init() {}
@@ -160,6 +165,12 @@ public final class StoreMCPService: @unchecked Sendable {
             return try runDayLedger(args, grant: grant, windowStart: windowStart, scoped: scoped)
         case .getItem:
             return try runItem(args, grant: grant, windowStart: windowStart, scoped: scoped)
+        case .getWeekLedger:
+            return try runWeekLedger(args, grant: grant, windowStart: windowStart, scoped: scoped)
+        case .getPatterns:
+            return try runPatterns(args, grant: grant, windowStart: windowStart, scoped: scoped)
+        case .recentActivity:
+            return try runRecentActivity(args, grant: grant, scoped: scoped)
         }
     }
 
@@ -387,6 +398,7 @@ public final class StoreMCPService: @unchecked Sendable {
         // windowStart，这里做不到——如实标出来，不假装裁过（README 第 10 节也写了）。
         object["coversBeforeWindowStart"] = .bool(ledger.start < windowStart)
         var dropped = 0
+        var dropList: [String] = []
         if scoped {
             let kept = ledger.apps.filter { grant.allows(app: $0.key) }
             dropped = ledger.apps.count - kept.count
@@ -402,13 +414,158 @@ public final class StoreMCPService: @unchecked Sendable {
             let droppedFields = ["sites", "files", "onlineUnionS", "perDisplayDwellS",
                                  "sessions", "interruptions", "evidence"]
             for key in droppedFields { object.removeValue(forKey: key) }
-            object["droppedFields"] = .array(droppedFields.map { .string($0) })
+            dropList = droppedFields
         }
+        // T12 的叙述标注：键永远在，过期不给正文，白名单生效时整段丢掉。
+        dropList += Self.attachNarrative(&object, narrative: ledger.narrative,
+                                         model: ledger.model, meta: ledger.narrativeMeta,
+                                         isStale: ledger.narrativeIsStale, scoped: scoped)
+        if !dropList.isEmpty { object["droppedFields"] = .array(dropList.map { .string($0) }) }
         object["grant"] = grantBlock(grant, windowStart: windowStart,
                                      filtered: scoped, droppedByGrant: dropped)
         let count = (object["apps"]?.arrayValue?.count) ?? ledger.apps.count
         return ToolOutcome(value: .object(object), count: count,
-                           note: "date=\(date)" + (scoped ? " grant_filtered=\(dropped)" : ""))
+                           note: "date=\(date)"
+                               + (ledger.narrative == nil ? "" : " narrative")
+                               + (scoped ? " grant_filtered=\(dropped)" : ""))
+    }
+
+    // MARK: - get_week_ledger（M2 / T14）
+
+    private func runWeekLedger(_ args: [String: JSONValue], grant: Grant,
+                               windowStart: Int64, scoped: Bool) throws -> ToolOutcome {
+        guard let week = args["week"]?.stringValue, !week.isEmpty else {
+            throw MCPBadArgument(message: "get_week_ledger 需要 week（YYYY-Www 或周内任意一天的 YYYY-MM-DD）")
+        }
+        let ledger: WeekLedger
+        do {
+            ledger = try store.getWeekLedger(weekStart: week)
+        } catch let e as StoreError {
+            throw MCPBadArgument(message: "\(e)")
+        }
+        guard ledger.end > windowStart else {
+            throw MCPDeniedByGrant(message: "\(ledger.week) 早于 grant 的时间窗（\(grant.timeWindowDays) 天）")
+        }
+        var object = try JSONValue(encoding: ledger).objectValue ?? [:]
+        // 与 get_day_ledger 同一条口径：台账是**整周**的预聚合，切不成半周。
+        // 窗口起点落在这一周里面时，窗口之前那几天的数字也在返回值里，如实标出来。
+        object["coversBeforeWindowStart"] = .bool(ledger.start < windowStart)
+        var dropped = 0
+        var dropList: [String] = []
+        if scoped {
+            let kept = ledger.apps.filter { grant.allows(app: $0.key) }
+            dropped = ledger.apps.count - kept.count
+            object["apps"] = try JSONValue(encoding: kept)
+            object["totalDwellS"] = .double(kept.reduce(0) { $0 + $1.dwellS })
+            object["totalActiveS"] = .double(kept.reduce(0) { $0 + $1.activeS })
+            object["totalUnknownS"] = .double(kept.reduce(0) { $0 + $1.unknownS })
+            object["focusDwellS"] = .double(kept.reduce(0) { $0 + $1.dwellS })
+            object["switches"] = .int(Int64(kept.reduce(0) { $0 + $1.switches }))
+            object["observations"] = .int(Int64(kept.reduce(0) { $0 + $1.observations }))
+            // 站点 / 文件按 URL 与路径聚合、按天分布与会话数按整条观察流算，
+            // 都回不到"是哪个应用"，白名单生效时整段丢掉（与 get_day_ledger 同一处理）。
+            let droppedFields = ["sites", "files", "onlineUnionS", "perDisplayDwellS",
+                                 "sessions", "interruptions", "evidence", "dayTotals",
+                                 "activeDays"]
+            for key in droppedFields { object.removeValue(forKey: key) }
+            dropList = droppedFields
+        }
+        dropList += Self.attachNarrative(&object, narrative: ledger.narrative,
+                                         model: ledger.model, meta: ledger.narrativeMeta,
+                                         isStale: ledger.narrativeIsStale, scoped: scoped)
+        if !dropList.isEmpty { object["droppedFields"] = .array(dropList.map { .string($0) }) }
+        object["grant"] = grantBlock(grant, windowStart: windowStart,
+                                     filtered: scoped, droppedByGrant: dropped)
+        let count = (object["apps"]?.arrayValue?.count) ?? ledger.apps.count
+        return ToolOutcome(value: .object(object), count: count,
+                           note: "week=\(ledger.week) recomputed=\(ledger.daysRecomputed.count)"
+                               + " cache=\(ledger.servedFromCache)"
+                               + (ledger.narrative == nil ? "" : " narrative")
+                               + (scoped ? " grant_filtered=\(dropped)" : ""))
+    }
+
+    // MARK: - get_patterns（M2 / T14）
+
+    private func runPatterns(_ args: [String: JSONValue], grant: Grant,
+                             windowStart: Int64, scoped: Bool) throws -> ToolOutcome {
+        let calendar = DayCalendar(store.retrieval.timeZone)
+        guard let askedStart = try Self.time(args["start"], field: "start", calendar: calendar),
+              let end = try Self.time(args["end"], field: "end", calendar: calendar) else {
+            throw MCPBadArgument(message: "get_patterns 需要 start 与 end")
+        }
+        // 时间窗是硬下界（与 search / get_timeline 同一条规矩）。
+        let start = max(askedStart, windowStart)
+        guard end > start else {
+            throw MCPDeniedByGrant(message: "区间整体落在 grant 的时间窗（\(grant.timeWindowDays) 天）之外")
+        }
+        let days = Double(end - start) / 86_400_000.0
+        guard days <= Double(options.maxPatternDays) else {
+            throw MCPBadArgument(message: "区间太长：get_patterns 一次最多 \(options.maxPatternDays) 天，"
+                                        + "收到 \(String(format: "%.1f", days)) 天")
+        }
+
+        var patternOptions = PatternOptions()
+        if let v = args["focus_block_minutes"]?.doubleValue {
+            guard v >= 1, v <= 600 else {
+                throw MCPBadArgument(message: "focus_block_minutes 要在 1…600 之间")
+            }
+            patternOptions.focusBlockMinMinutes = v
+        }
+        if let v = args["max_transitions"]?.intValue {
+            patternOptions.maxTransitions = min(max(1, Int(v)), 200)
+        }
+        if let v = args["max_apps"]?.intValue {
+            patternOptions.maxApps = min(max(1, Int(v)), 200)
+        }
+
+        // 白名单**下推到 core**：热力图 / 切换对 / 工作块都要在"只剩白名单内应用"的
+        // 观察流上重算，事后裁字段是算不回来的（`ActivityPatterns.appFilter` 会标出来）。
+        let patterns = try store.getPatterns(start: start, end: end,
+                                             apps: scoped ? grant.apps : nil,
+                                             options: patternOptions)
+        var object = try JSONValue(encoding: patterns).objectValue ?? [:]
+        object["appliedStart"] = .int(start)
+        object["grant"] = grantBlock(grant, windowStart: windowStart,
+                                     filtered: scoped, droppedByGrant: 0)
+        if scoped {
+            object["scopeNote"] = .string(
+                "白名单生效：热力图、切换对、连续工作块都在只含白名单应用的观察流上重算，"
+                + "因此块更碎、切换对更少——这是换了输入，不是把结果裁短。")
+        }
+        return ToolOutcome(value: .object(object), count: patterns.heatmap.count,
+                           note: "days=\(String(format: "%.2f", patterns.spanDays))"
+                               + " obs=\(patterns.observations)"
+                               + " blocks=\(patterns.focus.count)"
+                               + (scoped ? " app_filter=\(grant.apps.count)" : ""))
+    }
+
+    // MARK: - recent_activity（M2 / T14）
+
+    private func runRecentActivity(_ args: [String: JSONValue], grant: Grant,
+                                   scoped: Bool) throws -> ToolOutcome {
+        var minutes = max(1, Int(args["minutes"]?.intValue ?? 30))
+        // 时间窗是硬上界：grant 给 30 天，就问不出 90 天前的"最近活动"。
+        let cappedMinutes = grant.timeWindowDays * 1440
+        let clamped = minutes > cappedMinutes
+        minutes = min(minutes, cappedMinutes)
+        let maxItems = min(max(0, Int(args["max_items"]?.intValue ?? 20)), options.maxRecentItems)
+
+        let recent = try store.recentActivity(minutes: minutes, maxItems: maxItems,
+                                              apps: scoped ? grant.apps : nil)
+        var object = try JSONValue(encoding: recent).objectValue ?? [:]
+        object["minutesClampedByGrant"] = .bool(clamped)
+        object["grant"] = grantBlock(grant, windowStart: recent.start,
+                                     filtered: scoped, droppedByGrant: 0)
+        // 3.6 的 fields 分级只管**原文**：这里每条都是 ≤ 100 token 的摘要（与 search 同口径），
+        // 原文一律走 get_evidence，那里才按 fields 裁。说清楚，免得被读成"summary 也漏原文"。
+        object["fieldsNote"] = .string(
+            "items[].summary 是 ≤ \(recent.summaryTokenBudget) token 的摘要，与 search 的命中摘要同一口径；"
+            + "原文只能经 get_evidence 展开，受 grant.fields 限制。")
+        return ToolOutcome(value: .object(object), count: recent.items.count,
+                           note: "minutes=\(minutes) items=\(recent.items.count)"
+                               + "/\(recent.observations)"
+                               + (clamped ? " clamped" : "")
+                               + (scoped ? " app_filter=\(grant.apps.count)" : ""))
     }
 
     // MARK: - get_item
@@ -573,6 +730,37 @@ public final class StoreMCPService: @unchecked Sendable {
         _ = store.appendMCPAudit(row)
     }
 
+    /// 台账的**叙述标注**透传（3.7「输出与台账分开标注」，T12 的 schema v6 三列）。
+    ///
+    /// 三件事：
+    /// ① 键**永远在**，没有叙述时显式给 `null`——`JSONEncoder` 会把 nil 的可选字段整键省掉，
+    ///    客户端就没法区分"没跑叙述"和"这个版本还没有这个字段"。
+    /// ② `narrativeIsStale` 为真（叙述对不上现在这份台账）时**不把正文交出去**，
+    ///    只留标记：一段描述另一版台账的话比没有更糟。
+    /// ③ **应用白名单生效时整段丢掉**：叙述是照整份台账写的，里面可能点名白名单之外的应用，
+    ///    按 key 裁字段裁不掉它（这是 M1 第一轮验收在 `get_evidence` 的邻居上抓到过的同一类口子）。
+    static func attachNarrative(_ object: inout [String: JSONValue],
+                                narrative: String?, model: String?,
+                                meta: NarrativeMeta?, isStale: Bool,
+                                scoped: Bool) -> [String] {
+        object.removeValue(forKey: "narrativeMeta")
+        guard !scoped else {
+            object["narrative"] = .null
+            object["model"] = .null
+            object["narrativeMeta"] = .null
+            object["narrativeIsStale"] = .bool(false)
+            return ["narrative", "model", "narrativeMeta"]
+        }
+        let usable = !isStale
+        object["narrative"] = (usable ? narrative.map { JSONValue.string($0) } : nil) ?? .null
+        object["model"] = (usable ? model.map { JSONValue.string($0) } : nil) ?? .null
+        object["narrativeMeta"] = (usable ? meta.flatMap { try? JSONValue(encoding: $0) } : nil) ?? .null
+        object["narrativeIsStale"] = .bool(isStale)
+        // 3.7：叙述是模型写的，台账是算出来的。这一条让客户端不必去猜哪个是哪个。
+        object["narrativeGeneratedBy"] = (usable && narrative != nil) ? .string("model") : .null
+        return []
+    }
+
     /// 每个结果里都带一份 grant 说明：客户端拿到的是"被谁按什么范围裁过的数据"，
     /// 这一点不该靠人去猜。
     private func grantBlock(_ grant: Grant, windowStart: Int64,
@@ -647,6 +835,14 @@ public final class StoreMCPService: @unchecked Sendable {
             parts.append("granularity=\(args["granularity"]?.stringValue ?? "-")")
         case .getDayLedger:
             parts.append("date=\(args["date"]?.stringValue ?? "-")")
+        case .getWeekLedger:
+            parts.append("week=\(args["week"]?.stringValue ?? "-")")
+        case .getPatterns:
+            parts.append("focus_min=\(args["focus_block_minutes"]?.doubleValue.map { String(format: "%.0f", $0) } ?? "-")")
+            parts.append("max_transitions=\(args["max_transitions"]?.intValue.map(String.init) ?? "-")")
+        case .recentActivity:
+            parts.append("minutes=\(args["minutes"]?.intValue.map(String.init) ?? "-")")
+            parts.append("max_items=\(args["max_items"]?.intValue.map(String.init) ?? "-")")
         case .getItem:
             if let app = args["app"]?.stringValue {
                 parts.append("kind=app key=\(app)")            // bundle id 不是隐私内容

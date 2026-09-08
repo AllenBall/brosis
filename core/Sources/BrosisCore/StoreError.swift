@@ -23,6 +23,10 @@ public enum StoreError: Error, CustomStringConvertible, Sendable {
     case schemaVersion(found: Int, expected: Int)
     /// 调用方用法错误（参数不合法、库已关闭等）。
     case invalidUsage(String)
+    /// D17 / 3.9：段序号不连续。**缺段不跳过**，停下来等那一段到齐。
+    case syncOutOfOrder(device: String, expected: Int64, found: Int64)
+    /// D17 / 3.9：段内容自相矛盾（缺正文、哈希对不上）。停止导入并记事件。
+    case syncCorruptSegment(String)
 
     public var description: String {
         switch self {
@@ -40,6 +44,11 @@ public enum StoreError: Error, CustomStringConvertible, Sendable {
             return "schema 版本不匹配：库里是 \(found)，本版本支持 \(expected)"
         case .invalidUsage(let m):
             return "用法错误：\(m)"
+        case .syncOutOfOrder(let device, let expected, let found):
+            return "同步段序号不连续（D17）：设备 \(device) 期望 seq \(expected)，拿到 \(found)；"
+                 + "缺段不跳过，等它到齐再导"
+        case .syncCorruptSegment(let m):
+            return "同步段损坏（D17）：\(m)"
         }
     }
 }

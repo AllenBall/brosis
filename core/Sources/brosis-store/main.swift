@@ -7,6 +7,7 @@
 import Foundation
 import BrosisCore
 import BrosisIPC
+import BrosisSync
 
 // MARK: - 参数
 
@@ -108,6 +109,61 @@ func percentile(_ values: [Double], _ p: Double) -> Double? {
     return s[lo] + (s[hi] - s[lo]) * (k - Double(lo))
 }
 
+/// M2 c / T14：同一条查询在**同一个连接**上跑 `reps + 1` 次，报冷 / 热耗时。
+///
+/// 口径与 `bench` 一致但更轻：第一次是"进程内第一次"（连接刚开、页缓存空），单列成 `cold_ms`；
+/// 其余 `reps` 次是热，给 p50 / p95 / min / max。冷 / 热的完整定义见 `bench` 的注释。
+func repeatTimed(_ reps: Int, _ body: () throws -> Int) rethrows -> [String: Any] {
+    var cold = 0.0
+    var rows = 0
+    do {
+        let t = Date()
+        rows = try body()
+        cold = Date().timeIntervalSince(t) * 1000
+    }
+    var hot: [Double] = []
+    hot.reserveCapacity(max(0, reps))
+    for _ in 0..<max(0, reps) {
+        let t = Date()
+        rows = try body()
+        hot.append(Date().timeIntervalSince(t) * 1000)
+    }
+    var out: [String: Any] = ["cold_ms": cold, "reps": hot.count, "rows": rows]
+    if !hot.isEmpty {
+        out["hot_p50_ms"] = percentile(hot, 0.5) ?? 0
+        out["hot_p95_ms"] = percentile(hot, 0.95) ?? 0
+        out["hot_min_ms"] = hot.min() ?? 0
+        out["hot_max_ms"] = hot.max() ?? 0
+        out["hot_mean_ms"] = hot.reduce(0, +) / Double(hot.count)
+    }
+    return out
+}
+
+// MARK: - 向量文件（v4 / M2 c / T11）
+
+/// 从 JSON 文件读一条查询向量（数字数组）。core 不加载模型，向量一律由外面算好传进来。
+func readVectorFile(_ path: String) throws -> [Float] {
+    let data = try Data(contentsOf: URL(fileURLWithPath: path))
+    guard let array = try JSONSerialization.jsonObject(with: data) as? [Any] else {
+        throw CLIError("\(path) 要是一个 JSON 数字数组")
+    }
+    return array.compactMap { ($0 as? NSNumber)?.floatValue }
+}
+
+/// 从 JSON 文件读一批查询向量：`{"<查询 id>": [数字, …], …}`。
+func readVectorMap(_ path: String) throws -> [String: [Float]] {
+    let data = try Data(contentsOf: URL(fileURLWithPath: path))
+    guard let object = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+        throw CLIError("\(path) 要是一个 {\"id\": [数字, …]} 的 JSON 对象")
+    }
+    var out: [String: [Float]] = [:]
+    for (key, value) in object {
+        guard let array = value as? [Any] else { continue }
+        out[key] = array.compactMap { ($0 as? NSNumber)?.floatValue }
+    }
+    return out
+}
+
 // MARK: - 等退出信号
 
 /// 等 `SIGINT` / `SIGTERM`，或者 `seconds` 到点。返回之后调用方做干净收尾。
@@ -164,6 +220,15 @@ func openStore(_ args: Args, createIfMissing: Bool = true) throws -> Store {
     if let c = args.int("fts-candidates") { store.retrieval.ftsCandidateLimit = c }
     if let c = args.int("fts-candidates-filtered") { store.retrieval.filteredFTSCandidateLimit = c }
     if let t = args.int("summary-tokens") { store.retrieval.summaryTokenBudget = t }
+    // v4（M2 c / T11）：向量通道**默认关**，只有显式 --vectors 才打开（计划 3.4 / 4.3）。
+    if args.has("vectors") { store.retrieval.vectorsEnabled = true }
+    if let k = args.int("vector-k") { store.retrieval.vectorK = k }
+    if let k = args.int("vector-k-filtered") { store.retrieval.filteredVectorK = k }
+    if let d = args.flags["vector-max-distance"].flatMap(Double.init) {
+        store.retrieval.vectorMaxDistance = d
+    }
+    if let w = args.flags["vector-weight"].flatMap(Double.init) { store.retrieval.vectorWeight = w }
+    if let k = args.flags["rrf-k"].flatMap(Double.init) { store.retrieval.rrfK = k }
     if let v = args.flags["max-dwell-s"].flatMap(Double.init) { store.sessionConfig.maxDwellSeconds = v }
     if let v = args.flags["gap-s"].flatMap(Double.init) { store.sessionConfig.gapSeconds = v }
     if let v = args.flags["interruption-s"].flatMap(Double.init) {
@@ -345,8 +410,43 @@ brosis-store —— core/ 加密存储核心的命令行工具（M1 / T2）
   timeline          get_timeline（--start --end --granularity hour|day|week）
   sessions          会话（[--build|--rebuild|--force] [--start --end] [--stale]）
   ledger            日台账（--date YYYY-MM-DD [--recompute]，或 --days 列出所有有观察的日子）
+
+周台账、活动模式、最近活动（M2 c / T14，计划 3.6 / 3.7 / 4.3）：
+  week-ledger       周台账（--week YYYY-Www 或周内任意一天的 YYYY-MM-DD [--recompute]，
+                    或 --weeks 列出所有有观察的周）。周 = 该周 7 个日台账之和；
+                    --check 额外打印"周 vs 7 天之和"的逐字段对照
+  patterns          活动模式（--start --end [--focus-minutes 25] [--max-transitions 20]
+                    [--max-apps 20] [--apps a,b] [--no-heatmap 只出汇总]）
+  recent            最近活动（--minutes 30 [--max-items 20] [--apps a,b] [--at <ms>]
+                    [--no-items 只出汇总]）
+  以上三条都支持 --reps N：同一连接上跑 1 + N 次，报冷（第一次）与热 p50 / p95
   bench             四类查询的冷 / 热 p50 / p95（--cold-rounds 20 --hot-reps 20 [--out x.json]）
                     --cold-round 是它自己 spawn 的子进程模式，一般不手动用
+
+向量检索（M2 c / T11，计划 3.4 / 4.3；**默认关**）：
+  vec-status        分块 / 向量 / 模型状态 + 最近的嵌入任务行（--jobs 5）
+  vec-plan          只分块不嵌入（--limit 处理多少个文本版本，--batch 每批多少个）
+  vec-embed         跑嵌入任务（--provider hash：确定性伪嵌入，**没有语义**，只给测试用；
+                    真实模型走 app 包里的 brosis-embed embed）
+                    [--batch 16] [--max-chunks N] [--max-seconds S] [--model-id ID]
+  vec-rebuild       清掉全部 chunks / vec_chunks 与嵌入元数据，下次任务从头再来
+  vec-search        纯向量 kNN（--vector-file <JSON 数字数组> | --text <文本> [--k 20]）
+  search / search-batch 的向量选项：
+    --vectors                打开向量通道（不给就是关，与 v3 行为逐位相同）
+    --vector-file <文件>     search：这一题的查询向量（JSON 数字数组）
+    --query-vectors <文件>   search-batch：{"<题 id>": [数字, …]} 的查询向量表
+    --hash-query             用确定性伪嵌入现算查询向量（**没有语义**，只给测试 / 自检用）
+    --vector-k / --vector-k-filtered / --vector-max-distance / --vector-weight / --rrf-k
+
+跨设备同步（M2 c / T13，计划 3.9 / D17）：
+  sync-init         初始化或加入同步目录 --sync-dir <目录> [--passphrase <配对口令>] [--device-name <名字>]
+                    首台会**打印一次**配对口令（之后再也拿不到）；已有目录时必须给口令
+  sync-status       同步状态：出站水位线、各设备已导入到哪个 seq、待导入段数、目录字节
+  sync-export       把待出站记录打成段文件（--max-segments 8 --max-observations 2000
+                    --max-text-bytes 8388608）
+  sync-import       按 seq 顺序导入其他设备的段（缺段 / 校验失败即停，不跳过）
+  sync-cleanup      删掉所有对端都已 ack 的本机段文件
+  sync-run          一轮完整同步：入站 → 出站 → 清理
 
 本地 IPC / MCP（M1 / T5，计划 3.1 / 3.6）：
   serve             在 <数据目录>/ipc.sock 上起 IPC 服务端（**测试替身**，产品路径在 brosis.app 里）
@@ -371,7 +471,38 @@ brosis-store —— core/ 加密存储核心的命令行工具（M1 / T2）
   --max-dwell-s      会话常量：停留上限，默认 90 s（3.7）
   --gap-s            会话常量：间隔上限，默认 300 s（3.7）
   --interruption-s   会话常量：打断上限，默认 20 s（3.7）
+  --sync-dir         同步目录（D17）。默认 iCloud Drive/brosis-sync/，测试用任意临时目录
+  --passphrase       配对口令（加入已有同步目录时必须给）
+  --device-name      写进 devices/<id>.json 的设备名，只在同步目录里出现
 """
+
+// MARK: - 同步（D17 / 3.9）
+
+enum SyncDefaults {
+    /// 3.9 的默认同步目录：`~/Library/Mobile Documents/com~apple~CloudDocs/brosis-sync/`。
+    /// 普通文件系统路径，不需要 iCloud 容器 entitlement。
+    static var directory: URL {
+        FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Mobile Documents/com~apple~CloudDocs/brosis-sync",
+                                    isDirectory: true)
+    }
+}
+
+func importJSON(_ report: SyncImportReport) -> [String: Any] {
+    ["segments": report.segments, "ok": report.ok, "errors": report.errors,
+     "peers": report.peers,
+     "observations_inserted": report.stats.observationsInserted,
+     "observations_skipped": report.stats.observationsSkipped,
+     "occurrences_inserted": report.stats.occurrencesInserted,
+     "text_versions_inserted": report.stats.textVersionsInserted,
+     "text_versions_reused": report.stats.textVersionsReused,
+     "tombstones_applied": report.stats.tombstonesApplied,
+     "tombstones_skipped": report.stats.tombstonesSkipped,
+     "observations_tombstoned": report.stats.observationsTombstoned,
+     "sessions_stale": report.stats.sessionsStale,
+     "ledgers_stale": report.stats.ledgersStale,
+     "elapsed_ms": report.elapsedMS]
+}
 
 // MARK: - 主流程
 
@@ -412,6 +543,10 @@ do {
             "dir_mode_octal": String(flags.mode, radix: 8),
             "metadata_never_index": flags.neverIndex,
             "excluded_from_backup": flags.excludedFromBackup,
+            // 迁移审计：验收「v4 / v5 真的建过 / 迁过」直接看这一列
+            "migrations": try store.migrationNotes().map {
+                ["version": $0.version, "applied_at": $0.appliedAt, "note": $0.note]
+            },
         ])
 
     case "stats":
@@ -643,8 +778,14 @@ do {
         let store = try openStore(args, createIfMissing: false)
         defer { store.close() }
         let q = try args.require("q")
+        // --hash-query：用确定性伪嵌入把查询串现算成向量。**只给测试与自检用**，没有语义。
+        var queryVector = try args.string("vector-file").map(readVectorFile)
+        if queryVector == nil, args.has("hash-query") {
+            queryVector = try HashEmbeddingProvider().embed([q])[0]
+        }
         let result = try store.search(q: q, start: args.int64("start"), end: args.int64("end"),
-                                      app: args.string("app"), limit: args.int("limit") ?? 20)
+                                      app: args.string("app"), limit: args.int("limit") ?? 20,
+                                      queryVector: queryVector)
         var object: [String: Any] = ["command": "search"]
         if let dict = jsonValue(result) as? [String: Any] { object.merge(dict) { a, _ in a } }
         object["hit_count"] = result.hits.count
@@ -662,17 +803,32 @@ do {
                 as? [[String: Any]] else {
             throw CLIError("search-batch 的输入要是一个 JSON 数组")
         }
+        // v4：--vectors <文件> 给每题一条查询向量（{"<题 id>": [数字, …]}）。
+        // 只有同时给了 --vectors 与 --vectors-enabled（或 --vectors 开关）才走混合检索。
+        // 注意：`--vectors` 是**开关**（打开向量通道），查询向量表走 `--query-vectors <文件>`。
+        // 两者共用一个名字的话 `args.has("vectors")` 会因为后面跟了文件名而变成 false，
+        // 于是"开了开关却没开"——第一版踩过这个坑。
+        var vectorMap = try args.string("query-vectors").map(readVectorMap) ?? [:]
+        if vectorMap.isEmpty, args.has("hash-query") {
+            let provider = HashEmbeddingProvider()
+            for item in items {
+                guard let q = item["q"] as? String else { continue }
+                vectorMap[item["id"] as? String ?? q] = try provider.embed([q])[0]
+            }
+        }
         var results: [[String: Any]] = []
         for item in items {
             guard let q = item["q"] as? String else { continue }
+            let id = item["id"] as? String ?? q
             let t0 = Date()
             let r = try store.search(q: q,
                                      start: (item["start"] as? NSNumber)?.int64Value,
                                      end: (item["end"] as? NSNumber)?.int64Value,
                                      app: item["app"] as? String,
-                                     limit: (item["limit"] as? NSNumber)?.intValue ?? 10)
+                                     limit: (item["limit"] as? NSNumber)?.intValue ?? 10,
+                                     queryVector: vectorMap[id])
             results.append([
-                "id": item["id"] as? String ?? q,
+                "id": id,
                 "q": q,
                 "channels": r.channels.map(\.rawValue),
                 "route": r.route.rawValue,
@@ -683,6 +839,12 @@ do {
                 "fts_verified": r.ftsVerified,
                 "max_summary_tokens": r.hits.map(\.summaryTokens).max() ?? 0,
                 "elapsed_ms": Date().timeIntervalSince(t0) * 1000,
+                "fusion": r.fusion,
+                "vectors_unavailable": r.vectorsUnavailable,
+                "vector_unavailable_reason": r.vectorUnavailableReason ?? "",
+                "vector_candidates": r.vectorCandidates,
+                "vector_observations": r.vectorObservations,
+                "vector_best_distance": r.vectorBestDistance ?? -1,
             ])
         }
         var object: [String: Any] = ["command": "search-batch", "results": results]
@@ -803,6 +965,136 @@ do {
         // 3.7：台账与叙述分开标注。M1 不产叙述，这里显式打出 null 而不是把键省掉。
         object["narrative"] = ledger.narrative ?? NSNull()
         object["model"] = ledger.model ?? NSNull()
+        emit(object)
+
+    // ------------------------------- 周台账 / 活动模式 / 最近活动（M2 c / T14）
+
+    case "week-ledger":
+        let store = try openStore(args, createIfMissing: false)
+        defer { store.close() }
+        if args.has("weeks") {
+            emit(["command": "week-ledger", "weeks": try store.observationWeeks()])
+            break
+        }
+        let week = try args.require("week")
+        if let reps = args.int("reps") {
+            // 第一次按 --recompute 走（冷 = 真算），其余次走缓存（热 = 读回并校验 7 天指纹）
+            var first = true
+            let timing = try repeatTimed(reps) {
+                let l = try store.getWeekLedger(weekStart: week,
+                                                recompute: first && args.has("recompute"))
+                first = false
+                return l.apps.count
+            }
+            var object: [String: Any] = ["command": "week-ledger", "week": week]
+            object.merge(timing) { a, _ in a }
+            emit(object)
+            break
+        }
+        let t0 = Date()
+        let ledger = try store.getWeekLedger(weekStart: week, recompute: args.has("recompute"))
+        var object: [String: Any] = ["command": "week-ledger",
+                                     "elapsed_ms": Date().timeIntervalSince(t0) * 1000]
+        if let dict = jsonValue(ledger) as? [String: Any] { object.merge(dict) { a, _ in a } }
+        // 3.7：台账与叙述分开标注。叙述在 ledgers 的三个独立列上（T12 / schema v6），
+        // 没有就显式打出 null 而不是把键省掉。
+        object["narrative"] = ledger.narrative ?? NSNull()
+        object["model"] = ledger.model ?? NSNull()
+        object["narrative_meta"] = ledger.narrativeMeta.map { jsonValue($0) } ?? NSNull()
+        object["narrative_is_stale"] = ledger.narrativeIsStale
+        if args.has("check") {
+            // "周 = 7 天之和"的逐字段对照：验收时不用自己去加 7 个数。
+            var days: [DayLedger] = []
+            for date in ledger.days { days.append(try store.getDayLedger(date: date)) }
+            // 写成显式循环而不是 `reduce`：把一个非 Sendable 的闭包传进 `reduce` 的闭包里，
+            // Swift 6 严格并发下是 `sending 'f' risks causing data races`（release 构建实测）。
+            func sum(_ f: (DayLedger) -> Double) -> Double {
+                var total = 0.0
+                for day in days { total += f(day) }
+                return total
+            }
+            func sumInt(_ f: (DayLedger) -> Int) -> Int {
+                var total = 0
+                for day in days { total += f(day) }
+                return total
+            }
+            object["check"] = [
+                "days": ledger.days,
+                "sum_dwell_s": sum(\.totalDwellS), "week_dwell_s": ledger.totalDwellS,
+                "sum_active_s": sum(\.totalActiveS), "week_active_s": ledger.totalActiveS,
+                "sum_unknown_s": sum(\.totalUnknownS), "week_unknown_s": ledger.totalUnknownS,
+                "sum_online_union_s": sum(\.onlineUnionS), "week_online_union_s": ledger.onlineUnionS,
+                "sum_switches": sumInt(\.switches), "week_switches": ledger.switches,
+                "sum_interruptions": sumInt(\.interruptions), "week_interruptions": ledger.interruptions,
+                "sum_sessions": sumInt(\.sessions), "week_sessions": ledger.sessions,
+                "sum_observations": sumInt(\.observations), "week_observations": ledger.observations,
+            ]
+        }
+        emit(object)
+
+    case "patterns":
+        let store = try openStore(args, createIfMissing: false)
+        defer { store.close() }
+        guard let start = args.int64("start"), let end = args.int64("end") else {
+            throw CLIError("patterns 需要 --start 与 --end（Unix 毫秒）")
+        }
+        var patternOptions = PatternOptions()
+        if let v = args.string("focus-minutes").flatMap(Double.init) {
+            patternOptions.focusBlockMinMinutes = v
+        }
+        if let v = args.int("max-transitions") { patternOptions.maxTransitions = v }
+        if let v = args.int("max-apps") { patternOptions.maxApps = v }
+        if let v = args.int("top-hours") { patternOptions.topHoursPerApp = v }
+        let appFilter = args.string("apps")?.split(separator: ",").map(String.init)
+        if let reps = args.int("reps") {
+            let timing = try repeatTimed(reps) {
+                try store.getPatterns(start: start, end: end, apps: appFilter,
+                                      options: patternOptions).heatmap.count
+            }
+            var object: [String: Any] = ["command": "patterns", "start": start, "end": end,
+                                         "days": Double(end - start) / 86_400_000.0]
+            object.merge(timing) { a, _ in a }
+            emit(object)
+            break
+        }
+        let t0 = Date()
+        let patterns = try store.getPatterns(start: start, end: end, apps: appFilter,
+                                             options: patternOptions)
+        var object: [String: Any] = ["command": "patterns",
+                                     "wall_ms": Date().timeIntervalSince(t0) * 1000]
+        if let dict = jsonValue(patterns) as? [String: Any] { object.merge(dict) { a, _ in a } }
+        if args.has("no-heatmap") {
+            object["heatmap"] = "(--no-heatmap，\(patterns.heatmap.count) 格)"
+        }
+        emit(object)
+
+    case "recent":
+        let store = try openStore(args, createIfMissing: false)
+        defer { store.close() }
+        let appFilter = args.string("apps")?.split(separator: ",").map(String.init)
+        if let reps = args.int("reps") {
+            let timing = try repeatTimed(reps) {
+                try store.recentActivity(minutes: args.int("minutes") ?? 30,
+                                         maxItems: args.int("max-items") ?? 20,
+                                         apps: appFilter, endingAt: args.int64("at")).items.count
+            }
+            var object: [String: Any] = ["command": "recent",
+                                         "minutes": args.int("minutes") ?? 30]
+            object.merge(timing) { a, _ in a }
+            emit(object)
+            break
+        }
+        let t0 = Date()
+        let recent = try store.recentActivity(minutes: args.int("minutes") ?? 30,
+                                              maxItems: args.int("max-items") ?? 20,
+                                              apps: appFilter,
+                                              endingAt: args.int64("at"))
+        var object: [String: Any] = ["command": "recent",
+                                     "wall_ms": Date().timeIntervalSince(t0) * 1000]
+        if let dict = jsonValue(recent) as? [String: Any] { object.merge(dict) { a, _ in a } }
+        if args.has("no-items") {
+            object["items"] = "(--no-items，\(recent.items.count) 条)"
+        }
         emit(object)
 
     case "bench":
@@ -1001,6 +1293,82 @@ do {
         store.close()
         emit(["command": "serve", "stopped": true])
 
+    // ------------------------------------------------- 向量（v4 / M2 c / T11）
+    //
+    // 这几条子命令**不加载任何模型**（core 里没有 mlx）。真实模型的那条路走
+    // app 包里的 `brosis-embed`：它算好向量，`--provider` 这一侧只提供
+    //   * `hash`：确定性的伪嵌入（`HashEmbeddingProvider`，没有语义，只给测试 / 复现用）
+    // 两个动作因此可以分开验收：存储与检索在这里、模型在那里。
+    case "vec-status":
+        let store = try openStore(args, createIfMissing: false)
+        defer { store.close() }
+        let status = try store.vectorStatus()
+        var object: [String: Any] = ["command": "vec-status"]
+        if let dict = jsonValue(status) as? [String: Any] { object.merge(dict) { a, _ in a } }
+        object["ready"] = status.ready
+        object["jobs"] = try store.embeddingJobs(limit: args.int("jobs") ?? 5)
+        emit(object)
+
+    case "vec-plan":
+        let store = try openStore(args, createIfMissing: false)
+        defer { store.close() }
+        var config = ChunkConfig()
+        if let v = args.int("target-chars") { config.targetCharacters = v }
+        if let v = args.int("max-chars") { config.maxCharacters = v }
+        if let v = args.int("overlap-chars") { config.overlapCharacters = v }
+        let report = try store.planChunks(config: config, limit: args.int("limit"),
+                                          batch: args.int("batch") ?? 2_000)
+        var object: [String: Any] = ["command": "vec-plan",
+                                     "chunk_config": config.fingerprint]
+        if let dict = jsonValue(report) as? [String: Any] { object.merge(dict) { a, _ in a } }
+        emit(object)
+
+    case "vec-embed":
+        let store = try openStore(args, createIfMissing: false)
+        defer { store.close() }
+        let providerName = args.string("provider") ?? "hash"
+        guard providerName == "hash" else {
+            throw CLIError("brosis-store 只带 --provider hash（确定性伪嵌入）。"
+                           + "真实模型走 app 包里的 brosis-embed embed")
+        }
+        let provider = HashEmbeddingProvider(id: args.string("model-id") ?? "hash-test-provider")
+        var options = EmbeddingJobOptions(batchSize: args.int("batch") ?? 16,
+                                          maxChunks: args.int("max-chunks"),
+                                          maxSeconds: args.flags["max-seconds"].flatMap(Double.init))
+        if let v = args.int("target-chars") { options.chunkConfig.targetCharacters = v }
+        if let v = args.int("max-chars") { options.chunkConfig.maxCharacters = v }
+        if let v = args.int("overlap-chars") { options.chunkConfig.overlapCharacters = v }
+        let report = try store.runEmbeddingJob(provider: provider, options: options)
+        var object: [String: Any] = ["command": "vec-embed", "provider": providerName]
+        if let dict = jsonValue(report) as? [String: Any] { object.merge(dict) { a, _ in a } }
+        emit(object)
+
+    case "vec-rebuild":
+        let store = try openStore(args, createIfMissing: false)
+        defer { store.close() }
+        let removed = try store.rebuildEmbeddings()
+        emit(["command": "vec-rebuild", "chunks_removed": removed])
+
+    case "vec-search":
+        // 纯向量 kNN。查询向量由 --vector-file 给（JSON 数字数组），不需要模型。
+        let store = try openStore(args, createIfMissing: false)
+        defer { store.close() }
+        // --vector-file 给真实向量；--text 用确定性伪嵌入现算一条（**没有语义**，只给测试用）。
+        let vector: [Float]
+        if let path = args.string("vector-file") {
+            vector = try readVectorFile(path)
+        } else if let text = args.string("text") {
+            vector = try HashEmbeddingProvider().embed([text])[0]
+        } else {
+            throw CLIError("vec-search 要 --vector-file <JSON 数字数组> 或 --text <文本>")
+        }
+        let t0 = Date()
+        let hits = try store.vectorSearchChunks(queryVector: vector, k: args.int("k") ?? 20)
+        emit(["command": "vec-search", "k": args.int("k") ?? 20,
+              "dimension": vector.count, "hit_count": hits.count,
+              "elapsed_ms": Date().timeIntervalSince(t0) * 1000,
+              "hits": jsonValue(hits)])
+
     // -------------------------------------------------------------- mcp-audit
     case "mcp-audit":
         let store = try openStore(args, createIfMissing: false)
@@ -1009,6 +1377,84 @@ do {
                                           clientID: args.string("client"))
         emit(["command": "mcp-audit", "count": rows.count,
               "total": try store.mcpAuditCount(), "rows": jsonValue(rows)])
+
+    // -------------------------------------------------------------- 跨设备同步（D17 / 3.9）
+    case "sync-init", "sync-status", "sync-export", "sync-import", "sync-cleanup", "sync-run":
+        let store = try openStore(args, createIfMissing: args.command == "sync-init")
+        defer { store.close() }
+        let root = URL(fileURLWithPath: args.string("sync-dir") ?? SyncDefaults.directory.path)
+        var options = SyncOptions()
+        options.deviceName = args.string("device-name")
+        if let n = args.int("max-segments") { options.maxSegmentsPerRun = n }
+        if let n = args.int("max-observations") { options.maxObservationsPerSegment = n }
+        if let n = args.int("max-text-bytes") { options.maxTextBytesPerSegment = n }
+        if let n = args.int("download-timeout-s") { options.downloadTimeout = Double(n) }
+        let opened = try SyncEngine.openOrCreate(
+            store: store, root: root, passphrase: args.string("passphrase"), options: options,
+            logEvent: { kind, detail in _ = try? store.recordRuntimeEvent(kind: kind, detail: detail) })
+        let engine = opened.engine
+
+        func statusObject() throws -> [String: Any] {
+            let status = try engine.status()
+            return [
+                "directory": status.directory, "device_id": status.deviceID,
+                "key_id": status.keyID, "peers": status.peers,
+                "pending_imports": status.pendingImports,
+                "pending_observations": status.state.pendingObservations,
+                "pending_tombstones": status.state.pendingTombstones,
+                "next_seq": status.state.nextSeq,
+                "exported_observation_id": status.state.exportedObservationID,
+                "exported_deletion_id": status.state.exportedDeletionID,
+                "last_export_at": status.state.lastExportAt as Any,
+                "last_import_at": status.state.lastImportAt as Any,
+                "own_segments": status.ownSegments, "segment_bytes": status.segmentBytes,
+                "peer_state": status.state.peers.map {
+                    ["device_id": $0.deviceID, "name": $0.name as Any,
+                     "imported_seq": $0.importedSeq, "observations": $0.observations,
+                     "last_error": $0.lastError as Any]
+                },
+            ]
+        }
+
+        var out: [String: Any] = ["command": args.command, "created": opened.created]
+        // 配对口令**只在建目录那一次**打印，之后任何命令都再也拿不到它。
+        if let passphrase = opened.generatedPassphrase { out["pairing_passphrase"] = passphrase }
+
+        switch args.command {
+        case "sync-init":
+            out["status"] = try statusObject()
+        case "sync-status":
+            out["status"] = try statusObject()
+        case "sync-export":
+            let report = try engine.exportOnce()
+            out["export"] = ["segments": report.segments, "observations": report.observations,
+                             "texts": report.texts, "occurrences": report.occurrences,
+                             "tombstones": report.tombstones,
+                             "text_payload_bytes": report.textPayloadBytes,
+                             "file_bytes": report.fileBytes,
+                             "first_seq": report.firstSeq as Any, "last_seq": report.lastSeq as Any,
+                             "elapsed_ms": report.elapsedMS]
+            out["status"] = try statusObject()
+        case "sync-import":
+            let report = try engine.importOnce()
+            out["import"] = importJSON(report)
+            out["status"] = try statusObject()
+        case "sync-cleanup":
+            let cleaned = try engine.cleanup()
+            out["cleanup"] = ["deleted": cleaned.deleted, "watermark": cleaned.watermark]
+            out["status"] = try statusObject()
+        default:   // sync-run
+            let round = try engine.runOnce()
+            out["import"] = importJSON(round.imported)
+            out["export"] = ["segments": round.exported.segments,
+                             "observations": round.exported.observations,
+                             "tombstones": round.exported.tombstones,
+                             "file_bytes": round.exported.fileBytes,
+                             "elapsed_ms": round.exported.elapsedMS]
+            out["cleanup"] = ["deleted": round.cleaned]
+            out["status"] = try statusObject()
+        }
+        emit(out)
 
     default:
         throw CLIError("未知子命令 \(args.command)，见 --help")

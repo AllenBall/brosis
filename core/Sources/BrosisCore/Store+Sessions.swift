@@ -38,6 +38,11 @@ extension Store {
     /// **一条观察代表的时长 = 到「同一块屏上的下一条观察」为止，上限 `maxDwellSeconds`**
     /// （3.7 的「停留上限 90 s」就是这个上限；超过它说明中间那段没有证据，不记时长）。
     /// 每块屏最后一条观察没有下一条，记 0——不给未来的时间记账。
+    ///
+    /// **D17 / v5**：只取 `origin_device IS NULL` 的观察，也就是**本机自己产生的**。
+    /// 3.7 的 dwell / active / unknown 三类时间是"这台机器的屏幕时间"；把另一台机器导入的
+    /// 观察混进同一条时间线，会造出根本没发生过的应用切换，并把同一段墙钟时间记两遍。
+    /// 入站**墓碑**仍会让本机会话标 stale（见 Store+Sync 的 `applyImportedTombstone`）。
     func observationSlices(from: Int64?, to: Int64?, withLabels: Bool = false,
                            conn: SQLiteConnection) throws -> [ObservationSlice] {
         let maxDwellMS = Int64(sessionConfig.maxDwellSeconds * 1000)
@@ -50,13 +55,13 @@ extension Store {
                   LEFT JOIN apps  a ON a.id = o.app_id
                   LEFT JOIN urls  u ON u.id = o.url_id
                   LEFT JOIN files f ON f.id = o.file_id
-                 WHERE o.device_id = ? AND o.deleted_at IS NULL
+                 WHERE o.device_id = ? AND o.origin_device IS NULL AND o.deleted_at IS NULL
                 """
         } else {
             sql = """
                 SELECT o.id, o.ts, o.display_id, o.app_id, o.source_state
                   FROM observations o
-                 WHERE o.device_id = ? AND o.deleted_at IS NULL
+                 WHERE o.device_id = ? AND o.origin_device IS NULL AND o.deleted_at IS NULL
                 """
         }
         var binds: [SQLValue] = [.text(deviceID)]
@@ -252,7 +257,7 @@ extension Store {
     private func boundaryStartToInclude(from: Int64, conn: SQLiteConnection) throws -> Int64? {
         let atBoundary = try conn.intColumn("""
             SELECT id FROM observations
-             WHERE device_id = ? AND ts = ? AND deleted_at IS NULL;
+             WHERE device_id = ? AND origin_device IS NULL AND ts = ? AND deleted_at IS NULL;
             """, [.text(deviceID), .int(from)])
         guard !atBoundary.isEmpty else { return nil }
         let boundaryIDs = Set(atBoundary)
@@ -361,7 +366,10 @@ extension Store {
         }
 
         let newWatermark = try conn.scalarInt(
-            "SELECT MAX(ts) FROM observations WHERE device_id = ? AND deleted_at IS NULL;",
+            """
+            SELECT MAX(ts) FROM observations
+             WHERE device_id = ? AND origin_device IS NULL AND deleted_at IS NULL;
+            """,
             [.text(deviceID)])
         try setMeta("sessions_watermark_ts", newWatermark.map(String.init), conn: conn)
         // 区间查询要用它给 start 补下界（E7 §10.3），所以必须持久化。

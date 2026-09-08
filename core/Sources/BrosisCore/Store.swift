@@ -85,6 +85,18 @@ public final class Store: @unchecked Sendable {
     /// 3.7 的三个会话常量。**可配置参数，不是已验证结论**；改了要重建会话（`buildSessions(force: true)`）。
     public var sessionConfig = SessionConfig()
 
+    // MARK: - sqlite-vec 注册（M2 c / T11）
+
+    /// 把 sqlite-vec 注册成 auto extension，**进程内只做一次**。
+    /// `true` = `sqlite3_auto_extension` 返回 `SQLITE_OK`，此后每条新连接都带 `vec0` 与 `vec_*` 函数。
+    ///
+    /// v3 之前它只是静态链接进来「保证能链接」（3.4）；v4 起真的注册，
+    /// 因为 `vec_chunks` 是 `vec0` 虚拟表，不注册就连建表都建不出来。
+    public static let sqliteVecRegistered: Bool = (brosis_register_vec() == SQLITE_OK)
+
+    /// 静态编入的 sqlite-vec 版本（不需要开库就能问）。
+    public static var sqliteVecVersion: String { String(cString: brosis_vec_version()) }
+
     // MARK: - 打开
 
     /// 打开（或创建）加密库。
@@ -129,6 +141,11 @@ public final class Store: @unchecked Sendable {
         var raw = try keyProvider.fetchKey()
         defer { brosisZeroize(&raw) }
         self.key = try SecureKey(raw)
+
+        // M2 c / T11：sqlite-vec 必须在**建连接之前**注册（`sqlite3_auto_extension` 只对之后
+        // 新建的连接生效）。`static let` 保证进程内只跑一次、且线程安全。
+        // 它只往连接上挂函数与虚拟表模块，不碰库文件，所以排在 `PRAGMA key` 之前没有问题。
+        _ = Store.sqliteVecRegistered
 
         self.conn = try SQLiteConnection(path: databaseURL.path, createIfMissing: options.createIfMissing)
         self.deviceID = ""       // 建库 / 读库后填
@@ -221,6 +238,24 @@ public final class Store: @unchecked Sendable {
             try conn.run("INSERT INTO migrations(version, applied_at, note) VALUES (?,?,?);",
                          [.int(3), .int(now),
                           .text("v3：capture_audit（3.3 采样审计）+ occurrences.confidence / note（D24）")])
+            // v4（M2 c / T11）：分块与向量索引。表建出来但默认空、检索开关默认关。
+            try conn.exec(SchemaV4.createChunks)
+            try conn.exec(SchemaV4.createVecChunks)
+            try conn.run("INSERT INTO migrations(version, applied_at, note) VALUES (?,?,?);",
+                         [.int(4), .int(now),
+                          .text("v4：chunks + vec_chunks（3.4 向量检索 / 4.3 嵌入任务，"
+                                + "\(SchemaV4.elementType)[\(SchemaV4.dimension)] cosine）")])
+            // v5（M2 c / T13）：D17 跨设备同步。新库直接把两张表与三个索引建上；
+            // `observations` / `deletions` 的三个新列已经写在 createTables 里。
+            try conn.exec(SyncSchema.createAllForNewDatabase)
+            try conn.run("INSERT INTO migrations(version, applied_at, note) VALUES (?,?,?);",
+                         [.int(5), .int(now),
+                          .text("v5：sync_state + sync_peers + observations.origin_device / origin_id"
+                                + " + deletions.targets（3.9 跨设备同步，D17）")])
+            // v6（M2 c / T12）：`ledgers.narrative_meta` 已经写在 createTables 里，
+            // 新库这里只补审计行。
+            try conn.run("INSERT INTO migrations(version, applied_at, note) VALUES (?,?,?);",
+                         [.int(6), .int(now), .text(SchemaV6.note)])
         }
     }
 
@@ -266,6 +301,70 @@ public final class Store: @unchecked Sendable {
                              [.int(3), .int(now),
                               .text("v3：capture_audit（3.3 采样审计）+ occurrences.confidence / note"
                                     + "（D24），由 v\(found) 就地迁移")])
+            }
+        }
+        // v4（M2 c / T11）：chunks + vec_chunks。纯新增两张表，老库就地补建、不重建、不丢数据。
+        if found < 4 {
+            try conn.transaction {
+                let tables = Set(try conn.textColumn(
+                    "SELECT name FROM sqlite_schema WHERE type = 'table';"))
+                if !tables.contains("chunks") { try conn.exec(SchemaV4.createChunks) }
+                if !tables.contains("vec_chunks") { try conn.exec(SchemaV4.createVecChunks) }
+                try conn.run("UPDATE meta SET value = '4' WHERE key = 'schema_version';")
+                // 审计行也要能重跑：`migrations.version` 是主键，库里已经有 v4 那一行时
+                // （例如只把 meta.schema_version 手工回滚过）直接 INSERT 会撞唯一约束。
+                try conn.run("INSERT INTO migrations(version, applied_at, note) VALUES (?,?,?) "
+                           + "ON CONFLICT(version) DO UPDATE "
+                           + "SET applied_at = excluded.applied_at, note = excluded.note;",
+                             [.int(4), .int(now),
+                              .text("v4：chunks + vec_chunks（3.4 向量检索 / 4.3 嵌入任务，"
+                                    + "\(SchemaV4.elementType)[\(SchemaV4.dimension)] cosine），"
+                                    + "由 v\(found) 就地迁移")])
+            }
+        }
+        // v5（M2 c / T13）：D17 跨设备同步。两张新表 + 三个可空列 + 三个索引，全部纯新增。
+        if found < 5 {
+            try conn.transaction {
+                let tables = Set(try conn.textColumn(
+                    "SELECT name FROM sqlite_schema WHERE type = 'table';"))
+                if !tables.contains("sync_state") { try conn.exec(SyncSchema.createSyncState) }
+                if !tables.contains("sync_peers") { try conn.exec(SyncSchema.createSyncPeers) }
+                let obsColumns = Set(try conn.textColumn(
+                    "SELECT name FROM pragma_table_info('observations');"))
+                for item in SyncSchema.alterObservationsV5 where !obsColumns.contains(item.column) {
+                    try conn.exec(item.sql)
+                }
+                let delColumns = Set(try conn.textColumn(
+                    "SELECT name FROM pragma_table_info('deletions');"))
+                for item in SyncSchema.alterDeletionsV5 where !delColumns.contains(item.column) {
+                    try conn.exec(item.sql)
+                }
+                let indexes = Set(try conn.textColumn(
+                    "SELECT name FROM sqlite_schema WHERE type = 'index';"))
+                for item in SyncSchema.createIndexes where !indexes.contains(item.name) {
+                    try conn.exec(item.sql)
+                }
+                try conn.run("UPDATE meta SET value = '5' WHERE key = 'schema_version';")
+                try conn.run("INSERT INTO migrations(version, applied_at, note) VALUES (?,?,?);",
+                             [.int(5), .int(now),
+                              .text("v5：sync_state + sync_peers + observations.origin_device /"
+                                    + " origin_id + deletions.targets（3.9 跨设备同步，D17），"
+                                    + "由 v\(found) 就地迁移")])
+            }
+        }
+        // v6（M2 c / T12）：ledgers 补一列可空的 narrative_meta。纯新增，先查再加，能重跑。
+        if found < 6 {
+            try conn.transaction {
+                let columns = Set(try conn.textColumn(
+                    "SELECT name FROM pragma_table_info('ledgers');"))
+                for item in SchemaV6.alterLedgersV6 where !columns.contains(item.column) {
+                    try conn.exec(item.sql)
+                }
+                try conn.run("UPDATE meta SET value = '6' WHERE key = 'schema_version';")
+                try conn.run("INSERT INTO migrations(version, applied_at, note) VALUES (?,?,?) "
+                           + "ON CONFLICT(version) DO UPDATE "
+                           + "SET applied_at = excluded.applied_at, note = excluded.note;",
+                             [.int(6), .int(now), .text(SchemaV6.note + "，由 v\(found) 就地迁移")])
             }
         }
     }

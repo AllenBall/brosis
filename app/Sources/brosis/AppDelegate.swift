@@ -13,6 +13,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var events: EventSkeleton?
     private var lastCaptureError: String?
     private var guide: PermissionGuide?
+    /// 3.9 跨设备同步（c 批 T13）。挂在锁定状态机上，只在 unlocked 相位跑循环。
+    private var sync: SyncController?
     /// 最近一次前台的**非本应用**：菜单里「暂停采集当前应用」要用它。
     /// 不能在菜单打开时现问 `frontmostApplication`——点状态栏图标本身会让本应用成为前台。
     private var foregroundBundleID: String?
@@ -54,6 +56,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             self.syncSubsystems()
         }
         lock.onLocking = { [weak self] in self?.stopSubsystems(reason: "locking") }
+
+        // c 批接线（tools/bench/results/m2_c_{vectors,sync,narrative}_2026-09-08.md 各自的「接入方式」）：
+        // 同步控制器链式挂到上面两个回调之后（它自己保留原回调，不覆盖）；
+        // 模型面板 / 嵌入调度器 / 叙述调度器只登记依赖，开关默认关，关着时定时器什么都不做。
+        // 调度器在 utility 队列上 tick，而 LockController 是 MainActor 的，所以读快照要回主线程。
+        let sync = SyncController()
+        sync.install(lock: lock, recorder: recorder)
+        self.sync = sync
+        let lockSnapshot = makeLockSnapshotReader()
+        ModelsWindowController.shared.configure(recorder: recorder, lockSnapshot: lockSnapshot)
+        NarrativeScheduler.shared.configure(recorder: recorder, lockSnapshot: lockSnapshot)
+        if NarrativeScheduler.shared.isEnabled { NarrativeScheduler.shared.start() }
 
         // 3.12 的应用采集清单窗口。**这里只是接线，不创建窗口**——
         // 窗口在用户第一次点菜单项时才建（LSUIElement 的进程不该在启动时拉起 AppKit 窗口）。
@@ -410,6 +424,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // 第 5 节接进来：菜单项自带 target/action 与可用性判定，默认不联网、fail-closed。
         menu.addItem(UpdaterController.shared.makeMenuItem())
 
+        // c 批：模型与向量检索面板（T11）、夜间叙述（T12）、跨设备同步（T13）。
+        menu.addItem(.separator())
+        menu.addItem(ModelsMenu.menuItem())
+        menu.addItem(narrativeMenuItem())
+        let syncItem = NSMenuItem(title: "跨设备同步…（\(sync?.status.enabled == true ? "已开启" : "未开启")）",
+                                  action: #selector(openSyncWindow), keyEquivalent: "")
+        syncItem.target = self
+        menu.addItem(syncItem)
+
         menu.addItem(.separator())
         let quit = NSMenuItem(title: "退出 brosis", action: #selector(quit), keyEquivalent: "q")
         quit.target = self
@@ -565,6 +588,60 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         lastStatsExport = "\(outcome.url.lastPathComponent)（\(outcome.fileBytes) 字节）"
         NSWorkspace.shared.activateFileViewerSelecting([outcome.url])
         refreshMenu()
+    }
+
+    /// 给后台调度器读锁定状态用：调度器在 utility 队列上 tick，`LockController` 是 MainActor 的。
+    /// 主线程上直接读；别的线程同步跳回主线程读（读一个小结构体，不会久）。
+    private func makeLockSnapshotReader() -> @Sendable () -> LockSnapshot {
+        { [weak self] in
+            let read: @MainActor () -> LockSnapshot = { self?.lock?.snapshot ?? LockSnapshot() }
+            if Thread.isMainThread { return MainActor.assumeIsolated { read() } }
+            return DispatchQueue.main.sync { MainActor.assumeIsolated { read() } }
+        }
+    }
+
+    /// 夜间叙述的子菜单：开关、门控状态一行、「立刻写一篇」。
+    /// 面板本身是 T11 的「模型」窗口，这里只放三个入口（T12 结果文件第 7 节）。
+    private func narrativeMenuItem() -> NSMenuItem {
+        let scheduler = NarrativeScheduler.shared
+        let item = NSMenuItem(title: "夜间叙述（\(scheduler.isEnabled ? "已开启" : "未开启")）",
+                              action: nil, keyEquivalent: "")
+        let submenu = NSMenu()
+        submenu.addItem(disabledItem(String(scheduler.statusLine().prefix(90))))
+        submenu.addItem(.separator())
+        let toggle = NSMenuItem(title: scheduler.isEnabled ? "关闭夜间叙述" : "开启夜间叙述（需已安装生成模型）",
+                                action: #selector(toggleNarrative), keyEquivalent: "")
+        toggle.target = self
+        submenu.addItem(toggle)
+        let now = NSMenuItem(title: "立刻写一篇（后台，约 10 s / 篇）",
+                             action: #selector(runNarrativeNow), keyEquivalent: "")
+        now.target = self
+        now.isEnabled = scheduler.modelsRootURL() != nil
+        submenu.addItem(now)
+        item.submenu = submenu
+        return item
+    }
+
+    @objc private func toggleNarrative() {
+        NarrativeScheduler.shared.isEnabled.toggle()
+        recorder.logEvent(kind: "narrative_toggled",
+                          detail: "enabled=\(NarrativeScheduler.shared.isEnabled)")
+        refreshMenu()
+    }
+
+    @objc private func runNarrativeNow() {
+        guard let root = NarrativeScheduler.shared.modelsRootURL() else { return }
+        DispatchQueue.global(qos: .utility).async {
+            let summary = NarrativeScheduler.shared.runOnce(modelsRoot: root)
+            DispatchQueue.main.async { [weak self] in
+                self?.recorder.logEvent(kind: "narrative_manual_run", detail: summary.prefix(160).description)
+                self?.refreshMenu()
+            }
+        }
+    }
+
+    @objc private func openSyncWindow() {
+        sync?.presentWindow()
     }
 
     @objc private func quit() {

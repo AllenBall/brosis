@@ -16,6 +16,16 @@
 #     fail-closed，Sparkle 会拒绝启动而不是不验签就装）；
 #   - 逐个签 Sparkle 的内嵌代码（XPC、Updater.app、Autoupdate、框架本身），
 #     不用 --deep，然后逐个 Mach-O 核对 Team ID。
+#
+# 从 M2 c（T11 模型管理器 + 向量检索）起再多做三件事：
+#   - **现编 mlx.metallib**（Support/build_metallib.sh，要 Metal Toolchain）并放进
+#     Contents/Resources/mlx-swift_Cmlx.bundle/default.metallib。
+#     位置不能换：Contents/MacOS/ 下的任何文件都被 codesign 当作嵌套代码去校验，
+#     而 metallib 是 MTLB 格式、不是可签名的 Mach-O，放那儿必然报
+#     "code object is not signed at all"（E9 实测，见 tools/e9/README.md）。
+#   - 把 SwiftPM 生成的资源 bundle（brosis_BrosisModels.bundle 里的模型清单、
+#     swift-transformers_Hub.bundle 里的 tokenizer 配置…）拷进 Contents/Resources；
+#   - 把 brosis-embed 放进 Contents/MacOS 并**单独签**（与 brosis-mcp 同一处理）。
 set -euo pipefail
 
 APP_SRC="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -76,6 +86,25 @@ MCP_BIN="$CORE_BIN_DIR/brosis-mcp"
 [ -x "$MCP_BIN" ] || fail "找不到可执行文件 $MCP_BIN"
 echo "MCP 二进制：$MCP_BIN（$(stat -f%z "$MCP_BIN") 字节）"
 
+# ---------------------------------------------------------------- 1c. brosis-embed + metallib
+# brosis-embed 与主程序在同一个包里，上面那次 swift build 已经把它编出来了。
+EMBED_BIN="$BIN_DIR/brosis-embed"
+[ -x "$EMBED_BIN" ] || fail "找不到可执行文件 $EMBED_BIN"
+echo "嵌入工具：$EMBED_BIN（$(stat -f%z "$EMBED_BIN") 字节）"
+
+step "1d. 准备 mlx.metallib"
+METALLIB=""
+METALLIB_SOURCE=""
+if [ -n "${MLX_METALLIB:-}" ] && [ -f "$MLX_METALLIB" ]; then
+  METALLIB="$MLX_METALLIB"; METALLIB_SOURCE="MLX_METALLIB 指定"
+elif xcrun -sdk macosx metal --version > /dev/null 2>&1; then
+  SCRATCH="$SCRATCH" bash "$APP_SRC/Support/build_metallib.sh" "$SCRATCH/mlx.metallib"
+  METALLIB="$SCRATCH/mlx.metallib"; METALLIB_SOURCE="xcrun metal 现编（Metal Toolchain 已装）"
+else
+  fail "拿不到 mlx.metallib：没装 Metal Toolchain。先 xcodebuild -downloadComponent MetalToolchain，或用 MLX_METALLIB 指定一个版本对得上的（只适合验证）。"
+fi
+echo "metallib：$METALLIB（$(stat -f%z "$METALLIB") 字节）来源：$METALLIB_SOURCE"
+
 # ---------------------------------------------------------------- 2. 组装 .app
 step "2. 组装 $APP_BUNDLE"
 rm -rf "$APP_BUNDLE"
@@ -85,6 +114,21 @@ mkdir -p "$APP_BUNDLE/Contents/Library/LaunchAgents"
 
 cp "$BIN" "$APP_BUNDLE/Contents/MacOS/$APP_NAME"
 cp "$MCP_BIN" "$APP_BUNDLE/Contents/MacOS/brosis-mcp"
+cp "$EMBED_BIN" "$APP_BUNDLE/Contents/MacOS/brosis-embed"
+# mlx 在 .app 里能找到、且 codesign 不报错的位置：主 bundle 的 Resources 下的 SwiftPM 资源 bundle。
+#   device.cpp: load_swiftpm_library -> NS::Bundle::allBundles() -> 主 bundle 的 resourceURL
+#   -> <resourceURL>/mlx-swift_Cmlx.bundle -> 平铺 bundle 的 resourceURL 就是它自己 -> default.metallib
+mkdir -p "$APP_BUNDLE/Contents/Resources/mlx-swift_Cmlx.bundle"
+cp "$METALLIB" "$APP_BUNDLE/Contents/Resources/mlx-swift_Cmlx.bundle/default.metallib"
+# SwiftPM 生成的资源 bundle：模型清单（brosis_BrosisModels.bundle/catalog.json）与
+# swift-transformers 的 tokenizer 配置。整个拷过去，Bundle.module 才找得到。
+for b in "$BIN_DIR"/*.bundle; do
+  [ -d "$b" ] || continue
+  ditto "$b" "$APP_BUNDLE/Contents/Resources/$(basename "$b")"
+done
+# 清单再单独放一份平铺的：ModelResources 的查找顺序里 Bundle.main 的 Resources 也在里面，
+# 万一将来 SwiftPM 换了 bundle 命名规则也不至于找不到清单。
+cp "$APP_SRC/Sources/BrosisModels/catalog.json" "$APP_BUNDLE/Contents/Resources/catalog.json"
 cp "$APP_SRC/Support/Info.plist" "$APP_BUNDLE/Contents/Info.plist"
 
 # ---- Sparkle.framework：SwiftPM 把 binaryTarget 解出来的框架拷到 bin 目录，
@@ -181,6 +225,15 @@ find "$APP_BUNDLE" -type f -not -path "*/Sparkle.framework/*" | sed "s|$APP_BUND
 printf '  brosis.app/Contents/Frameworks/Sparkle.framework（%s 个文件，%s）\n' \
   "$(find "$SPARKLE_FW" -type f | wc -l | tr -d ' ')" "$(du -sh "$SPARKLE_FW" | cut -f1)"
 
+# ---- 体积（M2 c / T11 要记的 app 体积增量）----
+APP_BYTES=$(find "$APP_BUNDLE" -type f -exec stat -f%z {} + | awk '{s+=$1} END {print s}')
+MAIN_BYTES=$(stat -f%z "$APP_BUNDLE/Contents/MacOS/$APP_NAME")
+EMBED_BYTES=$(stat -f%z "$APP_BUNDLE/Contents/MacOS/brosis-embed")
+LIB_BYTES=$(stat -f%z "$APP_BUNDLE/Contents/Resources/mlx-swift_Cmlx.bundle/default.metallib")
+printf '\n体积：app 合计 %.2f MiB = 主程序 %.2f + brosis-embed %.2f + metallib %.2f + 其余\n' \
+  "$(echo "$APP_BYTES/1048576" | bc -l)" "$(echo "$MAIN_BYTES/1048576" | bc -l)" \
+  "$(echo "$EMBED_BYTES/1048576" | bc -l)" "$(echo "$LIB_BYTES/1048576" | bc -l)"
+
 # ---------------------------------------------------------------- 3. 签名
 if [ "${SKIP_SIGN:-0}" = "1" ]; then
   step "3. 跳过签名（SKIP_SIGN=1）"
@@ -226,6 +279,18 @@ else
   MCP_SIGN_ARGS+=(--timestamp)
 fi
 codesign "${MCP_SIGN_ARGS[@]}" "$APP_BUNDLE/Contents/MacOS/brosis-mcp"
+# brosis-embed 同理：Contents/MacOS 下的第二、第三个 Mach-O 都要单独签，
+# 漏了 --deep --strict 会报 "code object is not signed at all"。
+# 它要加载 mlx 与模型权重，E9 实测在裸 hardened runtime 下不需要任何额外权利
+# （allow-jit / allow-unsigned-executable-memory / disable-library-validation 都不要）。
+EMBED_SIGN_ARGS=(--force --sign "$IDENTITY" --options runtime
+                 --identifier "com.brosis.app.embed" --generate-entitlement-der)
+if [ "$TIMESTAMP" = "none" ]; then
+  EMBED_SIGN_ARGS+=(--timestamp=none)
+else
+  EMBED_SIGN_ARGS+=(--timestamp)
+fi
+codesign "${EMBED_SIGN_ARGS[@]}" "$APP_BUNDLE/Contents/MacOS/brosis-embed"
 
 # ---- Sparkle：由内向外逐个签，**不用 --deep**。
 # Sparkle 官方要求：XPC 服务 → Updater.app → Autoupdate → 框架本身，
@@ -280,6 +345,7 @@ codesign "${SIGN_ARGS[@]}" "$APP_BUNDLE"
 step "4. codesign --verify --deep --strict"
 codesign --verify --deep --strict --verbose=2 "$APP_BUNDLE"
 codesign --verify --strict --verbose=2 "$APP_BUNDLE/Contents/MacOS/brosis-mcp"
+codesign --verify --strict --verbose=2 "$APP_BUNDLE/Contents/MacOS/brosis-embed"
 MCP_TEAM="$(codesign -dv "$APP_BUNDLE/Contents/MacOS/brosis-mcp" 2>&1 | sed -n 's/^TeamIdentifier=//p')"
 APP_TEAM="$(codesign -dv "$APP_BUNDLE" 2>&1 | sed -n 's/^TeamIdentifier=//p')"
 [ -n "$MCP_TEAM" ] && [ "$MCP_TEAM" = "$APP_TEAM" ] \
@@ -306,6 +372,11 @@ echo "Sparkle 的 $sparkle_checked 个 Mach-O 全部由同一个 Team ID 签名"
 # dyld 找不到 Sparkle.framework 的话这一步会直接非零退出。
 step "4b. 从 bundle 里跑 --version（验 dyld 能按 rpath 找到 Sparkle.framework）"
 "$APP_BUNDLE/Contents/MacOS/$APP_NAME" --version
+
+step "4c. 从 bundle 里跑 brosis-embed env（验 metallib 在位、GPU 真能算、清单读得到）"
+"$APP_BUNDLE/Contents/MacOS/brosis-embed" env > "$SCRATCH/embed_env.json"
+cat "$SCRATCH/embed_env.json"
+python3 "$APP_SRC/Support/check_embed_env.py" "$SCRATCH/embed_env.json"
 
 step "5. codesign -dv --verbose=4"
 codesign -dv --verbose=4 "$APP_BUNDLE"

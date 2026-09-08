@@ -152,8 +152,12 @@ final class IPCProtocolTests: XCTestCase {
 
     // MARK: - 工具清单（3.6）
 
-    func testToolCatalogHasSixReadOnlyTools() throws {
-        XCTAssertEqual(MCPToolCatalog.all.count, 6)
+    func testToolCatalogCoversEveryToolAndIsReadOnly() throws {
+        // v1 的六个（3.6）+ M2 的三个（周台账 / get_patterns / recent_activity，T14）
+        XCTAssertEqual(MCPToolCatalog.all.count, 9)
+        XCTAssertEqual(MCPToolCatalog.all.count, MCPTool.allCases.count)
+        // 清单顺序 = 枚举顺序：客户端看到的工具顺序不该随手改（新工具一律追加在后面）
+        XCTAssertEqual(MCPToolCatalog.all.map(\.name), MCPTool.allCases.map(\.rawValue))
         XCTAssertEqual(Set(MCPToolCatalog.all.map(\.name)),
                        Set(MCPTool.allCases.map(\.rawValue)))
         for tool in MCPToolCatalog.all {
@@ -166,6 +170,9 @@ final class IPCProtocolTests: XCTestCase {
             XCTAssertTrue(JSONSerialization.isValidJSONObject(json.foundationObject), tool.name)
         }
         XCTAssertEqual(MCPToolCatalog.descriptor(for: "search")?.name, "search")
+        XCTAssertEqual(MCPToolCatalog.descriptor(for: "get_week_ledger")?.name, "get_week_ledger")
+        XCTAssertEqual(MCPToolCatalog.descriptor(for: "get_patterns")?.name, "get_patterns")
+        XCTAssertEqual(MCPToolCatalog.descriptor(for: "recent_activity")?.name, "recent_activity")
         XCTAssertNil(MCPToolCatalog.descriptor(for: "delete_everything"))
     }
 
@@ -333,12 +340,25 @@ final class IPCProtocolTests: XCTestCase {
         try server.start()
         defer { server.stop() }
 
+        // 【M2 c 批修】原来这里是固定的 `usleep(400_000)`：处理器自己要睡 150 ms，
+        // 机器一忙（本批并行任务在编 mlx）第三条连接的服务线程排不上，`served` 读回 2 不是 3，
+        // 用例随机变红。改成**按条件等**（上限 10 s），行为不变、不再看机器负载脸色。
+        func waitUntil(_ label: String, _ condition: @escaping () -> Bool) {
+            let deadline = Date().addingTimeInterval(10)
+            while Date() < deadline && !condition() { usleep(10_000) }
+            XCTAssertTrue(condition(), "等 \(label) 超时（10 s）")
+        }
+
         for i in 0..<3 {
             let fd = try connectRaw(socketURL)
             let line = try IPCCodec.line(IPCRequest(client: "hang-up-\(i)", op: .ping))
             _ = line.withUnsafeBytes { raw in Darwin.write(fd, raw.baseAddress, raw.count) }
             Darwin.close(fd)                      // 不读响应，直接挂断
-            usleep(400_000)                       // 等服务端那条线程把响应写完（并失败）
+            // 等服务端那条线程把这一条的响应写完（并失败）：处理器先 +1 再睡 150 ms 再写，
+            // 所以要等的是"事件数追上请求数"，不是"served 追上"。
+            waitUntil("第 \(i + 1) 条挂断连接的写失败") {
+                events.value.filter { $0.hasPrefix("ipc_write_error") }.count >= i + 1
+            }
         }
 
         XCTAssertEqual(served.value, 3, "三次请求都该到达处理器")

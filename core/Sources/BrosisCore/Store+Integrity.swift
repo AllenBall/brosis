@@ -2,9 +2,10 @@ import Foundation
 
 extension Store {
 
-    /// 13 项悬空引用检查 + `integrity_check` + `foreign_key_check` + FTS5 `integrity-check`。
-    /// 逐项与 E3 的 S7（`tools/proto/test_correctness.py: scenario_7_dangling`）对齐，
-    /// 差别只有第 4 / 5 项的口径注释（本包的 FTS 是 contentless + 显式维护，不是触发器）。
+    /// 16 项悬空引用检查 + `integrity_check` + `foreign_key_check` + FTS5 `integrity-check`。
+    /// 前 13 项逐项与 E3 的 S7（`tools/proto/test_correctness.py: scenario_7_dangling`）对齐，
+    /// 差别只有第 4 / 5 项的口径注释（本包的 FTS 是 contentless + 显式维护，不是触发器）；
+    /// 后 3 项是 v4（M2 c / T11）新增的分块与向量索引检查（`chunks` / `vec_chunks`）。
     public func integrityReport() throws -> IntegrityReport {
         try withLock { conn in
             func n(_ sql: String, _ binds: [SQLValue] = []) throws -> Int {
@@ -49,6 +50,23 @@ extension Store {
             check("同一 observation 内 ord 重复的 occurrence", try n("""
                 SELECT COUNT(*) FROM (SELECT device_id, observation_id, ord FROM occurrences
                                        GROUP BY 1,2,3 HAVING COUNT(*) > 1);
+                """))
+
+            // v4（M2 c / T11）：分块与向量索引。三项都必须是 0。
+            // `chunks` 靠外键 CASCADE 跟着 text_versions 走，所以第一项理论上永远是 0；
+            // `vec_chunks` 是虚拟表、**没有外键**，第二项才是真正会漏的那一处
+            // （`sweepOrphanVersions` 必须显式删它）。
+            check("chunk 指向不存在的 text_version", try n("""
+                SELECT COUNT(*) FROM chunks c WHERE NOT EXISTS(
+                  SELECT 1 FROM text_versions tv WHERE tv.device_id = c.device_id AND tv.id = c.text_version_id);
+                """))
+            check("向量行没有对应的 chunk", try n("""
+                SELECT COUNT(*) FROM vec_chunks v WHERE NOT EXISTS(
+                  SELECT 1 FROM chunks c WHERE c.vrow = v.chunk_rowid);
+                """))
+            check("标了已嵌入却没有向量行的 chunk", try n("""
+                SELECT COUNT(*) FROM chunks c WHERE c.embedded_at IS NOT NULL AND NOT EXISTS(
+                  SELECT 1 FROM vec_chunks v WHERE v.chunk_rowid = c.vrow);
                 """))
 
             // 派生结果引用了已删观察却没标 stale

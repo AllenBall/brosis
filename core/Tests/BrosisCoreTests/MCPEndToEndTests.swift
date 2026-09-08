@@ -283,26 +283,31 @@ final class MCPEndToEndTests: XCTestCase {
         DayCalendar(TimeZone(identifier: "UTC")!).dayString(ts)
     }
 
-    private var allSixCalls: [(String, [String: Any])] {
+    /// 每个工具各一次调用（v1 的六个 + M2 / T14 的三个）。
+    private var allToolCalls: [(String, [String: Any])] {
         [("search", ["q": "知识图谱", "limit": 3]),
          ("get_evidence", ["ids": [1]]),
          ("get_context", ["hours": 2, "max_tokens": 500]),
          ("get_timeline", ["start": baseTS, "end": baseTS + 3_600_000, "granularity": "hour"]),
          ("get_day_ledger", ["date": day(baseTS)]),
-         ("get_item", ["app": Self.bundles[0]])]
+         ("get_item", ["app": Self.bundles[0]]),
+         ("get_week_ledger", ["week": day(baseTS)]),
+         ("get_patterns", ["start": baseTS - 3_600_000, "end": baseTS + 3_600_000]),
+         ("recent_activity", ["minutes": 180, "max_items": 5])]
     }
 
     // MARK: - 1. initialize / tools/list / 没有 grant 全拒
 
-    func testInitializeListsSixToolsAndDeniesEverythingWithoutGrant() throws {
+    func testInitializeListsEveryToolAndDeniesEverythingWithoutGrant() throws {
         try startServer()
-        let run = try runMCP(client: "claude-code", calls: allSixCalls, label: "no-grant")
+        let run = try runMCP(client: "claude-code", calls: allToolCalls, label: "no-grant")
 
         XCTAssertEqual(run.serverName, "brosis")
         XCTAssertEqual(run.protocolVersion, "2025-06-18")
         XCTAssertEqual(run.toolNames, ["get_context", "get_day_ledger", "get_evidence",
-                                       "get_item", "get_timeline", "search"])
-        XCTAssertEqual(run.steps.count, 6)
+                                       "get_item", "get_patterns", "get_timeline",
+                                       "get_week_ledger", "recent_activity", "search"])
+        XCTAssertEqual(run.steps.count, 9)
         for step in run.steps {
             XCTAssertTrue(step.isError, "\(step.tool) 在没有 grant 时必须报错")
             XCTAssertTrue(step.text.contains("no_grant"), step.tool)
@@ -315,17 +320,73 @@ final class MCPEndToEndTests: XCTestCase {
             with: try Data(contentsOf: URL(fileURLWithPath: run.reportPath))) as? [String: Any] ?? [:]
         let tools = ((listed["tools_list"] as? [String: Any])?["result"] as? [String: Any])?["tools"]
             as? [[String: Any]] ?? []
-        XCTAssertEqual(tools.count, 6)
+        XCTAssertEqual(tools.count, 9)
         for tool in tools {
             let annotations = tool["annotations"] as? [String: Any] ?? [:]
             XCTAssertEqual(annotations["readOnlyHint"] as? Bool, true, "\(tool["name"] ?? "?")")
             XCTAssertNotNil(tool["inputSchema"] as? [String: Any], "\(tool["name"] ?? "?")")
         }
 
-        // 审计：六条 no_grant
+        // 审计：九条 no_grant
         let audit = try storeCLI(["mcp-audit", "--limit", "20"])
         XCTAssertEqual(audit.status, 0, audit.err)
-        XCTAssertEqual(audit.out.components(separatedBy: "\"no_grant\"").count - 1, 6, audit.out)
+        XCTAssertEqual(audit.out.components(separatedBy: "\"no_grant\"").count - 1, 9, audit.out)
+    }
+
+    // MARK: - 1b. M2 的三个工具走完整条链路（M2 c / T14）
+
+    /// 四个真进程（XCTest → python3 客户端 → `brosis-mcp` → `brosis-store serve`）上，
+    /// `get_week_ledger` / `get_patterns` / `recent_activity` 各真实调用一次。
+    func testM2ToolsThroughMCP() throws {
+        try startServer()
+        XCTAssertEqual(try admin(["grant", "add", "--client", "claude-code",
+                                  "--fields", "evidence", "--apps", "*",
+                                  "--time-window", "30"]).status, 0)
+
+        let run = try runMCP(client: "claude-code", calls: [
+            ("get_week_ledger", ["week": day(baseTS)]),
+            ("get_patterns", ["start": baseTS - 3_600_000, "end": baseTS + 3_600_000]),
+            ("recent_activity", ["minutes": 180, "max_items": 5]),
+        ], label: "m2-tools")
+        XCTAssertEqual(run.steps.count, 3)
+        for step in run.steps { XCTAssertFalse(step.isError, "\(step.tool)：\(step.text)") }
+
+        // ① 周台账：包含 baseTS 那一天，7 天的按天分布都在，narrative 是 null（3.7）
+        let week = try XCTUnwrap(run.steps[0].payload)
+        XCTAssertEqual((week["days"] as? [String])?.count, 7)
+        XCTAssertTrue((week["days"] as? [String] ?? []).contains(day(baseTS)))
+        XCTAssertEqual((week["dayTotals"] as? [[String: Any]])?.count, 7)
+        XCTAssertGreaterThan((week["observations"] as? Int) ?? 0, 0)
+        XCTAssertNil(week["narrative"] as? String, "3.7：台账与叙述分开标注")
+        XCTAssertNotNil(week["grant"])
+
+        // ② 活动模式：热力格子非空，且把算它用到的常量一起回来了
+        let patterns = try XCTUnwrap(run.steps[1].payload)
+        XCTAssertGreaterThan((patterns["heatmap"] as? [[String: Any]])?.count ?? 0, 0)
+        XCTAssertEqual((patterns["byHour"] as? [[String: Any]])?.count, 24)
+        XCTAssertEqual((patterns["byWeekday"] as? [[String: Any]])?.count, 7)
+        XCTAssertNotNil(patterns["options"])
+        XCTAssertNotNil(patterns["sessionConfig"])
+        XCTAssertEqual((patterns["focus"] as? [String: Any])?["minMinutes"] as? Double, 25)
+
+        // ③ 最近活动：每条摘要 ≤ 100 token（3.6）
+        let recent = try XCTUnwrap(run.steps[2].payload)
+        let items = try XCTUnwrap(recent["items"] as? [[String: Any]])
+        XCTAssertFalse(items.isEmpty)
+        XCTAssertLessThanOrEqual(items.count, 5)
+        let budget = try XCTUnwrap(recent["summaryTokenBudget"] as? Int)
+        XCTAssertEqual(budget, 100)
+        for item in items {
+            XCTAssertLessThanOrEqual((item["summaryTokens"] as? Int) ?? 0, budget)
+            XCTAssertNotNil(item["evidenceID"])
+        }
+
+        // ④ 审计：三条 ok，工具名对得上
+        let audit = try storeCLI(["mcp-audit", "--limit", "10"])
+        XCTAssertEqual(audit.status, 0, audit.err)
+        for tool in ["get_week_ledger", "get_patterns", "recent_activity"] {
+            XCTAssertTrue(audit.out.contains("\"\(tool)\""), "审计里要有 \(tool)：\(audit.out)")
+        }
     }
 
     // MARK: - 2. 闭环：记录 → 找回 → 展开原文 → 删除后消失（3.8 / 4.2 验收）
@@ -591,7 +652,7 @@ final class MCPEndToEndTests: XCTestCase {
         // 不起 serve，直接跑客户端
         let run = try runMCP(client: "claude-code",
                              calls: [("search", ["q": "知识图谱"])], label: "no-server")
-        XCTAssertEqual(run.toolNames.count, 6, "连不上服务端也要能 tools/list（清单是本地的）")
+        XCTAssertEqual(run.toolNames.count, 9, "连不上服务端也要能 tools/list（清单是本地的）")
         XCTAssertTrue(run.steps[0].isError)
         XCTAssertTrue(run.steps[0].text.contains("连不上"), run.steps[0].text)
         XCTAssertTrue(run.steps[0].text.contains("brosis.app"), run.steps[0].text)

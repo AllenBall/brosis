@@ -1226,6 +1226,21 @@ enum SelfCheck {
             check("视口 OCR / 采样审计端到端", false, "\(error)")
         }
 
+        // ------------------------------------------------ 7. 跨设备同步（M2 c / T13，3.9 / D17）
+        // 实现在 SyncSelfCheck.swift（本文件只加这一行，避免与并行任务改同一段）。
+        failures += SyncSelfCheck.run()
+
+        // ------------------------------ 8. 模型管理器与向量检索（M2 c / T11，3.4 / 3.11 / D18 / D27）
+        // 实现在 Models/ModelsSelfCheck.swift（本文件同样只加这一行）。
+        // 它不加载任何模型（向量那段用确定性伪嵌入），所以没装模型的机器上照样应该全过。
+        failures += ModelsSelfCheck.run()
+
+        // ------------------------------------ 9. 夜间叙述（M2 c / T12，4.3 / 3.7 / 3.10 / D19）
+        // 实现在 Models/NarrativeSelfCheck.swift（本文件同样只加这一行）。
+        // 生成侧用脚本化假提供方，**不加载 2.85 GiB 的权重**，所以几毫秒跑完、
+        // 没装模型的机器上照样全过；真实模型那一次在 `--narrative-smoke` 里。
+        failures += NarrativeSelfCheck.run()
+
         // ---------------------------------------------------------------- 参数快照
         print("加密库自检工作目录：\(workspace.path)（跑完删除）")
         print("MCP：\(MCPTool.allCases.count) 个工具 "
