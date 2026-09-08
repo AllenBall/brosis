@@ -71,7 +71,8 @@ final class QuotaScheduler: @unchecked Sendable {
             return note
         }
         let note = exporter.expireWithNotice()
-        self.note(note)
+        // "配额未到线" 是常态噪音；删了东西 / 被通知拦住 / 库没开 才值得落盘。
+        self.note(note, significant: !note.hasPrefix("配额未到线"))
         return note
     }
 
@@ -83,11 +84,21 @@ final class QuotaScheduler: @unchecked Sendable {
         }
     }
 
-    private func note(_ text: String) {
+    /// 记一次检查结果。
+    ///
+    /// **分级**：每 30 分钟查一次，一天 48 条，其中绝大多数是"没到线、什么都没做"——
+    /// 这种噪音落盘会把真正有意义的那几条淹掉，所以只用 `.info`（默认不持久化，
+    /// 只在内存缓冲里，`log show --info` 能看到）。**真删了东西、或被通知拦住、
+    /// 或出错**才用 `.notice` 落盘，那是事后要能查到的。
+    private func note(_ text: String, significant: Bool = false) {
         lock.lock()
         _lastNote = text
         lock.unlock()
-        BrosisLog.lifecycle.notice("配额检查：\(text, privacy: .public)")
+        if significant {
+            BrosisLog.lifecycle.notice("配额检查：\(text, privacy: .public)")
+        } else {
+            BrosisLog.lifecycle.info("配额检查：\(text, privacy: .public)")
+        }
     }
 }
 
