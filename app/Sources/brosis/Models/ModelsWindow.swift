@@ -145,6 +145,7 @@ final class ModelsWindowController: NSObject, NSWindowDelegate,
     private var statusLabel: NSTextField?
     private var vectorSwitch: NSButton?
     private var nightlySwitch: NSButton?
+    private var autoSwitch: NSButton?
     /// M2 d / T15：「现在开始建索引」按钮（跑起来之后变成「取消」）。
     private var overnightButton: NSButton?
     /// D30 新增的三个入口。
@@ -167,7 +168,7 @@ final class ModelsWindowController: NSObject, NSWindowDelegate,
     }
 
     private func buildWindow() {
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 860, height: 560),
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 860, height: 584),
                               styleMask: [.titled, .closable, .miniaturizable, .resizable],
                               backing: .buffered, defer: false)
         window.title = "模型与向量检索"
@@ -180,7 +181,7 @@ final class ModelsWindowController: NSObject, NSWindowDelegate,
         content.autoresizingMask = [.width, .height]
 
         let status = NSTextField(labelWithString: "")
-        status.frame = NSRect(x: 16, y: 510, width: 828, height: 34)
+        status.frame = NSRect(x: 16, y: 534, width: 828, height: 34)
         status.autoresizingMask = [.width, .minYMargin]
         status.lineBreakMode = .byWordWrapping
         status.maximumNumberOfLines = 2
@@ -198,7 +199,7 @@ final class ModelsWindowController: NSObject, NSWindowDelegate,
             column.width = spec.width
             table.addTableColumn(column)
         }
-        let scroll = NSScrollView(frame: NSRect(x: 16, y: 150, width: 828, height: 350))
+        let scroll = NSScrollView(frame: NSRect(x: 16, y: 174, width: 828, height: 350))
         scroll.autoresizingMask = [.width, .height]
         scroll.hasVerticalScroller = true
         scroll.documentView = table
@@ -208,64 +209,64 @@ final class ModelsWindowController: NSObject, NSWindowDelegate,
         // 第一行：模型本身怎么来、用哪一个（D30）。
         let downloadButton = NSButton(title: "下载", target: self,
                                       action: #selector(downloadClicked(_:)))
-        downloadButton.frame = NSRect(x: 16, y: 112, width: 72, height: 28)
+        downloadButton.frame = NSRect(x: 16, y: 136, width: 72, height: 28)
         downloadButton.autoresizingMask = [.maxXMargin, .minYMargin]
         content.addSubview(downloadButton)
         self.downloadButton = downloadButton
 
         let importButton = NSButton(title: "从本地目录导入…", target: self,
                                     action: #selector(importClicked(_:)))
-        importButton.frame = NSRect(x: 96, y: 112, width: 152, height: 28)
+        importButton.frame = NSRect(x: 96, y: 136, width: 152, height: 28)
         importButton.autoresizingMask = [.maxXMargin, .minYMargin]
         content.addSubview(importButton)
 
         let linkButton = NSButton(title: "关联外部目录…", target: self,
                                   action: #selector(linkClicked(_:)))
-        linkButton.frame = NSRect(x: 256, y: 112, width: 140, height: 28)
+        linkButton.frame = NSRect(x: 256, y: 136, width: 140, height: 28)
         linkButton.autoresizingMask = [.maxXMargin, .minYMargin]
         content.addSubview(linkButton)
 
         let selectButton = NSButton(title: "设为当前模型", target: self,
                                     action: #selector(selectClicked(_:)))
-        selectButton.frame = NSRect(x: 404, y: 112, width: 128, height: 28)
+        selectButton.frame = NSRect(x: 404, y: 136, width: 128, height: 28)
         selectButton.autoresizingMask = [.maxXMargin, .minYMargin]
         content.addSubview(selectButton)
         self.selectButton = selectButton
 
         let verifyButton = NSButton(title: "重新校验", target: self,
                                     action: #selector(verifyClicked(_:)))
-        verifyButton.frame = NSRect(x: 540, y: 112, width: 96, height: 28)
+        verifyButton.frame = NSRect(x: 540, y: 136, width: 96, height: 28)
         verifyButton.autoresizingMask = [.maxXMargin, .minYMargin]
         content.addSubview(verifyButton)
 
         let removeButton = NSButton(title: "移除", target: self, action: #selector(removeClicked(_:)))
-        removeButton.frame = NSRect(x: 644, y: 112, width: 72, height: 28)
+        removeButton.frame = NSRect(x: 644, y: 136, width: 72, height: 28)
         removeButton.autoresizingMask = [.maxXMargin, .minYMargin]
         content.addSubview(removeButton)
 
         // 第二行：索引怎么建。
         let runNow = NSButton(title: "现在跑一次嵌入任务", target: self,
                               action: #selector(runNowClicked(_:)))
-        runNow.frame = NSRect(x: 16, y: 78, width: 180, height: 28)
+        runNow.frame = NSRect(x: 16, y: 102, width: 180, height: 28)
         runNow.autoresizingMask = [.maxXMargin, .minYMargin]
         content.addSubview(runNow)
 
         let rebuild = NSButton(title: "重建索引", target: self, action: #selector(rebuildClicked(_:)))
-        rebuild.frame = NSRect(x: 204, y: 78, width: 96, height: 28)
+        rebuild.frame = NSRect(x: 204, y: 102, width: 96, height: 28)
         rebuild.autoresizingMask = [.maxXMargin, .minYMargin]
         content.addSubview(rebuild)
 
         // M2 d / T15：首次全量建索引的一次性动作（D8 的条件 3）。
         let overnight = NSButton(title: "现在开始建索引（连续跑到完成或取消）", target: self,
                                  action: #selector(overnightClicked(_:)))
-        overnight.frame = NSRect(x: 308, y: 78, width: 300, height: 28)
+        overnight.frame = NSRect(x: 308, y: 102, width: 300, height: 28)
         overnight.autoresizingMask = [.maxXMargin, .minYMargin]
         content.addSubview(overnight)
         overnightButton = overnight
 
         let vectorToggle = NSButton(checkboxWithTitle: "在检索里使用向量（未装模型时强制关）",
                                     target: self, action: #selector(vectorToggled(_:)))
-        vectorToggle.frame = NSRect(x: 16, y: 50, width: 400, height: 22)
+        vectorToggle.frame = NSRect(x: 16, y: 74, width: 400, height: 22)
         vectorToggle.autoresizingMask = [.maxXMargin, .minYMargin]
         content.addSubview(vectorToggle)
         vectorSwitch = vectorToggle
@@ -273,10 +274,20 @@ final class ModelsWindowController: NSObject, NSWindowDelegate,
         let nightlyToggle = NSButton(
             checkboxWithTitle: "夜间自动建索引（接电 + 空闲 5 分钟 + 温度正常，日均 GPU 预算 10 分钟）",
             target: self, action: #selector(nightlyToggled(_:)))
-        nightlyToggle.frame = NSRect(x: 16, y: 26, width: 600, height: 22)
+        nightlyToggle.frame = NSRect(x: 16, y: 50, width: 600, height: 22)
         nightlyToggle.autoresizingMask = [.maxXMargin, .minYMargin]
         content.addSubview(nightlyToggle)
         nightlySwitch = nightlyToggle
+
+        // 2026-09-08 用户要求：打开时跑一次、之后每小时一次。默认开。
+        let autoToggle = NSButton(
+            checkboxWithTitle: "打开时与每 \(Int(AutoIndexScheduler.intervalMinutes)) 分钟自动建索引"
+                             + "（接电 + 温度正常时跑，跑到待办清空；用电池或转热自动暂停）",
+            target: self, action: #selector(autoIndexToggled(_:)))
+        autoToggle.frame = NSRect(x: 16, y: 26, width: 700, height: 22)
+        autoToggle.autoresizingMask = [.maxXMargin, .minYMargin]
+        content.addSubview(autoToggle)
+        autoSwitch = autoToggle
 
         let note = NSTextField(labelWithString: "")
         note.frame = NSRect(x: 16, y: 6, width: 828, height: 18)
@@ -327,6 +338,8 @@ final class ModelsWindowController: NSObject, NSWindowDelegate,
         noteLabel?.stringValue =
             OvernightIndexJob.shared.statusText + " · " + QueryEmbedderService.shared.statusDescription
             + " · 模型目录 \(state.modelsRoot?.lastPathComponent ?? "?")（来源 \(state.modelsRootSource)）"
+            + " · 自动建索引：\(AutoIndexScheduler.isEnabled ? "开" : "关")"
+            + "（上次 \(Self.autoText(AutoIndexScheduler.shared.lastDecision))）"
             + (lastAction.map { " · " + $0 } ?? "")
 
         let current = currentState().currentModelID
@@ -335,11 +348,28 @@ final class ModelsWindowController: NSObject, NSWindowDelegate,
         vectorSwitch?.isEnabled = installed && (state.vector?.embeddedChunks ?? 0) > 0
         nightlySwitch?.state = EmbeddingScheduler.shared.isEnabled ? .on : .off
         nightlySwitch?.isEnabled = installed
+        autoSwitch?.state = AutoIndexScheduler.isEnabled ? .on : .off
+        autoSwitch?.isEnabled = installed
         let overnightRunning = OvernightIndexJob.shared.isRunning
         overnightButton?.title = overnightRunning
             ? "取消建索引" : "现在开始建索引（连续跑到完成或取消）"
         overnightButton?.isEnabled = installed
             && (overnightRunning || (state.vector?.pendingChunks ?? 0) > 0)
+    }
+
+    /// 自动建索引上一次判定翻成人话。
+    static func autoText(_ reason: String) -> String {
+        switch reason {
+        case "started": "已踢起一轮"
+        case "auto_disabled": "开关关着"
+        case "model_not_installed": "没有可用的嵌入模型"
+        case "already_running": "上一轮还在跑"
+        case "nothing_pending": "没有待办的块"
+        case "paused": "采集已暂停"
+        case "还没跑过": "还没跑过"
+        default:
+            reason.hasPrefix("locked_") ? "数据库未解锁" : reason
+        }
     }
 
     /// 门控原因翻成人话。与 `EmbeddingGatePolicy.decide` 的字符串一一对应。
@@ -662,6 +692,18 @@ final class ModelsWindowController: NSObject, NSWindowDelegate,
         // M2 d / T15：关掉就立刻把查询嵌入器卸了，不等 10 分钟空闲。
         QueryEmbedderService.shared.setVectorsEnabled(on, store: recorder?.withStore { $0 })
         lastAction = on ? "向量通道已打开" : "向量通道已关闭（只走精确字段 + FTS）"
+        reload()
+    }
+
+    /// 自动建索引开关（`embedding.autoIndex`）。关掉之后定时器立刻停，正在跑的那轮不打断。
+    @objc private func autoIndexToggled(_ sender: NSButton) {
+        let on = sender.state == .on
+        UserDefaults.standard.set(on, forKey: AutoIndexScheduler.enabledKey)
+        if on { AutoIndexScheduler.shared.start() } else { AutoIndexScheduler.shared.stop() }
+        recorder?.logEvent(kind: "auto_index_toggled", detail: "enabled=\(on)")
+        lastAction = on
+            ? "自动建索引已打开（打开时与每 \(Int(AutoIndexScheduler.intervalMinutes)) 分钟一次）"
+            : "自动建索引已关闭"
         reload()
     }
 

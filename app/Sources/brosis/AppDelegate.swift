@@ -71,6 +71,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         self.sync = sync
         let lockSnapshot = makeLockSnapshotReader()
         ModelsWindowController.shared.configure(recorder: recorder, lockSnapshot: lockSnapshot)
+        // 自动建索引（2026-09-08 用户要求：打开时跑一次、之后每小时一次）。
+        // 只登记依赖；真正的启停跟着锁定状态走（见 syncSubsystems / stopSubsystems）。
+        AutoIndexScheduler.shared.configure(recorder: recorder)
         // 2026-09-08：用户决定不要叙述功能，夜间叙述调度器**不再接线、不再启动**，
         // 菜单里也没有入口。core / app 里的叙述代码原样留着（休眠，自检仍跑它的纯逻辑用例），
         // 将来要恢复：装回生成模型、把清单条目加回 catalog.json、恢复这两行与 narrativeMenuItem()。
@@ -169,6 +172,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             events = nil
         }
 
+        // 自动建索引：库解锁着就让它的定时器跑（首次延迟 20 s，之后每小时）；
+        // 其余状态一律停"踢"，正在跑的任务由 OvernightIndexPolicy 的 locked_* / paused 收尾。
+        if lock.snapshot.isRecording {
+            AutoIndexScheduler.shared.start()
+        } else {
+            AutoIndexScheduler.shared.stop()
+        }
+
         if recording && permissions.screenRecording {
             if capture?.isRunning != true { startCapture(displayID: capture?.currentDisplayID) }
             capture?.setPaused(false)
@@ -179,6 +190,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private func stopSubsystems(reason: String) {
+        AutoIndexScheduler.shared.stop()
         events?.stop()
         events = nil
         guard let capture else { return }

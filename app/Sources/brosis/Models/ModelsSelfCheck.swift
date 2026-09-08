@@ -132,6 +132,48 @@ enum ModelsSelfCheck {
                   "\(chosenAndInstalled ?? "nil") / \(chosenButMissing ?? "nil") / \(neverChosen ?? "nil")")
         }
 
+        // -------------------------------------------- 2b. 自动建索引的判定（2026-09-08 用户要求）
+        //
+        // 「打开时跑一次、之后每小时一次」。这里只测判定这只纯函数：接电与温度那两道门在
+        // `OvernightIndexPolicy`（第 4 组已经有 12 条对照），这条只管"要不要踢这一脚"。
+        struct AutoCase {
+            var label: String
+            var enabled = true
+            var modelUsable = true
+            var running = false
+            var pending = 100
+            var phase: LockPhase = .unlocked
+            var paused = false
+            var want: String?
+        }
+        let autoCases: [AutoCase] = [
+            AutoCase(label: "都满足 ⇒ 踢", want: nil),
+            AutoCase(label: "开关关着", enabled: false, want: "auto_disabled"),
+            AutoCase(label: "没有可用模型", modelUsable: false, want: "model_not_installed"),
+            AutoCase(label: "上一轮还在跑 ⇒ 不叠加", running: true, want: "already_running"),
+            AutoCase(label: "没有待办的块", pending: 0, want: "nothing_pending"),
+            AutoCase(label: "库锁着", phase: .locked, want: "locked_locked"),
+            AutoCase(label: "采集暂停", paused: true, want: "paused"),
+            // 顺序：开关 > 模型 > 锁 > 暂停 > 在跑 > 待办。锁着时不该报"没待办"。
+            AutoCase(label: "锁着且没待办 ⇒ 先报锁", pending: 0, phase: .locked, want: "locked_locked"),
+        ]
+        var autoFailures: [String] = []
+        for c in autoCases {
+            let got = AutoIndexScheduler.decide(enabled: c.enabled, modelUsable: c.modelUsable,
+                                                alreadyRunning: c.running, pendingChunks: c.pending,
+                                                lockPhase: c.phase, paused: c.paused)
+            if got != c.want {
+                autoFailures.append("\(c.label)→\(got ?? "踢")（期望 \(c.want ?? "踢")）")
+            }
+        }
+        check("自动建索引判定 \(autoCases.count) 条（开关 / 模型 / 锁 / 暂停 / 在跑 / 待办，含优先级）",
+              autoFailures.isEmpty,
+              autoFailures.isEmpty
+                  ? "默认开，打开时延迟 \(Int(AutoIndexScheduler.launchDelaySeconds)) s 跑第一次，"
+                    + "之后每 \(Int(AutoIndexScheduler.intervalMinutes)) 分钟一次；"
+                    + "接电与温度的门在 OvernightIndexPolicy"
+                  : autoFailures.joined(separator: " "))
+
         // ------------------------------------------------------------ 3. 向量索引往返（v4）
         let workspace = FileManager.default.temporaryDirectory
             .appendingPathComponent("brosis-veccheck-\(ProcessInfo.processInfo.processIdentifier)",

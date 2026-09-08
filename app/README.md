@@ -1429,6 +1429,20 @@ D29 叙述下架后清单里没有生成模型；**D30（2026-09-08）起嵌入�
 搬进新目录一次（`ModelStore.migrateLegacyDefaultRoot`，事件 `models_dir_migrated`），
 旧目录里别的东西不碰。
 
+### 13.3b 自动建索引（D32，2026-09-08）
+
+**打开时跑一次、之后每小时一次**：`AutoIndexScheduler`（`embedding.autoIndex`，默认开）在库解锁后
+20 s 踢第一脚，之后每 `embedding.autoIndexIntervalMinutes`（默认 60）分钟踢一次。
+
+它**不实现任何嵌入逻辑**，踢的是「现在开始建索引」那条任务（`OvernightIndexJob`），所以：
+- 门控就是 `OvernightIndexPolicy` 那套——**接电与温度保留**（用电池 / 温度 fair → 暂停，每 60 s
+  复查，期间把权重卸掉；serious / critical → 停），**跑到待办清空为止**，不受夜间增量那条
+  「空闲 5 分钟」与日均 GPU 预算的限制；
+- 手点「现在开始建索引」与自动触发是同一条路，正在跑时自动触发被 `start` 返回 false 挡掉，不会叠加。
+
+踢之前自己还有一层判定（`AutoIndexScheduler.decide`，自检 8 条对照）：开关 > 模型 > 锁 > 暂停 >
+在跑 > 待办。事件 `auto_index_started` / `auto_index_toggled`。
+
 ### 13.3 夜间嵌入任务的门控（3.1 / D27 / 4.3）
 
 九条判定全在 `EmbeddingGatePolicy.decide`（**纯函数**，自检整段跑 14 条用例），
@@ -1467,6 +1481,8 @@ D29 叙述下架后清单里没有生成模型；**D30（2026-09-08）起嵌入�
 | `retrieval.vectorsEnabled` | false | 检索里用不用向量。**M2 d / T15 起解锁时会从这里恢复到 `store.retrieval`**（模型没装则强制关，3.11） |
 | `models.directory` | — | 模型根目录（不设就是数据目录里的 `models/`） |
 | `models.embedding.current` | — | 当前生效的嵌入模型 id（D30；不设就取第一个装着的） |
+| `embedding.autoIndex` | **true** | 自动建索引总开关（D32：打开时 + 每小时） |
+| `embedding.autoIndexIntervalMinutes` | 60 | 自动建索引间隔（分钟，下限 5） |
 | `models.allowDownload` | false | 面板里是否显示下载入口 |
 
 ### 13.5 打包（`build_app.sh` 新增的三件事）
