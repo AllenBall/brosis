@@ -231,7 +231,7 @@ enum ModelsSelfCheck {
                   "\(report.chunksEmbedded) 块 / \(report.batches) 批，"
                   + "provider \(String(format: "%.3f", report.providerSeconds)) s")
 
-            // 伪嵌入没有语义，距离普遍在 0.4 以上，产品默认闸（0.40）会把它们全挡掉；
+            // 伪嵌入没有语义，距离普遍在 0.4 以上，产品默认闸（0.50）会把它们全挡掉；
             // 这里把闸门开到最大，好让向量通道**真的**参与，断言才有意义。
             store.retrieval.vectorMaxDistance = 2
             let hybrid = try store.search(q: marker, limit: 10, queryVector: queryVector)
