@@ -90,6 +90,40 @@ final class ExportController {
     // MARK: - 配额（D7）
 
     /// 刷新配额通知内容。库没开时置 nil。
+    /// 导入归档。放在后台队列跑（一份归档可能几百 MB），完成后回主线程报结果。
+    ///
+    /// 模式由 `Store.importArchive` 自己判定（空库 restore / 有数据 merge），
+    /// 这里不替它决定——UI 只负责在动手前把后果讲清楚。
+    func importArchive(root: URL, passphrase: String,
+                       completion: @escaping @MainActor (String) -> Void) {
+        guard let recorder else {
+            Task { @MainActor in completion(L("库没打开（锁定中），先解锁再导入。",
+                                              "Database not open (locked) — unlock before importing.")) }
+            return
+        }
+        DispatchQueue.global(qos: .userInitiated).async {
+            let outcome: String
+            if let stats = recorder.withStore({ store -> ExportImportStats in
+                try store.importArchive(from: root, passphrase: passphrase)
+            }) {
+                outcome = L("导入完成（\(stats.mode)）：新增观察 \(stats.observationsInserted) 条、"
+                            + "跳过 \(stats.observationsSkipped) 条"
+                            + "（其中已删除的 \(stats.observationsSkippedTombstoned) 条不复活）、"
+                            + "文本版本 \(stats.textVersionsInserted) 个。",
+                            "Import finished (\(stats.mode)): \(stats.observationsInserted) observations "
+                            + "added, \(stats.observationsSkipped) skipped "
+                            + "(\(stats.observationsSkippedTombstoned) of them deleted here and not "
+                            + "resurrected), \(stats.textVersionsInserted) text versions.")
+            } else {
+                // withStore 吞掉错误只返回 nil：口令错、schema 对不上、目录不是归档都会到这里。
+                outcome = L("导入失败：口令不对、归档 schema 版本不匹配，或这个目录不是 brosis 归档。",
+                            "Import failed: wrong passphrase, archive schema version mismatch, "
+                            + "or this folder is not a brosis archive.")
+            }
+            Task { @MainActor in completion(outcome) }
+        }
+    }
+
     func refreshQuota() {
         quota = recorder?.withStore { try $0.quotaAction() }
         onChange?()
@@ -242,6 +276,7 @@ final class ExportWindowController: NSObject, NSWindowDelegate {
     private let progressBar = NSProgressIndicator()
     private let exportButton = NSButton(title: "", target: nil, action: nil)
     private let acknowledgeButton = NSButton(title: "", target: nil, action: nil)
+    private let importButton = NSButton(title: "", target: nil, action: nil)
 
     private var chosenDirectory: URL?
 
@@ -276,6 +311,7 @@ final class ExportWindowController: NSObject, NSWindowDelegate {
         chooseButton.title = L("选择位置…", "Choose location…")
         exportButton.title = L("开始加密导出", "Start encrypted export")
         acknowledgeButton.title = L("我已了解，允许按最旧先删", "I understand — allow deleting oldest first")
+        importButton.title = L("导入归档…", "Import archive…")
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 640, height: 560),
                               styleMask: [.titled, .closable, .miniaturizable],
                               backing: .buffered, defer: false)
@@ -290,6 +326,8 @@ final class ExportWindowController: NSObject, NSWindowDelegate {
         exportButton.action = #selector(startExport(_:))
         acknowledgeButton.target = self
         acknowledgeButton.action = #selector(acknowledge(_:))
+        importButton.target = self
+        importButton.action = #selector(startImport(_:))
         directoryField.isEditable = false
         directoryField.isSelectable = true
         directoryField.lineBreakMode = .byTruncatingMiddle
@@ -344,6 +382,8 @@ final class ExportWindowController: NSObject, NSWindowDelegate {
             exportButton,
             progressBar,
             statusLabel,
+            ExportBox.separator(),
+            importButton,
         ])
         stack.orientation = .vertical
         stack.alignment = .leading
@@ -419,6 +459,57 @@ final class ExportWindowController: NSObject, NSWindowDelegate {
     }
 
     @objc private func passphraseChanged(_ sender: Any?) { reload() }
+
+    /// 导入归档（e 批 ⑥）。
+    ///
+    /// 恢复语义**不是这里定的**——core 早就定好了，`ExportImportMode` 两档：
+    ///  - `restore`：目标库是空的，源 id 原样写回，会话 / 台账 / 事件一并恢复；
+    ///  - `merge`：目标库已有数据，走 origin_device / origin_id 口径，
+    ///    派生结果（会话 / 台账）与运行期事件**不导**（各机自算）。
+    /// 而且**墓碑不复活**：目标库里删过的记录不会因为导入又回来——3.8 的删除是合规动作。
+    /// 这里只负责把这三件事在动手之前说清楚，然后调 `importArchive`（模式由它自己判定）。
+    @objc private func startImport(_ sender: Any?) {
+        guard let controller else { return }
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.allowsMultipleSelection = false
+        panel.prompt = L("导入", "Import")
+        panel.message = L("选一个 brosis 加密归档目录（里面有 manifest.json）。",
+                          "Pick a brosis encrypted archive folder (the one containing manifest.json).")
+        guard panel.runModal() == .OK, let root = panel.url else { return }
+
+        let passphrase = passphraseField.stringValue
+        guard !passphrase.isEmpty else {
+            statusLabel.stringValue = L("先在上面的「口令」里填这份归档的导出口令。",
+                                        "Enter this archive’s export passphrase in the Passphrase field above.")
+            return
+        }
+
+        let alert = NSAlert()
+        alert.messageText = L("把这份归档导入当前库？", "Import this archive into the current database?")
+        alert.informativeText = L(
+            "目标库为空时按「恢复」写回（连会话与台账一起）；已有数据时按「合并」——"
+            + "只并入证据本身，会话与台账各机自算。\n\n"
+            + "**已经删掉的记录不会被导回来**：删除在这里是不可撤销的。\n\n"
+            + "归档：\(root.lastPathComponent)",
+            "If the database is empty this restores everything (including sessions and ledgers); "
+            + "if it already has data this merges evidence only — sessions and ledgers are recomputed "
+            + "locally.\n\n"
+            + "Records you have deleted are NOT brought back: deletion here is irreversible.\n\n"
+            + "Archive: \(root.lastPathComponent)")
+        alert.addButton(withTitle: L("导入", "Import"))
+        alert.addButton(withTitle: L("取消", "Cancel"))
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+
+        importButton.isEnabled = false
+        statusLabel.stringValue = L("正在导入…", "Importing…")
+        controller.importArchive(root: root, passphrase: passphrase) { [weak self] message in
+            guard let self else { return }
+            self.importButton.isEnabled = true
+            self.statusLabel.stringValue = message
+        }
+    }
 
     @objc private func acknowledge(_ sender: Any?) {
         controller?.acknowledgeQuota(archiveID: currentArchiveID)

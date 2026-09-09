@@ -394,6 +394,21 @@ final class ModelsWindowController: NSObject, NSWindowDelegate,
         }
     }
 
+    /// 换模型时提醒查询嵌入的代价（e 批 ⑪）。
+    ///
+    /// 这个数**直接加在每一次检索上**，不像建索引那样能挪到夜里：T15 实测 0.6B 查询嵌入
+    /// 热 p50 19.4 ms，4B 是 94 ms——都在 3.4 的 150 ms 目标内，但 4B 是 5 倍，
+    /// 在这台无风扇的机器上搜索时是感觉得到的。换模型是低频动作，所以把代价放在
+    /// 做决定的那一刻说，而不是等用户事后觉得"搜索怎么变慢了"。
+    static func queryLatencyNote(for modelID: String) -> String {
+        guard modelID.contains("-4B") || modelID.contains("-8B") else { return "" }
+        return L("\n\n另外：更大的模型会让**每一次检索**都变慢——查询嵌入要现算，"
+                 + "0.6B 实测热 p50 约 19 ms，4B 约 94 ms。建索引可以挪到夜里，这一项不行。",
+                 "\n\nAlso: a larger model makes **every search** slower — the query embedding is "
+                 + "computed on the spot. Measured warm p50 is about 19 ms for 0.6B and 94 ms for 4B. "
+                 + "Index building can be moved to the night; this cannot.")
+    }
+
     /// 门控原因翻成人话。表在 `GateReasonText`（nonisolated，三个调度器共用）。
     static func gateText(_ reason: String) -> String { GateReasonText.text(reason) }
 
@@ -587,11 +602,13 @@ final class ModelsWindowController: NSObject, NSWindowDelegate,
             alert.messageText = L("换成 \(entry.id)？", "Switch to \(entry.id)?")
             alert.informativeText =
                 L("现在的 \(embedded) 块向量是用 \(indexedModel) 建的。不同模型的向量不能互相比较，"
-                + "换模型必须重建索引（证据、台账、全文检索都不受影响，只是要重新跑一遍嵌入任务）。",
+                + "换模型必须重建索引（证据、台账、全文检索都不受影响，只是要重新跑一遍嵌入任务）。"
+                + Self.queryLatencyNote(for: entry.id),
                 "The current \(embedded) chunk vectors were built with \(indexedModel). Vectors from "
                 + "different models are not comparable, so switching requires rebuilding the index. "
                 + "Evidence, ledgers and full-text search are unaffected — only the embedding pass "
-                + "has to run again.")
+                + "has to run again."
+                + Self.queryLatencyNote(for: entry.id))
             alert.addButton(withTitle: L("换并重建索引", "Switch and rebuild"))
             alert.addButton(withTitle: L("取消", "Cancel"))
             guard alert.runModal() == .alertFirstButtonReturn else { return }

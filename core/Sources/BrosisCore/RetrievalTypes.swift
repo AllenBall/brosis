@@ -168,6 +168,14 @@ public struct RetrievalOptions: Sendable {
     /// FTS 候选窗口（无过滤）。E7：`ORDER BY rowid DESC LIMIT` 让延迟与库规模无关。
     public var ftsCandidateLimit: Int = 200
     /// FTS 候选窗口（带时间 / 应用过滤）。过滤会把候选筛掉，所以要取更大的窗口。
+    ///
+    /// **经 MCP 的 search 必然走这一档**：grant 带时间窗，所以每次都是"带过滤"。
+    /// T15 实测这让它比直接调用慢 3 倍，换来召回 0.254 → 0.277。
+    ///
+    /// **裁决（2026-09-09，e 批 ⑧）：不给 MCP 单独调小。** 一次 MCP search 客户端墙钟
+    /// p50 84 ms，慢 3 倍也就 250 ms 量级——对一个 agent 工具调用，这个延迟看不出来，
+    /// 而少 0.023 的召回意味着答不出的问题变多，那才是用户会察觉的。
+    /// 再加一个只有作者会调的旋钮，不如把取舍写在这里。
     public var filteredFTSCandidateLimit: Int = 2000
     /// 每条摘要的 token 预算（3.6：每条 ≤ 100 token）。
     public var summaryTokenBudget: Int = 100
