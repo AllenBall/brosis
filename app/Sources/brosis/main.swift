@@ -28,6 +28,10 @@ if arguments.contains("--narrative-smoke") {
     exit(NarrativeSmoke.run())
 }
 
+if arguments.contains("--key-status") {
+    exit(KeyStatus.run())
+}
+
 if arguments.contains("--dump-ocr") {
     exit(OCRDump.run())
 }

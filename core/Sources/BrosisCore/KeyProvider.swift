@@ -169,7 +169,12 @@ public struct KeychainKeyProvider: KeyProvider {
             }
             // 2. data-protection：生成并写入；被 -34018 拒绝也回退
             guard createIfMissing else {
-                throw StoreError.keyUnavailable("钥匙串里没有 \(service)/\(account)，且未允许生成")
+                throw StoreError.keyUnavailable(
+                    "钥匙串里没有 \(service)/\(account)，且调用方不允许生成新密钥。"
+                    + "库已经存在时这是有意的：现有的库只有用**原来那把**密钥才打得开，"
+                    + "此刻造一把新的会让它变成永久解不开的文件，且原密钥再也无从找回。"
+                    + "先确认钥匙串没被清理 / 没换签名身份；确实找不回时，"
+                    + "只能把旧库移走让 app 建新库——那等于放弃旧库里的数据。")
             }
             switch try create(dataProtection: true) {
             case .created(let data):
@@ -191,7 +196,12 @@ public struct KeychainKeyProvider: KeyProvider {
             throw StoreError.keyUnavailable("登录钥匙串也返回 errSecMissingEntitlement，无法取钥")
         case .notFound:
             guard createIfMissing else {
-                throw StoreError.keyUnavailable("钥匙串里没有 \(service)/\(account)，且未允许生成")
+                throw StoreError.keyUnavailable(
+                    "钥匙串里没有 \(service)/\(account)，且调用方不允许生成新密钥。"
+                    + "库已经存在时这是有意的：现有的库只有用**原来那把**密钥才打得开，"
+                    + "此刻造一把新的会让它变成永久解不开的文件，且原密钥再也无从找回。"
+                    + "先确认钥匙串没被清理 / 没换签名身份；确实找不回时，"
+                    + "只能把旧库移走让 app 建新库——那等于放弃旧库里的数据。")
             }
             switch try create(dataProtection: false) {
             case .created(let data):

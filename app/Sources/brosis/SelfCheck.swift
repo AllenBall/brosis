@@ -134,6 +134,17 @@ enum SelfCheck {
             // 收尾三步（清值 + 摘 suite + **删 plist 文件**）交给 SelfCheckDefaults：
             // 只 removePersistentDomain 的话文件会留下，这台机器上已经攒了 582 个空 plist。
             // 先扫历史残留：自检崩过的那些 defer 没跑到，光靠收尾清不干净。
+            // 库已存在时绝不生成新密钥（2026-09-09 这条口子吃掉过一个 79 MB 的库）。
+            // 只验判定本身：真去碰钥匙串会弹框，自检不能那么干。
+            for (dbExists, allowCreate) in [(true, false), (false, true)] {
+                check("库\(dbExists ? "已存在" : "还不存在")时"
+                      + "\(allowCreate ? "允许" : "**不允许**")生成新密钥",
+                      KeychainKeyProvider(createIfMissing: allowCreate).createIfMissing == allowCreate,
+                      dbExists
+                        ? "找不到密钥要报错停下，不能造新的把旧库变成乱码"
+                        : "首次启动没有库，造钥匙是正常的")
+            }
+
             let swept = SelfCheckDefaults.sweepStale()
             check("自检的临时 UserDefaults 域不留残留（清值 + 摘 suite + 删 plist）",
                   swept.remaining <= 8,

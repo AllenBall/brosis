@@ -467,7 +467,17 @@ final class LockController {
         // D34：配额由设置窗口控制（口径是原文净载荷，不是数据库文件大小）。
         // 运行时改了也会经 Store.setQuotaBytes 立刻生效，这里是开库时的初值。
         options.quotaBytes = Settings.quotaBytes
-        let provider = KeychainKeyProvider()
+        // **库已经在了就绝不允许生成新密钥。**
+        //
+        // 2026-09-09 这条口子吃掉过一个 79 MB 的库：钥匙串里那把密钥被误删之后，
+        // 下一次启动读不到，`createIfMissing` 的默认值 true 让它**造了一把新的写进去**，
+        // 于是旧库变成永久解不开的乱码，而且新密钥一写，原来那把就再也无从找回。
+        //
+        // 正确的行为是停下来报错：找不到密钥这件事，在"库还不存在"时是正常的（首次启动），
+        // 在"库已经存在"时是灾难信号。只有前者才该造钥匙。
+        let databaseExists = FileManager.default.fileExists(
+            atPath: directory.appendingPathComponent(options.databaseFileName).path)
+        let provider = KeychainKeyProvider(createIfMissing: !databaseExists)
         Task.detached(priority: .userInitiated) {
             do {
                 let store = try Store.open(directory: directory, keyProvider: provider, options: options)
