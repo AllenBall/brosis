@@ -32,6 +32,13 @@ if arguments.contains("--dump-ocr") {
     exit(OCRDump.run())
 }
 
+// `--ax-probe [bundle id ...]`：量 Electron 应用的 AX 树要多久才有内容。
+// 不给 bundle id 就探所有正在运行的 Chromium 系应用。
+if let index = arguments.firstIndex(of: "--ax-probe") {
+    let rest = Array(arguments[(index + 1)...]).filter { !$0.hasPrefix("--") }
+    exit(AXProbe.run(bundleIDs: rest))
+}
+
 let application = NSApplication.shared
 let appDelegate = AppDelegate()
 application.delegate = appDelegate
