@@ -136,41 +136,36 @@ enum ModelsSelfCheck {
         //
         // 「打开时跑一次、之后每小时一次」。这里只测判定这只纯函数：接电与温度那两道门在
         // `OvernightIndexPolicy`（第 4 组已经有 12 条对照），这条只管"要不要踢这一脚"。
-        struct AutoCase {
-            var label: String
-            var enabled = true
-            var modelUsable = true
-            var running = false
-            var pending = 100
-            var unchunked = 0
-            var phase: LockPhase = .unlocked
-            var paused = false
-            var want: String?
-        }
-        let autoCases: [AutoCase] = [
-            AutoCase(label: "都满足 ⇒ 踢", want: nil),
-            AutoCase(label: "开关关着", enabled: false, want: "auto_disabled"),
-            AutoCase(label: "没有可用模型", modelUsable: false, want: "model_not_installed"),
-            AutoCase(label: "上一轮还在跑 ⇒ 不叠加", running: true, want: "already_running"),
-            AutoCase(label: "没有待办的块", pending: 0, want: "nothing_pending"),
+        // 用例表与另外两道门同构：一份 base，逐条 mutate。以前这里自带一个 AutoCase 结构体，
+        // 每加一个判据就要同时改结构体、表和调用点三处。
+        let autoBase = EmbeddingGateInput(
+            onACPower: true, idleSeconds: 600, thermalState: "nominal",
+            lockPhase: .unlocked, paused: false, modelInstalled: true, enabledByUser: true,
+            usedGPUSecondsToday: 0, budgetGPUSeconds: 600, pendingChunks: 100)
+        let autoCases: [(String, (inout EmbeddingGateInput) -> Void, Bool, Bool, String?)] = [
+            // 标签, 改环境, autoEnabled, alreadyRunning, 期望
+            ("都满足 ⇒ 踢", { _ in }, true, false, nil),
+            ("开关关着", { _ in }, false, false, "auto_disabled"),
+            ("没有可用模型", { $0.modelInstalled = false }, true, false, "model_not_installed"),
+            ("上一轮还在跑 ⇒ 不叠加", { _ in }, true, true, "already_running"),
+            ("没有待办的块", { $0.pendingChunks = 0 }, true, false, "nothing_pending"),
             // 2026-09-09 的真实故障：库删重建后一个块都没有，而分块只发生在任务内部
             // （runEmbeddingJob 的 planBatch）⇒ 门说"没活" ⇒ 任务不跑 ⇒ 没人分块 ⇒ 死锁。
-            AutoCase(label: "块空但还有没分块的文本版本 ⇒ 照踢", pending: 0, unchunked: 2195,
-                     want: nil),
-            AutoCase(label: "库锁着", phase: .locked, want: "locked_locked"),
-            AutoCase(label: "采集暂停", paused: true, want: "paused"),
+            ("块空但还有没分块的文本版本 ⇒ 照踢",
+             { $0.pendingChunks = 0; $0.unchunkedTextVersions = 2195 }, true, false, nil),
+            ("库锁着", { $0.lockPhase = .locked }, true, false, "locked_locked"),
+            ("采集暂停", { $0.paused = true }, true, false, "paused"),
             // 顺序：开关 > 模型 > 锁 > 暂停 > 在跑 > 待办。锁着时不该报"没待办"。
-            AutoCase(label: "锁着且没待办 ⇒ 先报锁", pending: 0, phase: .locked, want: "locked_locked"),
+            ("锁着且没待办 ⇒ 先报锁",
+             { $0.pendingChunks = 0; $0.lockPhase = .locked }, true, false, "locked_locked"),
         ]
         var autoFailures: [String] = []
-        for c in autoCases {
-            let got = AutoIndexScheduler.decide(enabled: c.enabled, modelUsable: c.modelUsable,
-                                                alreadyRunning: c.running, pendingChunks: c.pending,
-                                                unchunkedTextVersions: c.unchunked,
-                                                lockPhase: c.phase, paused: c.paused)
-            if got != c.want {
-                autoFailures.append("\(c.label)→\(got ?? "踢")（期望 \(c.want ?? "踢")）")
-            }
+        for (label, mutate, autoEnabled, running, want) in autoCases {
+            var input = autoBase
+            mutate(&input)
+            let got = AutoIndexScheduler.decide(input, autoEnabled: autoEnabled,
+                                                alreadyRunning: running)
+            if got != want { autoFailures.append("\(label)→\(got ?? "踢")（期望 \(want ?? "踢")）") }
         }
         check("自动建索引判定 \(autoCases.count) 条（开关 / 模型 / 锁 / 暂停 / 在跑 / 待办，含优先级）",
               autoFailures.isEmpty,

@@ -538,14 +538,19 @@ final class EventSkeleton {
                                        axChars: axChars)
         }
 
-        // 期望走 OCR 的规则（飞书 / 微信 / 飞书会议）却没把请求交出去时记一行。
-        // 这是 2026-09-09 排查「飞书会议记不到内容」补的最后一环：协调者那边只能看到
-        // "有没有收到请求"，看不到**请求是在这里就没生成**还是**生成了没送到**。
-        if rule.regions.contains(where: { $0.read.declaresOCR || $0.ocrFallback }) {
-            BrosisLog.capture.notice(
-                """
-                扫描：\(app.bundleIdentifier ?? "?", privacy: .public) 规则 \(rule.id, privacy: .public)，                读正文=\(shouldReadText, privacy: .public) 拿到窗口=\(windowElement != nil, privacy: .public)                 AX字符=\(axChars, privacy: .public) OCR请求=\(adapterScan?.ocrRequests.count ?? -1, privacy: .public)                 触发=\(trigger.rawValue, privacy: .public)
-                """)
+        // 期望走 OCR 的规则每次扫描记一行：请求是**在这里就没生成**，还是生成了没送到。
+        // 协调者那边只看得到后半段，这一行补的是前半段（2026-09-09 排查飞书会议时补的）。
+        //
+        // **`.info` 不是 `.notice`**：这条按扫描频率走，实测 12 分钟 321 条（约 1600 条/小时），
+        // 而 `.notice` 会落盘，攒下来会把系统日志的保留期挤短。`.info` 只进内存环形缓冲，
+        // 要看时加 `--info`：
+        //   log show --last 10m --info --predicate 'subsystem == "com.brosis.app"'
+        if rule.declaresOCR {
+            let text = "扫描：\(app.bundleIdentifier ?? "?") 规则 \(rule.id)，"
+                     + "读正文=\(shouldReadText) 拿到窗口=\(windowElement != nil) "
+                     + "AX字符=\(axChars) OCR请求=\(adapterScan?.ocrRequests.count ?? -1) "
+                     + "触发=\(trigger.rawValue)"
+            BrosisLog.capture.info("\(text, privacy: .public)")
         }
 
         // —— 把这次扫描的结果交给协调者：下一帧的视口 OCR 与采样审计要用 ——

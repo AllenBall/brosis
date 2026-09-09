@@ -50,8 +50,8 @@ struct EmbeddingGateInput: Sendable, Equatable {
     /// 面板却显示"索引已经是最新的"。默认 0 是为了让既有调用点不用改。
     var unchunkedTextVersions: Int = 0
 
-    /// 还有没有活要干（分块的活也算）。
-    var hasWork: Bool { pendingChunks > 0 || unchunkedTextVersions > 0 }
+    /// 还有没有活要干（分块的活也算）。与 `VectorStatus.workRemaining` 同一条判据。
+    var hasWork: Bool { pendingChunks + unchunkedTextVersions > 0 }
 }
 
 /// 判定结果。`.run` 才跑；其余都带一个**机器可读**的原因，事件与自检都按它对。

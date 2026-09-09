@@ -92,17 +92,20 @@ final class AutoIndexScheduler: @unchecked Sendable {
     }
 
     /// 一次判定。返回值只用于自检与状态行。
-    /// `unchunkedTextVersions`：还没分块的文本版本也算"有活"。分块只发生在任务内部
-    /// （`runEmbeddingJob` 的 planBatch），所以只看块数会死锁——空库里永远不启动。
-    static func decide(enabled: Bool, modelUsable: Bool, alreadyRunning: Bool,
-                       pendingChunks: Int, unchunkedTextVersions: Int = 0,
-                       lockPhase: LockPhase, paused: Bool) -> String? {
-        if !enabled { return "auto_disabled" }
-        if !modelUsable { return "model_not_installed" }
-        if lockPhase != .unlocked { return "locked_" + lockPhase.rawValue }
-        if paused { return "paused" }
+    ///
+    /// **收 `EmbeddingGateInput` 整个，不再把字段拆成参数列表**：另外两道门
+    /// （`EmbeddingGatePolicy` / `OvernightIndexPolicy`）本来就收它，唯一的调用点也早就
+    /// 拿着一份。拆成参数的写法让「还有没有活」在这里被第三次拼出来，加一个新判据就要
+    /// 手动穿一遍并补一个默认值——而默认值的含义恰好是"当作没活"，正是 2026-09-09 那个
+    /// 死锁的形状。`autoEnabled` 与 `alreadyRunning` 不属于环境快照，留作具名参数。
+    static func decide(_ input: EmbeddingGateInput,
+                       autoEnabled: Bool, alreadyRunning: Bool) -> String? {
+        if !autoEnabled { return "auto_disabled" }
+        if !input.modelInstalled { return "model_not_installed" }
+        if input.lockPhase != .unlocked { return "locked_" + input.lockPhase.rawValue }
+        if input.paused { return "paused" }
         if alreadyRunning { return "already_running" }
-        if pendingChunks == 0 && unchunkedTextVersions == 0 { return "nothing_pending" }
+        if !input.hasWork { return "nothing_pending" }
         return nil
     }
 
@@ -117,13 +120,8 @@ final class AutoIndexScheduler: @unchecked Sendable {
         let input = scheduler.currentInput(modelsRoot: root)
         // modelInstalled 就是 currentModelID(...) != nil，currentInput 已经算过一次；
         // 再算一次等于多读一遍 catalog.json 并 stat 一遍权重文件。
-        let reason = Self.decide(enabled: Self.isEnabled,
-                                 modelUsable: input.modelInstalled,
-                                 alreadyRunning: OvernightIndexJob.shared.isRunning,
-                                 pendingChunks: input.pendingChunks,
-                                 unchunkedTextVersions: input.unchunkedTextVersions,
-                                 lockPhase: input.lockPhase,
-                                 paused: input.paused)
+        let reason = Self.decide(input, autoEnabled: Self.isEnabled,
+                                 alreadyRunning: OvernightIndexJob.shared.isRunning)
         if let reason {
             note(reason)
             return

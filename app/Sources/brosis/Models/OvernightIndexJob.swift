@@ -333,14 +333,14 @@ final class OvernightIndexJob: @unchecked Sendable {
                           + "\"gpu_seconds\":\(String(format: "%.1f", progress.gpuSeconds)),"
                           + "\"thermal\":\"\(ModelProc.thermalState)\"}")
             }
-            // 这一批的块嵌完了，但可能还有没分块的文本版本——下一轮 planBatch 会把它们变成块。
-            // 只有两边都空才是真做完（多查一次库，只在 remaining 归零时发生）。
-            if report.chunksRemaining == 0,
-               scheduler.currentInput(modelsRoot: modelsRoot).unchunkedTextVersions == 0 {
-                stopReason = "complete"; break loop
-            }
+            // **"做完了"只由 `OvernightIndexPolicy` 一处说了算**（`!input.hasWork` ⇒ .stop("complete")）。
+            // 这里曾经再判一次「remaining == 0 且没有待分块的版本」，等于把同一条判据写第二遍，
+            // 还要为读一个 Int 多跑一次 `currentInput()`（它会重读 catalog.json、stat 权重文件、
+            // 取电源 / 空闲 / 温度 / GPU 台账）。删掉之后由循环开头那次判定收工，最多多转一圈。
+            //
             // 一段都没嵌进去（门控在第一批就叫停）：别空转，去 pause 分支等一等。
-            if report.chunksEmbedded == 0 {
+            // `chunksRemaining > 0` 是为了别在真做完的那一轮白睡 5 秒。
+            if report.chunksEmbedded == 0, report.chunksRemaining > 0 {
                 Thread.sleep(forTimeInterval: 5)
             }
         }

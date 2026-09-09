@@ -1050,10 +1050,9 @@ enum SelfCheck {
         // 它一路落到 generic，而 generic 的 ocrFallback 是 false，于是一次 OCR 都不排，
         // 库里 18 条飞书会议观察全是 0 字符。这条断言钉的就是"别再漏"。
         let meetingRule = AdapterRegistry.rule(for: "com.bytedance.macos.feishu.iron")
-        let meetingDeclaresOCR = meetingRule.regions.contains { $0.read.declaresOCR }
+        let meetingDeclaresOCR = meetingRule.declaresOCR
         check("飞书会议（.iron）单独命中会议规则，且真的会排 OCR（AX 实测 2 节点 0 字符）",
-              meetingRule.id == AdapterRegistry.feishuMeeting.id
-                && meetingRule.id != AdapterRegistry.feishu.id && meetingDeclaresOCR,
+              meetingRule.id == AdapterRegistry.feishuMeeting.id && meetingDeclaresOCR,
               "\(meetingRule.id)，声明 OCR=\(meetingDeclaresOCR)")
 
         let fallbackRule = AdapterRegistry.rule(for: "com.apple.finder")
@@ -1465,15 +1464,16 @@ enum SelfCheck {
             // AX 树活的应用随后每秒都会再扫一次、上下文立刻重建，所以看不出问题；
             // AX 树是死的那些（飞书会议、微信）只有激活那一次扫描，抹掉就再也没有了。
             coordinator.trigger.reset()
-            let meetingContext = CaptureCoordinator.Context(
-                bundleID: "com.brosis.selfcheck.meeting", appName: "自检会议",
-                ruleID: AdapterRegistry.feishuMeeting.id, displayID: 1, windowFrame: bounds,
-                windowTitle: "自检会议", observationID: nil, axText: "",
-                regionTexts: [:],
-                ocrRequests: [OCRRequest(regionName: "window", kind: .body,
-                                         rect: bounds, reason: .ruleDeclared)],
-                chatLayout: nil, completeness: .unavailable, captureMethod: .ocr,
-                at: Date().timeIntervalSince1970)
+            // 只有 bundleID / appName / ruleID / 那一条请求不同，其余与微信那份逐字一样——
+            // 整份重打一遍的话，Context 加字段时要在这个文件里改两处，还会悄悄漂开。
+            var meetingContext = wechatContext
+            meetingContext.bundleID = "com.brosis.selfcheck.meeting"
+            meetingContext.appName = "自检会议"
+            meetingContext.ruleID = AdapterRegistry.feishuMeeting.id
+            meetingContext.windowTitle = "自检会议"
+            meetingContext.chatLayout = nil
+            meetingContext.ocrRequests = [OCRRequest(regionName: "window", kind: .body,
+                                                     rect: bounds, reason: .ruleDeclared)]
             coordinator.noteScan(meetingContext)
             coordinator.clearContext(bundleID: "com.brosis.selfcheck.previous")   // 上一个应用谢幕
             let ranAfterSwitch = coordinator.handleFrame(screen, displayID: 1, recorder: ocrRecorder,

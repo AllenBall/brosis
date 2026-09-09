@@ -379,7 +379,9 @@ final class ModelsWindowController: NSObject, NSWindowDelegate,
         overnightButton?.title = overnightRunning
             ? L("取消建索引", "Cancel indexing") : L("现在开始建索引（连续跑到完成或取消）", "Build index now (runs until finished or cancelled)")
         overnightButton?.isEnabled = installed
-            && (overnightRunning || (state.vector?.pendingChunks ?? 0) > 0)
+            // 用 workRemaining 而不是 pendingChunks：空库上块数是 0 但有一堆没分块的文本版本，
+            // 只看块数会把「现在开始建索引」这个手动出口一起灰掉——正是最需要它的那种库。
+            && (overnightRunning || (state.vector?.workRemaining ?? 0) > 0)
     }
 
     /// 自动建索引上一次判定翻成人话。

@@ -234,10 +234,13 @@ final class CaptureCoordinator: @unchecked Sendable {
                 self.context = nil
                 stats.ocrStaleContext += 1
                 if !context.ocrRequests.isEmpty {
-                    BrosisLog.capture.notice(
-                        """
-                        丢帧：上下文是 \(context.bundleID, privacy: .public)，                        这一帧的前台是 \(frontmost, privacy: .public)，                        \(context.ocrRequests.count, privacy: .public) 个 OCR 请求作废
-                        """)
+                    // 先拼成一句、再作为**一个** public 字段记：`os_log` 的插值不能用 `+` 拼
+                    // （privacy 注解只在字面量里生效，拼出来的是普通 String，类型检查也会爆）。
+                    // 家法见 `Settings/QuotaScheduler.swift` 的「配额检查」那行。
+                    let text = "丢帧：上下文是 \(context.bundleID)，"
+                             + "这一帧的前台是 \(frontmost)，"
+                             + "\(context.ocrRequests.count) 个 OCR 请求作废"
+                    BrosisLog.capture.notice("\(text, privacy: .public)")
                 }
                 return nil
             }
@@ -419,13 +422,15 @@ final class CaptureCoordinator: @unchecked Sendable {
         }
 
         if fragments.isEmpty, !pending.ocrRequests.isEmpty {
-            // 本来该出字却一个字都没出：把每一种放弃的**当前累计值**打出来。
-            // 只有这一行能区分「没跑」和「跑了但是空的」——两者在库里长得一模一样。
-            let snapshot = lock.withLock { stats }
-            BrosisLog.capture.notice(
-                """
-                没出字：\(pending.bundleID, privacy: .public) 规则 \(pending.ruleID, privacy: .public)，                请求 \(pending.ocrRequests.count, privacy: .public) 个、实跑 \(regionsRun, privacy: .public) 个、                裁剪或识别落空 \(missingRegions, privacy: .public) 个，gated=\(gated, privacy: .public)；                累计 限流 \(snapshot.ocrRateLimited, privacy: .public)、                画面没变跳过 \(snapshot.ocrGatedUnchanged, privacy: .public)、                认出来是空 \(snapshot.ocrEmpty, privacy: .public)、                文本没变 \(snapshot.ocrUnchanged, privacy: .public)、                失败 \(snapshot.ocrFailures, privacy: .public)、                上下文过期 \(snapshot.ocrStaleContext, privacy: .public)
-                """)
+            // 本来该出字却一个字都没出。**这在全 OCR 的规则上是常态**（限流、画面没变、
+            // 文本逐字节没变都落在这儿），所以是 `.info` 不是 `.notice`——它按帧走。
+            // 累计计数直接用 `Stats.summary`：六个计数器的措辞只该有一份，
+            // 这里再抄一遍的话，下次加计数器就会两边不一致（`capture_progress` 用的也是它）。
+            let text = "没出字：\(pending.bundleID) 规则 \(pending.ruleID)，"
+                     + "请求 \(pending.ocrRequests.count) 个、实跑 \(regionsRun) 个、"
+                     + "裁剪或识别落空 \(missingRegions) 个，gated=\(gated)；"
+                     + "累计 \(currentStats.summary)"
+            BrosisLog.capture.info("\(text, privacy: .public)")
         }
 
         if !fragments.isEmpty {

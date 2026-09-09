@@ -227,6 +227,13 @@ public struct VectorStatus: Sendable, Codable {
     public var unchunkedTextVersions: Int
     /// 检索层开关（`RetrievalOptions.vectorsEnabled`）。
     public var retrievalEnabled: Bool
+    /// **还剩多少活**：待办的块 + 还没分块的文本版本。
+    ///
+    /// 分块（`text_versions → chunks`）只发生在 `runEmbeddingJob` 内部（`options.planBatch`），
+    /// 所以"没有待办的块"并不等于"做完了"。2026-09-09 就栽在这上面：库删重建后一个块都没有，
+    /// 各处只看 `pendingChunks` 就判"没活"，任务永远不启动，2195 个文本版本一直没分块。
+    /// 判据放在这里而不是各调用点自己拼——两个字段本来就在同一张快照上。
+    public var workRemaining: Int { pendingChunks + unchunkedTextVersions }
     /// 三条判据都满足才算"向量检索可用"。
     public var ready: Bool {
         tablePresent && extensionRegistered && model != nil && embeddedChunks > 0

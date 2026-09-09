@@ -111,9 +111,16 @@ enum AdapterRegistry {
     /// 聊天面板开合 / 字幕条升降），定点或比例切都会在换布局时切到空处；而每多一个区域
     /// 就多一次 Vision 请求（限流是**按区域**算的），整窗一块反而最省。
     ///
-    /// 代价（说清楚）：会议窗口有实时画面，dHash 那道"画面没变就跳过"基本拦不住，
-    /// 于是在会议窗口位于前台期间会按最小间隔跑满 —— 默认 5 s 一次整窗 accurate OCR，
-    /// 一小时约 720 次 × 约 169 ms ≈ 2 分钟 Vision 时间。嫌多就调间隔，不用重编译：
+    /// 代价（2026-09-09 复查时修正过一次，原来那个估算两头都错）：
+    ///   * **次数**没有 5 s 限流说的那么多。OCR 只在有帧时才跑，而定时兜底是 **12 s** 一帧
+    ///     （`CaptureController.periodicIntervalDefault`），且 `periodicTick` 只在
+    ///     `source_state == .ok` 时截 —— 看会议时人往往不动键鼠，落到 `.userIdle` 就整个跳过。
+    ///     所以上限是每小时几百次量级，不是按 5 s 限流算出来的 720 次。
+    ///   * **单次**比 169 ms 贵。accurate 的耗时由**字符数**决定而不是像素
+    ///     （D24 / E8 实测 0.24–0.36 ms/字符；稀疏页 306 字符 144 ms，密集页 2881 字符 **1008 ms**）。
+    ///     而会议窗口共享文档时正是密集页 —— 本机实测一次整窗 OCR 出 2326 字节。
+    /// 合起来仍然是有界的（帧频 12 s + 每区域 5 s 限流两道都在），但别拿"169 ms"去估。
+    /// 嫌多就调间隔，不用重编译：
     /// `defaults write com.brosis.app capture.ocrMinInterval -float 15`
     static let feishuMeeting = AdapterRule(
         id: "feishu_meeting",
