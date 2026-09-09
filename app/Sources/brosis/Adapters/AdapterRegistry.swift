@@ -191,18 +191,48 @@ enum AdapterRegistry {
         notes: "M0 的四个文本角色（AXTextArea / AXTextField / AXStaticText / AXWebArea）全窗口 BFS，"
              + "限额 1500 节点 / 12 层；不触发 OCR。与 M0 的唯一差别是加了视口裁剪。")
 
+    /// Chromium 系但没有专属规则时用它：与通用规则唯一的差别是**开了 OCR 回退**。
+    ///
+    /// 为什么只对 Chromium 系放开（2026-09-09，探测 Codex 时定的）：通用规则写死
+    /// `ocrFallback: false`，所以「没有专属规则 + AX 读不到」的应用**一个字都不会被记**——
+    /// 不是记得少，是完全没有。清单里 `完整 0 · 部分 0` 的那些行全是这个原因
+    /// （Codex 0/0/6、ZCode 0/2/66、LM Studio 0/0/19）。
+    ///
+    /// 但也不该对所有应用一律开 OCR：原生应用的 AX 空**通常就是真的没内容**，
+    /// 为它们烧 OCR 是白费电。Chromium 系是唯一"AX 空 ≠ 没内容"的一类——
+    /// 它们的正文在渲染进程里，要么应用主动打开无障碍才暴露，要么根本不暴露
+    /// （Codex 连 AXWebArea 都没有，飞书那个定制 Electron 不认 AXManualAccessibility）。
+    /// 对它们回退 OCR 是有依据的，对别人不是。
+    static let genericChromium: AdapterRule = {
+        var rule = generic
+        rule.id = "generic_chromium"
+        rule.name = "通用（Chromium 系，OCR 回退）"
+        rule.electron = true
+        rule.regions = generic.regions.map { region in
+            var copy = region
+            copy.ocrFallback = true
+            return copy
+        }
+        rule.notes = "与通用规则同一条 BFS，区别只在 AX 读不到时会排一次视口 OCR。"
+                   + "OCR 要不要真跑还要过 OCRTriggerGate 与帧门控（接电 / 温度 / 预算）。"
+        return rule
+    }()
+
     /// 首批规则（有序，进 README 与结果文件的规则表）。
     static let all: [AdapterRule] = [safari, claudeDesktop, feishu, wechat]
 
     /// bundle id → 规则；查不到就是兜底规则。
-    static func rule(for bundleID: String?) -> AdapterRule {
-        guard let bundleID, !bundleID.isEmpty else { return generic }
+    /// - Parameter chromium: 这个应用是不是 Chromium 系（`AX.chromiumDetection`）。
+    ///   没有专属规则时它决定兜底走哪一条：Chromium 系用带 OCR 回退的那条。
+    static func rule(for bundleID: String?, chromium: Bool = false) -> AdapterRule {
+        let base = chromium ? genericChromium : generic
+        guard let bundleID, !bundleID.isEmpty else { return base }
         let lowered = bundleID.lowercased()
         for rule in all where rule.bundleIDs.contains(where: { $0.lowercased() == lowered }) {
             return rule
         }
         // 访达等已经有 BFS 收紧值的应用：兜底规则 + 它自己的限额（`AX.bfsLimits`）。
-        var fallback = generic
+        var fallback = base
         fallback.limits = AX.bfsLimits(bundleID: bundleID)
         return fallback
     }

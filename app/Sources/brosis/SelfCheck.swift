@@ -780,6 +780,23 @@ enum SelfCheck {
         let electron = electronProbe()
         check("Electron 检测（伪造带框架的 .app）", electron.positivePassed, electron.positiveDetail)
         check("Electron 检测（伪造不带框架的 .app）", electron.negativePassed, electron.negativeDetail)
+        check("Chromium 判定认结构不认框架名（带版本目录的布局也算）",
+              electron.renamedPassed, electron.renamedDetail)
+
+        // 兜底规则分两条：Chromium 系开 OCR 回退，原生不开。
+        // 这条区分是 2026-09-09 探测 Codex 时定的——通用规则不触发 OCR，
+        // 于是「没有专属规则 + AX 读不到」的应用一个字都记不下来。
+        let nativeFallback = AdapterRegistry.rule(for: "com.example.native", chromium: false)
+        let chromiumFallback = AdapterRegistry.rule(for: "com.openai.codex", chromium: true)
+        let bespoke = AdapterRegistry.rule(for: "com.anthropic.claudefordesktop", chromium: true)
+        check("兜底规则：Chromium 系开 OCR 回退，原生不开；有专属规则的不受影响",
+              nativeFallback.regions.allSatisfy { !$0.ocrFallback }
+                && chromiumFallback.regions.allSatisfy { $0.ocrFallback }
+                && chromiumFallback.id == "generic_chromium"
+                && bespoke.id == "claude_desktop",
+              "原生 \(nativeFallback.id) ocr=\(nativeFallback.regions.allSatisfy { $0.ocrFallback })"
+              + "、Chromium \(chromiumFallback.id) ocr=\(chromiumFallback.regions.allSatisfy { $0.ocrFallback })"
+              + "、Claude 仍走 \(bespoke.id)")
         for note in electron.installedNotes { print("       \(note)") }
 
         // ---------------------------------------------------------------- 8. 截图触发口径
@@ -1544,6 +1561,7 @@ enum SelfCheck {
     private static func electronProbe()
         -> (positivePassed: Bool, positiveDetail: String,
             negativePassed: Bool, negativeDetail: String,
+            renamedPassed: Bool, renamedDetail: String,
             installedNotes: [String]) {
         let fm = FileManager.default
         let root = fm.temporaryDirectory.appendingPathComponent(
@@ -1558,33 +1576,49 @@ enum SelfCheck {
         var negativePassed = false
         var positiveDetail = ""
         var negativeDetail = ""
+        // 判据是结构不是名字，所以正例用一个**随便起名**的框架——这正是改判据的原因：
+        // 飞书叫 Lark Framework、Codex 叫 Codex Framework，按名字匹配全漏。
+        let renamed = root.appendingPathComponent("Renamed.app", isDirectory: true)
+        var renamedPassed = false
+        var renamedDetail = ""
         do {
             try fm.createDirectory(
                 at: withFramework.appendingPathComponent(
-                    "Contents/Frameworks/\(AX.electronFrameworkNames[0])", isDirectory: true),
+                    "Contents/Frameworks/Whatever Framework.framework/Helpers", isDirectory: true),
                 withIntermediateDirectories: true)
+            // 带版本目录的那种布局（飞书 / Codex 就是这样）。
             try fm.createDirectory(
-                at: withoutFramework.appendingPathComponent("Contents/Frameworks", isDirectory: true),
+                at: renamed.appendingPathComponent(
+                    "Contents/Frameworks/Codex Framework.framework/Versions/152.0.7977.83/Helpers",
+                    isDirectory: true),
+                withIntermediateDirectories: true)
+            // 反例：有 framework 但没有 Helpers——原生 app 就长这样。
+            try fm.createDirectory(
+                at: withoutFramework.appendingPathComponent(
+                    "Contents/Frameworks/Native.framework/Resources", isDirectory: true),
                 withIntermediateDirectories: true)
             let positive = AX.bundleContainsElectronFramework(at: withFramework)
             let negative = AX.bundleContainsElectronFramework(at: withoutFramework)
+            let renamedHit = AX.bundleContainsElectronFramework(at: renamed)
             positivePassed = positive == true
             negativePassed = negative == false
-            positiveDetail = "WithElectron.app/Contents/Frameworks/\(AX.electronFrameworkNames[0])"
-                           + " → \(positive)（期望 true）"
-            negativeDetail = "NativeApp.app/Contents/Frameworks/（空目录）"
-                           + " → \(negative)（期望 false）"
+            renamedPassed = renamedHit == true
+            positiveDetail = "改过名的框架 + Helpers → \(positive)（期望 true）"
+            negativeDetail = "有 framework 但没有 Helpers → \(negative)（期望 false）"
+            renamedDetail = "带版本目录的 Codex 布局 → \(renamedHit)（期望 true）"
         } catch {
             positiveDetail = "创建伪造 bundle 失败：\(error)"
             negativeDetail = positiveDetail
+            renamedDetail = positiveDetail
         }
-
         // 真实应用探测：装了才探，没装就跳过（不同机器结果不同，所以只打印、不参与通过判定）。
         var notes: [String] = []
         let candidates = [
             ("Claude 桌面版", "/Applications/Claude.app"),
             ("飞书 Lark", "/Applications/Lark.app"),
-            ("飞书 Feishu", "/Applications/Feishu.app")
+            ("飞书 Feishu", "/Applications/Feishu.app"),
+            ("ChatGPT / Codex", "/Applications/ChatGPT.app"),
+            ("LM Studio", "/Applications/LM Studio.app")
         ]
         for (label, path) in candidates where fm.fileExists(atPath: path) {
             let url = URL(fileURLWithPath: path)
@@ -1597,7 +1631,8 @@ enum SelfCheck {
         if notes.isEmpty {
             notes = ["/Applications 下没有 Claude / 飞书，跳过真实应用探测"]
         }
-        return (positivePassed, positiveDetail, negativePassed, negativeDetail, notes)
+        return (positivePassed, positiveDetail, negativePassed, negativeDetail,
+                renamedPassed, renamedDetail, notes)
     }
 
     /// 合成一张 640×400 的测试图：seed 0 是浅底深条，seed 1 是深底浅条（近似反色）。

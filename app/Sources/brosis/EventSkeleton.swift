@@ -453,7 +453,10 @@ final class EventSkeleton {
         var captureMethod: CaptureMethod = .ax
         var visibleRange: String?
         var adapterScan: AdapterScan?
-        let rule = AdapterRegistry.rule(for: app.bundleIdentifier)
+        // Chromium 系的兜底规则带 OCR 回退（判定结果按 bundle id 缓存，这里不摸文件系统）。
+        let isChromium = AX.chromiumDetection(bundleID: app.bundleIdentifier,
+                                              bundleURL: app.bundleURL).detection != .notChromium
+        let rule = AdapterRegistry.rule(for: app.bundleIdentifier, chromium: isChromium)
         if shouldReadText, let windowElement {
             // 任何一次真正的遍历都重置节流时钟。
             lastElementScanAt = Date().timeIntervalSince1970

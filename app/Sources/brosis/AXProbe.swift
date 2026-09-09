@@ -37,6 +37,7 @@ enum AXProbe {
         }
         print("\n读法：t=0 那一列就是采集端现在拿到的东西。它是 0、而后面某一列不是 0，")
         print("就说明「不可用」里有一部分纯粹是读得太早，不是这个应用给不出文本。")
+        print("0 字符**且** OCR 请求 0 个，才是「这个应用什么都记不下来」。")
         return 0
     }
 
@@ -59,7 +60,7 @@ enum AXProbe {
         }
         let pid = app.processIdentifier
         let detection = AX.chromiumDetection(bundleID: bundleID, bundleURL: app.bundleURL).detection
-        let rule = AdapterRegistry.rule(for: bundleID)
+        let rule = AdapterRegistry.rule(for: bundleID, chromium: detection != .notChromium)
         print("\n## \(app.localizedName ?? bundleID)（\(bundleID)）pid \(pid)")
         print("- Chromium 系判定：\(detection.rawValue)"
               + "；适配规则：\(rule.id)")
@@ -253,10 +254,14 @@ enum AXProbe {
         var completeness: Completeness = .unavailable
         var elapsedMS = 0.0
         var noWindow = false
+        /// 这一次扫描排了几个 OCR 区域。**0 字符 + 0 个 OCR 请求 = 这个应用什么都不会被记下来**，
+        /// 光看字符数分不出"读不到但会 OCR 补"和"读不到而且不会补"。
+        var ocrRequests = 0
 
         func describe() -> String {
             if noWindow { return "拿不到焦点窗口" }
             return "\(chars) 字符 / \(nodes) 节点 / \(completeness.rawValue)"
+                 + "，OCR 请求 \(ocrRequests) 个"
                  + "（\(String(format: "%.0f", elapsedMS)) ms）"
         }
     }
@@ -274,6 +279,7 @@ enum AXProbe {
         out.chars = scan.totalChars
         out.nodes = scan.visitedNodes
         out.completeness = scan.completeness
+        out.ocrRequests = scan.ocrRequests.count
         out.elapsedMS = Date().timeIntervalSince(started) * 1000
         return out
     }

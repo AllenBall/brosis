@@ -52,14 +52,18 @@ enum AX {
         "com.anthropic.claudefordesktop"
     ]
 
-    /// **第二路：通用框架检测。**这两个目录名出现在 `<app>.app/Contents/Frameworks/` 下时，
-    /// 应用一定是 Chromium 内核（Electron 或 CEF），按 Chromium 系处理。
-    /// 注意：改过框架名的应用（例如飞书把它重命名成 `Lark Framework.framework`）匹配不到，
-    /// 仍然要靠第一路的显式清单兜底。
-    static let electronFrameworkNames = [
-        "Electron Framework.framework",             // Electron
-        "Chromium Embedded Framework.framework"     // CEF
-    ]
+    /// **第二路：通用框架检测。**判据是**结构**不是名字：`Contents/Frameworks/<任意>.framework`
+    /// 底下有没有 `Helpers` 目录——Chromium 把渲染 / GPU / 工具子进程和 crashpad 放在那儿，
+    /// 原生 app 的 framework 不长这样。
+    ///
+    /// 为什么不再按框架名匹配（2026-09-09 改）：原来只认 `Electron Framework.framework` 与
+    /// `Chromium Embedded Framework.framework` 两个名字，而**四个 Chromium 应用里有两个改了名**
+    /// （飞书叫 `Lark Framework`，ChatGPT / Codex 叫 `Codex Framework`），只能靠人工清单兜底，
+    /// 而人工清单追不上新装的应用——Codex 就没在里面，判定结果是"不是 Chromium"。
+    ///
+    /// 实测这个信号：Claude / 飞书 / Codex / LM Studio / ZCode / 极空间 六个全中；
+    /// Terminal / 访达 / Xcode / 信息 / Telegram / 微信 / Safari 七个原生应用零假阳性。
+    static let chromiumHelpersDirectory = "Helpers"
 
     /// 判定依据，原样写进 `runtime_events.detail` 的 `detection=` 字段。
     enum ChromiumDetection: String, Sendable {
@@ -105,16 +109,28 @@ enum AX {
     /// 所以 `--self-check` 可以直接调用它做验证。
     static func bundleContainsElectronFramework(at bundleURL: URL?) -> Bool {
         guard let bundleURL else { return false }
+        let fm = FileManager.default
         let frameworks = bundleURL.appendingPathComponent("Contents/Frameworks", isDirectory: true)
-        for name in electronFrameworkNames {
-            var isDirectory: ObjCBool = false
-            let path = frameworks.appendingPathComponent(name, isDirectory: true).path
-            if FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory),
-               isDirectory.boolValue {
+        guard let entries = try? fm.contentsOfDirectory(atPath: frameworks.path) else { return false }
+        for entry in entries where entry.hasSuffix(".framework") {
+            let framework = frameworks.appendingPathComponent(entry, isDirectory: true)
+            // 两种布局都要认：Electron 的 `<F>.framework/Helpers`，
+            // 以及带版本目录的 `<F>.framework/Versions/<x.y.z.w>/Helpers`（飞书、Codex）。
+            if containsHelpers(framework, fm: fm) { return true }
+            let versions = framework.appendingPathComponent("Versions", isDirectory: true)
+            guard let stamps = try? fm.contentsOfDirectory(atPath: versions.path) else { continue }
+            for stamp in stamps
+            where containsHelpers(versions.appendingPathComponent(stamp, isDirectory: true), fm: fm) {
                 return true
             }
         }
         return false
+    }
+
+    private static func containsHelpers(_ directory: URL, fm: FileManager) -> Bool {
+        var isDirectory: ObjCBool = false
+        let path = directory.appendingPathComponent(chromiumHelpersDirectory, isDirectory: true).path
+        return fm.fileExists(atPath: path, isDirectory: &isDirectory) && isDirectory.boolValue
     }
 
     /// 两路合一的判定：显式清单优先，其次通用框架检测；结果按 bundle id 缓存。
