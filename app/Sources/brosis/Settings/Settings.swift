@@ -27,6 +27,14 @@ enum Settings {
         set { UserDefaults.standard.set(clamp(newValue, quotaGiBRange), forKey: quotaGiBKey) }
     }
 
+    /// 把 UserDefaults 里读到的原始值夹进合法区间。**抽成纯函数是为了让自检测到的是这一份**——
+    /// 此前自检在自己那边手抄了一遍同样的逻辑，于是生产代码写错了它也照样通过。
+    /// `raw <= 0` 表示没设过（`double(forKey:)` 读不到时返回 0），按默认值算。
+    static func normalizedQuotaGiB(_ raw: Double) -> Double {
+        guard raw > 0 else { return quotaGiBDefault }
+        return min(max(raw, quotaGiBRange.lowerBound), quotaGiBRange.upperBound)
+    }
+
     static var quotaBytes: Int { Int(quotaGiB * 1_073_741_824.0) }
 
     /// 到线后自动按配额过期（删最旧的原文）。**默认开**——不开的话配额只是个显示，库会一直涨。

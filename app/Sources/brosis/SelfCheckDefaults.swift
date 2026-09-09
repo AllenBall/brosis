@@ -21,27 +21,19 @@ enum SelfCheckDefaults {
 
     /// 历史上用过的别的前缀（含拼错的那个），只为把老机器上的残留也扫掉。
     /// 新代码不该再产生这些名字；等两台机器都清干净可以删掉这个清单。
+    /// （`brosis-veccheck-` 曾经列在这里，但它从来只是 `$TMPDIR` 下的临时**目录**名，
+    /// 不是 UserDefaults 域，扫这里永远扫不到。）
     static let legacyPrefixes = [
-        "brosis-selfcheck-", "brosis-selcheck-", "brosis-settings-check-", "brosis-veccheck-"
+        "brosis-selfcheck-", "brosis-selcheck-", "brosis-settings-check-"
     ]
 
-    private static let counter = Counter()
-
-    private final class Counter: @unchecked Sendable {
-        private let lock = NSLock()
-        private var value = 0
-        func next() -> Int {
-            lock.lock()
-            defer { lock.unlock() }
-            value += 1
-            return value
-        }
-    }
-
-    /// 造一个不会撞的临时域名字。带 pid 和自增序号：同一进程里多处自检、
-    /// 以及并行跑的两个进程，都不会用到同一个域。
+    /// 造一个不会撞的临时域名字。
+    ///
+    /// `label` 在调用点本来就互不相同（policy / ui / ocr / settings / overnight / budget /
+    /// selection），加上 pid 就已经跨进程唯一——曾经还挂过一个带锁的自增序号，
+    /// 它没有消除任何一次碰撞，反而让下面 sweep 里的"跳过本进程"判断多出一条永远为假的分支。
     static func name(_ label: String) -> String {
-        "\(prefix)\(label)-\(ProcessInfo.processInfo.processIdentifier)-\(counter.next())"
+        "\(prefix)\(label)-\(ProcessInfo.processInfo.processIdentifier)"
     }
 
     /// 清值 → 让 cfprefsd 落盘 → 删文件。少任何一步域都还在。
@@ -51,38 +43,38 @@ enum SelfCheckDefaults {
         try? FileManager.default.removeItem(at: plistURL(name))
     }
 
-    /// 扫掉早先跑崩、或旧版本留下的残留。返回删掉几个。
+    /// 扫掉早先跑崩、或旧版本留下的残留。返回 (删掉几个, 还剩几个)。
     ///
-    /// 自检开头调一次：崩溃时 `defer` 不一定跑得到，光靠收尾清不干净。
+    /// 自检开头调一次：崩溃时 `defer` 跑不到，光靠收尾清不干净。
+    /// **一次目录遍历出两个数**——曾经拆成 `sweepStale()` + `staleCount()` 两个函数，
+    /// 结果不但把 `~/Library/Preferences`（几百个条目）扫了两遍，两边的判据还漂了：
+    /// 一个跳过本进程的域、一个不跳，于是同一句自检消息里的两个数**数的不是同一批东西**。
     @discardableResult
-    static func sweepStale() -> Int {
+    static func sweepStale() -> (removed: Int, remaining: Int) {
         let directory = preferencesDirectory
+        let mine = "\(prefix)"
+        let pid = "-\(ProcessInfo.processInfo.processIdentifier)"
         guard let entries = try? FileManager.default.contentsOfDirectory(atPath: directory.path)
-        else { return 0 }
+        else { return (0, 0) }
         let prefixes = [prefix] + legacyPrefixes
         var removed = 0
+        var remaining = 0
         for entry in entries where entry.hasSuffix(".plist")
             && prefixes.contains(where: { entry.hasPrefix($0) }) {
-            let name = String(entry.dropLast(".plist".count))
-            // 当前进程正在用的那几个别扫（名字里带自己的 pid）。
-            guard !name.hasSuffix("-\(ProcessInfo.processInfo.processIdentifier)"),
-                  !name.contains("-\(ProcessInfo.processInfo.processIdentifier)-") else { continue }
+            // 本进程正在用的那几个不扫（名字里带自己的 pid），但要数进 remaining，
+            // 否则"还剩几个"会显得比实际少。
+            if entry.hasPrefix(mine), entry.dropLast(".plist".count).hasSuffix(pid) {
+                remaining += 1
+                continue
+            }
             if (try? FileManager.default.removeItem(at: directory.appendingPathComponent(entry)))
                 != nil {
                 removed += 1
+            } else {
+                remaining += 1
             }
         }
-        return removed
-    }
-
-    /// 还剩几个残留（自检打出来，好看出扫干净没有）。
-    static func staleCount() -> Int {
-        guard let entries = try? FileManager.default
-            .contentsOfDirectory(atPath: preferencesDirectory.path) else { return 0 }
-        let prefixes = [prefix] + legacyPrefixes
-        return entries.filter { entry in
-            entry.hasSuffix(".plist") && prefixes.contains { entry.hasPrefix($0) }
-        }.count
+        return (removed, remaining)
     }
 
     private static var preferencesDirectory: URL {

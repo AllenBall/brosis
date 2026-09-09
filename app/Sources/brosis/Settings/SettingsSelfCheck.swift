@@ -42,10 +42,8 @@ enum SettingsSelfCheck {
         for c in cases {
             suite.set(c.input, forKey: Settings.quotaGiBKey)
             let raw = suite.double(forKey: Settings.quotaGiBKey)
-            let got: Double = {
-                guard raw > 0 else { return Settings.quotaGiBDefault }
-                return min(max(raw, Settings.quotaGiBRange.lowerBound), Settings.quotaGiBRange.upperBound)
-            }()
+            // 调**生产那一份**，不再手抄一遍夹逼逻辑——抄的那版无论生产代码对不对都会通过。
+            let got = Settings.normalizedQuotaGiB(raw)
             if got != c.want { bad.append("\(c.label)→\(got)（期望 \(c.want)）") }
         }
         check("配额脏值处理 \(cases.count) 条（0 / 负数 / 越界 / 区间内）", bad.isEmpty,

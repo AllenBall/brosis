@@ -151,8 +151,6 @@ extension Store {
             // 「开关关闭时无向量调用」这条由它保证。
             var vector = VectorChannelResult()
             var vectorReason: String? = nil
-            /// 只用于上报：间隔判据把这次的向量通道挡下来了。**不参与 `fused` 判定**。
-            var separationReason: String? = nil
             if !options.vectorsEnabled {
                 vectorReason = "disabled"
             } else if request.queryVector == nil {
@@ -166,11 +164,6 @@ extension Store {
                 vector = try vectorChannel(queryVector: queryVector, request: request,
                                            appID: appID, limit: limit, k: vectorK,
                                            options: options, conn: conn)
-                // 间隔判据说"这次没话说"：如实报给调用方，但**不改融合方式**。
-                // `vectorReason` 参与 `fused` 的判定（非 nil 就退回并集），而向量沉默
-                // 与"向量参与了但一条都没过阈值"应当是同一种排序——后者 vectorReason 是 nil。
-                // 所以另存一个只用于上报的字段。
-                separationReason = vector.unavailableReason
                 add(vector.ids, .vector)
             }
 
@@ -189,7 +182,9 @@ extension Store {
                                 scanFromTS: scanFrom, scanToTS: scanTo,
                                 elapsedMS: Date().timeIntervalSince(t0) * 1000,
                                 vectorsUnavailable: !fused,
-                                vectorUnavailableReason: vectorReason ?? separationReason,
+                                // 间隔判据挡下来时如实上报，但**不参与 `fused`**：向量沉默与
+                                // "向量参与了却一条都没过阈值"应当排序一致（后者 vectorReason 也是 nil）。
+                                vectorUnavailableReason: vectorReason ?? vector.unavailableReason,
                                 vectorCandidates: vector.candidates,
                                 vectorObservations: vector.ids.count,
                                 vectorBestDistance: vector.bestDistance,
@@ -226,10 +221,14 @@ extension Store {
 
         // 间隔判据：真答案会从候选大盘里凸出来；"库里没有"时候选彼此差不多。
         // 不满足就整条通道不出声——挑一批"矮子里的高个"正是负例误报的来源。
-        if options.vectorMinSeparation > 0, let best = hits.first?.distance {
-            let sorted = hits.map(\.distance).sorted()
-            let median = sorted[sorted.count / 2]
-            if median - best < options.vectorMinSeparation {
+        // `knn` 返回的就是按距离升序的（这个文件下面第 ③ 步也依赖这一点），
+        // 所以最小值就是第一条、中位数就是按 `percentile` 口径取的那一条——
+        // 不必把 1000 个距离再排一遍。中位数用 `Store.percentile`（同一个类型里已有的定义），
+        // 免得"中位数"在台账那边和这里指的不是同一个统计量。
+        if options.vectorMinSeparation > 0 {
+            let distances = hits.map(\.distance)          // 已经有序
+            let median = Self.percentile(distances, 0.5)
+            if median - distances[0] < options.vectorMinSeparation {
                 out.unavailableReason = "no_separation"
                 return out
             }

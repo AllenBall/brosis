@@ -285,6 +285,17 @@ final class CaptureController: NSObject, @unchecked Sendable {
         case .locked:      withStateLock { stats.skippedLocked += 1 }
         case .secureInput: withStateLock { stats.skippedSecureInput += 1 }
         case .userIdle:    withStateLock { stats.skippedIdle += 1 }
+        case .permissionLost:
+            // **月度再授权到期的检测点就在这里**（e 批 ⑤）。
+            //
+            // `sourceState` 把权限排在空闲之前判，所以哪怕机器一直空闲、一次截图都不发起，
+            // 这一档每 \(Self.periodicInterval) 秒也会看到权限没了。此前它掉进 `default: break`：
+            // 采集端明明知道，却什么都不做——菜单一直显示"录制中"，实际什么都没记下来。
+            //
+            // 走和真截图失败完全同一条路（解除武装 + 抛 .stopped），
+            // 由 AppDelegate 弹引导；引导自己每 1.5 s 轮询，用户补回授权后自动重新武装。
+            handleFailure(reason: "periodic", displayID: currentDisplayID ?? CGMainDisplayID(),
+                          message: "preflight=false", permissionLost: true)
         default:           break
         }
     }

@@ -135,9 +135,6 @@ public struct KeychainKeyProvider: KeyProvider {
         switch try read(dataProtection: true) {
         case .found(let data):
             backend?.pointee = .dataProtection
-            // **迁移的第二阶段**：data-protection 这条路这一次真的读通了，
-            // 到这里才敢删登录钥匙串里的旧副本。见下面第 1b 步的说明。
-            retireLegacyIfRedundant(dataProtection: data)
             return data
         case .missingEntitlement:
             break                                   // 这条路走不通，整体回退
@@ -145,30 +142,30 @@ public struct KeychainKeyProvider: KeyProvider {
             // 1b. 迁移：之前的构建没有 data-protection 权利时，密钥落在了登录钥匙串。
             //     现在权利有了，就把那把密钥搬进 data-protection（不能换新密钥，否则已有库打不开）。
             //
-            //     **分两阶段，中间隔一次启动。** 2026-09-08 这里丢过一个库：旧写法在
-            //     写完 data-protection 副本后**立刻**删掉登录钥匙串那份，而下一次启动时
-            //     新副本读不到（换了签名身份 / 权利没生效 / 锁屏），回退路径已经不存在，
-            //     于是库报 `rc=26 file is not a database`——密钥和库就此脱钩，数据只能丢。
+            //     **迁移只写，不删。** 2026-09-08 这里丢过一个库：旧写法在写完 data-protection
+            //     副本后立刻删掉登录钥匙串那份，而下次启动时新副本读不到（换了签名身份 /
+            //     权利没生效 / 锁屏），回退路径已经不存在，库报 `rc=26 file is not a database`，
+            //     密钥与库就此脱钩、数据只能丢。
             //
-            //     现在：这一趟只写不删，两把并存；等**下一次**启动 data-protection 真的
-            //     读通了（上面的 `.found` 分支），才把旧的退役。多留一次启动的冗余，
-            //     换的是"迁移失败也能退回去"。
+            //     所以两把**永久并存**：多一把冗余密钥是很小的安全折扣、零数据丢失风险；
+            //     而删掉它是这个文件里唯一可能让库再也打不开的操作。曾经写过一版
+            //     "下次启动读通了再删"的两阶段退役，也拿掉了——那把删除的时机推后一次启动，
+            //     并没有消除风险（权利在那之后丢失照样脱钩），却要在**每次开库**都去读一次
+            //     登录钥匙串；而对 ACL 不信任当前签名身份的条目做带数据的读取会弹模态框，
+            //     等于在开库路径上放了个可能无限期卡住的调用。
+            //
+            //     写完立刻读回来验证一次：SecItemAdd 返回成功但读不到是存在的
+            //     （权利只在写时生效、钥匙串被锁），那种情况下这一趟就按登录钥匙串继续用。
             if case .found(let legacy) = try read(dataProtection: false) {
-                switch try create(dataProtection: true, existing: legacy) {
-                case .created(let data):
-                    // 立刻读回来确认真的写进去了：SecItemAdd 返回成功但读不到的情况
-                    // （权利只在写时生效、钥匙串被锁）会让下一次启动无钥可用。
-                    guard case .found(let verified) = try read(dataProtection: true),
-                          verified == legacy else {
-                        backend?.pointee = .legacy
-                        return legacy
-                    }
+                if case .created = try create(dataProtection: true, existing: legacy),
+                   case .found(legacy) = try read(dataProtection: true) {
                     backend?.pointee = .dataProtection
-                    return data
-                case .missingEntitlement:
+                } else {
                     backend?.pointee = .legacy
-                    return legacy
                 }
+                // 三个分支返回的都是同一把 32 字节密钥（`create(existing:)` 原样写回），
+                // 差别只有 backend 报的是哪条路。
+                return legacy
             }
             // 2. data-protection：生成并写入；被 -34018 拒绝也回退
             guard createIfMissing else {
@@ -238,28 +235,6 @@ public struct KeychainKeyProvider: KeyProvider {
             return .missingEntitlement
         default:
             throw StoreError.keyUnavailable("SecItemCopyMatching 失败：OSStatus \(status)（\(dataProtection ? "data-protection" : "login-keychain")）")
-        }
-    }
-
-    /// 迁移的第二阶段：登录钥匙串里还留着一把**和 data-protection 那把一模一样**的密钥时，
-    /// 把它退役。
-    ///
-    /// 三个前提缺一不可，否则宁可留着：
-    ///  1. data-protection 这条路刚刚**真的读通了**（调用点保证）；
-    ///  2. 登录钥匙串里确实还有一把；
-    ///  3. 两把**逐字节相同**——不同就说明它们各自加密过不同的库，删哪把都可能让某个库开不了。
-    ///
-    /// 删不掉也不报错：留着一把多余的密钥没有坏处，为它中断开库才是坏处。
-    func retireLegacyIfRedundant(dataProtection: Data) {
-        guard case .found(let legacy) = try? read(dataProtection: false) else { return }
-        guard legacy == dataProtection else { return }
-        try? deleteLegacyOnly()
-    }
-
-    private func deleteLegacyOnly() throws {
-        let status = SecItemDelete(baseQuery(dataProtection: false) as CFDictionary)
-        guard status == errSecSuccess || status == errSecItemNotFound else {
-            throw StoreError.keyUnavailable("删除登录钥匙串旧条目失败：OSStatus \(status)")
         }
     }
 
