@@ -16,12 +16,12 @@ enum SettingsSelfCheck {
             print("[\(ok ? "PASS" : "FAIL")] \(label)\(detail.isEmpty ? "" : "：\(detail)")")
         }
 
-        let suiteName = "brosis-settings-check-\(ProcessInfo.processInfo.processIdentifier)"
+        let suiteName = SelfCheckDefaults.name("settings")
         guard let suite = UserDefaults(suiteName: suiteName) else {
             check("能建临时 UserDefaults 域", false)
             return 1
         }
-        defer { UserDefaults().removePersistentDomain(forName: suiteName) }
+        defer { SelfCheckDefaults.discard(suite, name: suiteName) }
 
         // 单位换算：10 GiB 必须等于 core StoreOptions 的默认配额。
         let tenGiB = Int(10.0 * 1_073_741_824.0)

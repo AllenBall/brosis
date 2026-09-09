@@ -100,13 +100,13 @@ enum ModelsSelfCheck {
                         : "本机未装嵌入模型 ⇒ 向量检索显示未启用，精确字段与 FTS 不受影响")
         // 选择规则（D30）：在**临时模型根目录 + 临时 UserDefaults 域**上跑三条对照，
         // 造两个假的"已装"模型（只要有 installed.json 就算装着），不碰真实设置与真实权重。
-        let selectionSuite = "brosis-selcheck-\(ProcessInfo.processInfo.processIdentifier)"
+        let selectionSuite = SelfCheckDefaults.name("selection")
         if let suite = UserDefaults(suiteName: selectionSuite), let catalogForSelection {
             let fakeRoot = FileManager.default.temporaryDirectory
                 .appending(path: selectionSuite, directoryHint: .isDirectory)
             defer {
                 try? FileManager.default.removeItem(at: fakeRoot)
-                UserDefaults().removePersistentDomain(forName: selectionSuite)
+                SelfCheckDefaults.discard(suite, name: selectionSuite)
             }
             var ok = true
             for id in ["fake-A", "fake-B"] {
@@ -318,9 +318,9 @@ enum ModelsSelfCheck {
                 .contains(ModelProc.thermalState), ModelProc.thermalState)
 
         // ------------------------------------------------------------ 5. GPU 预算台账
-        let suiteName = "brosis-selfcheck-budget-\(ProcessInfo.processInfo.processIdentifier)"
+        let suiteName = SelfCheckDefaults.name("budget")
         if let defaults = UserDefaults(suiteName: suiteName) {
-            defer { defaults.removePersistentDomain(forName: suiteName) }
+            defer { SelfCheckDefaults.discard(defaults, name: suiteName) }
             let ledger = GPUBudgetLedger(defaults: defaults, budgetSeconds: 600)
             let day1 = Date(timeIntervalSince1970: 1_788_000_000)
             let day2 = day1.addingTimeInterval(86_400 * 2)

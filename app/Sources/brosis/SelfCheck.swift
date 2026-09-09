@@ -131,9 +131,20 @@ enum SelfCheck {
             // 这里把 LockController 的两条真实路径原样走一遍：
             // locking = recorder.detach() + invalidateCache()；
             // unlocking 完成 = recorder.attach() + invalidateCache() + policy.attach()。
-            let suiteName = "com.brosis.selfcheck.policy-\(ProcessInfo.processInfo.processIdentifier)"
+            // 收尾三步（清值 + 摘 suite + **删 plist 文件**）交给 SelfCheckDefaults：
+            // 只 removePersistentDomain 的话文件会留下，这台机器上已经攒了 582 个空 plist。
+            // 先扫历史残留：自检崩过的那些 defer 没跑到，光靠收尾清不干净。
+            let sweptDomains = SelfCheckDefaults.sweepStale()
+            let leftDomains = SelfCheckDefaults.staleCount()
+            check("自检的临时 UserDefaults 域不留残留（清值 + 摘 suite + 删 plist）",
+                  leftDomains <= 8,
+                  "本次扫掉 \(sweptDomains) 个，还剩 \(leftDomains) 个"
+                  + "（剩的应当只有本进程正在用的那几个）；"
+                  + "removePersistentDomain 只清值不删文件，这台机器一度攒到 582 个空 plist")
+
+            let suiteName = SelfCheckDefaults.name("policy")
             let policyDefaults = UserDefaults(suiteName: suiteName) ?? .standard
-            defer { policyDefaults.removePersistentDomain(forName: suiteName) }
+            defer { SelfCheckDefaults.discard(policyDefaults, name: suiteName) }
             let policyStore = CapturePolicyStore(defaults: policyDefaults)
             let policyRecorder = Recorder()
             policyRecorder.attach(store)
@@ -668,9 +679,9 @@ enum SelfCheck {
                   + "释放 \(summary.bytesFreed) 字节；清单里这个应用的统计行消失，策略行保留")
 
             // 全局默认档存在 UserDefaults，走一次真的往返（用独立 suite，不碰用户的设置）。
-            let suite = "com.brosis.selfcheck.ui-\(ProcessInfo.processInfo.processIdentifier)"
+            let suite = SelfCheckDefaults.name("ui")
             let uiDefaults = UserDefaults(suiteName: suite) ?? .standard
-            defer { uiDefaults.removePersistentDomain(forName: suite) }
+            defer { SelfCheckDefaults.discard(uiDefaults, name: suite) }
             let uiPolicy = CapturePolicyStore(defaults: uiDefaults)
             let before = uiPolicy.globalDefault
             uiPolicy.setGlobalDefault(.eventsOnly)
@@ -1336,9 +1347,9 @@ enum SelfCheck {
             let ocrRecorder = Recorder()
             ocrRecorder.attach(ocrStore)
 
-            let suite = "com.brosis.selfcheck.ocr-\(ProcessInfo.processInfo.processIdentifier)"
+            let suite = SelfCheckDefaults.name("ocr")
             let ocrDefaults = UserDefaults(suiteName: suite) ?? .standard
-            defer { ocrDefaults.removePersistentDomain(forName: suite) }
+            defer { SelfCheckDefaults.discard(ocrDefaults, name: suite) }
             let coordinator = CaptureCoordinator(defaults: ocrDefaults)
 
             // 自绘一张 864×560 的"屏幕"（深色聊天面板样张的 1x），显示器就当成 864×560 点。

@@ -235,9 +235,9 @@ enum QueryEmbedderSelfCheck {
         check("进度：还没跑够 1 秒时不瞎报速率",
               cold2.chunksPerSecond == nil && cold2.etaSeconds == nil, cold2.text)
 
-        let suiteName = "brosis-selfcheck-overnight-\(ProcessInfo.processInfo.processIdentifier)"
+        let suiteName = SelfCheckDefaults.name("overnight")
         if let defaults = UserDefaults(suiteName: suiteName) {
-            defer { defaults.removePersistentDomain(forName: suiteName) }
+            defer { SelfCheckDefaults.discard(defaults, name: suiteName) }
             let overnight = OvernightGPULedger(defaults: defaults)
             let nightly = GPUBudgetLedger(defaults: defaults, budgetSeconds: 600)
             let day = Date(timeIntervalSince1970: 1_788_000_000)
