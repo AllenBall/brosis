@@ -462,14 +462,15 @@ final class HotKeys {
 
     /// 菜单里那一行。注册失败要看得见（T18 的要求）。
     var menuDescription: String {
+        let prefix = L("全局热键：", "Global hotkeys: ")
         guard installed, !registrations.isEmpty else {
-            return L("全局热键：未注册", "Global hotkeys: not registered")
+            return prefix + L("未注册", "not registered")
         }
         let failed = registrations.filter { !$0.registered }
         if failed.isEmpty {
-            return L("全局热键：", "Global hotkeys: ") + registrations.map { "\($0.spec?.display ?? $0.raw) \($0.action.title)" }
+            return prefix + registrations.map { "\($0.spec?.display ?? $0.raw) \($0.action.title)" }
                 .joined(separator: " · ")
         }
-        return L("全局热键：", "Global hotkeys: ") + failed.map(\.summary).joined(separator: "；")
+        return prefix + failed.map(\.summary).joined(separator: "；")
     }
 }

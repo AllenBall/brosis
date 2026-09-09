@@ -193,24 +193,13 @@ final class OvernightIndexJob: @unchecked Sendable {
             ?? L("整晚建索引：未开始", "Overnight indexing: not started")
     }
 
-    /// 停 / 暂停原因翻成人话。与 `OvernightIndexPolicy.decide` 的字符串一一对应。
-    /// （不复用 `ModelsWindowController.gateText`：那个类是 `@MainActor`，这里在后台线程读。）
+    /// 停 / 暂停原因翻成人话。共用的码在 `GateReasonText`（nonisolated，后台线程也能读——
+    /// 这正是当初抄第二份的原因），这里只补整晚任务特有的两个。
     static func reasonText(_ reason: String) -> String {
         switch reason {
         case "cancelled": L("你按了取消", "you pressed Cancel")
         case "complete": L("全部块都嵌完了", "every chunk is embedded")
-        case "model_not_installed": L("嵌入模型未安装", "no embedding model installed")
-        case "paused": L("采集已暂停（锁屏 / 用户暂停）", "capture is paused (screen locked or paused by you)")
-        case "on_battery": L("在用电池，插上电源就继续", "on battery — plug in to continue")
-        case "load_failed": L("模型加载失败", "model failed to load")
-        case "store_unavailable": L("库不可用（已关库）", "database unavailable (closed)")
-        default:
-            if reason.hasPrefix("thermal_") {
-                L("机器偏热（\(reason.dropFirst(8))）", "running hot (\(reason.dropFirst(8)))")
-            } else if reason.hasPrefix("locked_") {
-                L("数据库未解锁（\(reason.dropFirst(7))）", "database is locked (\(reason.dropFirst(7)))")
-            }
-            else { reason }
+        default: GateReasonText.text(reason)
         }
     }
 

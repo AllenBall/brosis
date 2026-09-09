@@ -633,6 +633,19 @@ enum SelfCheck {
                     && UILanguage.allCases.count == 3,
                   UILanguage.allCases.map(\.displayName).joined(separator: " / "))
 
+            // 门控原因表只有一份：整晚任务与自动建索引读到的必须逐字相同，
+            // 否则同一件事在两个界面上说法不一样（改成共用之前就是这样）。
+            let sharedReasons = ["paused", "on_battery", "model_not_installed",
+                                 "thermal_fair", "locked_screen", "store_unavailable"]
+            let reasonMismatch = sharedReasons.filter {
+                OvernightIndexJob.reasonText($0) != GateReasonText.text($0)
+            }
+            check("门控原因表共用一份（\(sharedReasons.count) 个共有码逐字相同）",
+                  reasonMismatch.isEmpty
+                    && OvernightIndexJob.reasonText("cancelled") != GateReasonText.text("cancelled"),
+                  reasonMismatch.isEmpty ? "共有码转调 GateReasonText，各自只补特有的码"
+                                         : reasonMismatch.joined(separator: " "))
+
             let plan = try uiStore.appObservationStatsPlan().joined(separator: " | ")
             check("清单统计走 idx_obs_live 部分索引", plan.contains("idx_obs_live"), plan)
 

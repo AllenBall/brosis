@@ -2,7 +2,7 @@ import AppKit
 import BrosisCore
 import Foundation
 
-/// 3.12「应用采集清单」窗口（设置里那一页L("应用", "App")）。
+/// 3.12「应用采集清单」窗口（设置里那一页「应用」）。
 ///
 /// 判定逻辑一行都不在这里——合并 / 分组 / 排序 / 过滤 / 改档状态机全在
 /// `PolicyList.swift`（纯函数，自检整段跑）。这个文件只做三件事：
@@ -39,13 +39,7 @@ final class PoliciesWindowController: NSObject, NSWindowDelegate,
     // MARK: - 界面元素
 
     private var window: NSWindow?
-
-    /// 界面语言换了就把窗口关掉：contentView 是打开时一次性搭出来的，
-    /// 就地把每个控件的文案换一遍既繁琐又容易漏，重开一次就全对了。
-    func closeForLanguageChange() {
-        window?.close()
-        window = nil
-    }
+    private var registeredLanguageHandler = false
     private var tableView: NSTableView?
     private var searchField: NSSearchField?
     private var globalDefaultPopUp: NSPopUpButton?
@@ -179,7 +173,9 @@ final class PoliciesWindowController: NSObject, NSWindowDelegate,
         var width: CGFloat
     }
 
-    private static let columns: [ColumnSpec] = [
+    /// **`var` 不是 `let`**：`static let` 一个进程只算一次，表头会冻在第一次开窗时的语言上，
+    /// 而这个窗口的设计前提正是"关掉重开就是新语言"。
+    private static var columns: [ColumnSpec] = [
         ColumnSpec(id: "name", title: L("应用", "App"), width: 180),
         ColumnSpec(id: "bundle", title: "bundle id", width: 230),
         ColumnSpec(id: "group", title: L("分组", "Group"), width: 110),

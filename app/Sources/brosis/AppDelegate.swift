@@ -34,17 +34,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // 这一步不弹窗、不需要权限。
         let axTimeoutError = AX.installGlobalMessagingTimeout()
 
-        // 界面语言换了：把已经打开的窗口全关掉（重开就是新语言），菜单本来就每次重建。
-        // 用 block observer + 显式回主线程，不用 @objc 方法——温度通知那次 SIGTRAP
-        // 的教训是 @MainActor 的 @objc 方法可能被后台队列直接调用。
+        // 系统语言变了，`.system` 档的解析结果要跟着变（缓存得作废）。
+        // 窗口怎么关不在这里点名——各窗口在搭好时自己向 L10n 登记，见 L10n.onLanguageChange。
         languageObserver = NotificationCenter.default.addObserver(
-            forName: L10n.didChange, object: nil, queue: .main) { _ in
-            MainActor.assumeIsolated {
-                SettingsWindowController.shared.closeForLanguageChange()
-                ModelsWindowController.shared.closeForLanguageChange()
-                PoliciesWindowController.shared.closeForLanguageChange()
-                MCPIntegrationWindowController.shared.closeForLanguageChange()
-            }
+            forName: NSLocale.currentLocaleDidChangeNotification, object: nil, queue: nil) { _ in
+            L10n.invalidate()
         }
 
         let lock = LockController(recorder: recorder)
@@ -389,7 +383,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         let permissions = Permissions.snapshot()
         menu.addItem(disabledItem("brosis \(BuildInfo.version) · \(BuildInfo.stage)"))
-        menu.addItem(disabledItem(L("状态：\(statusTitle)", "Status: \(statusTitle)")))
+        // 先取到本地：statusTitle 会再做一次权限 snapshot（CGPreflightScreenCaptureAccess
+        // 要走 WindowServer、AXIsProcessTrusted 要走 TCC），放进 L() 会被求值两次。
+        let status = statusTitle
+        menu.addItem(disabledItem(L("状态：\(status)", "Status: \(status)")))
         menu.addItem(disabledItem(L("数据库：\(lock.snapshot.phase.rawValue)（\(lock.directory.lastPathComponent)，来源 \(lock.directorySource)）",
                                        "Database: \(lock.snapshot.phase.rawValue) (\(lock.directory.lastPathComponent), source \(lock.directorySource))")))
         if let error = lock.lastError {
@@ -415,7 +412,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if let lastCaptureError {
             menu.addItem(disabledItem(L("最近错误：\(lastCaptureError.prefix(60))", "Last error: \(lastCaptureError.prefix(60))")))
         }
-        menu.addItem(disabledItem(L("当前应用：\(foregroundLabel)", "Current app: \(foregroundLabel)")))
+        // 同理：foregroundLabel 在「今日暂停」时会 new 一个 DateFormatter（实测 16.6 µs）。
+        let foreground = foregroundLabel
+        menu.addItem(disabledItem(L("当前应用：\(foreground)", "Current app: \(foreground)")))
         // 3.6：MCP 的本地 IPC 服务端状态（socket 起没起、现在服不服务）。
         menu.addItem(disabledItem(lock.ipc.menuDescription))
         menu.addItem(.separator())
@@ -496,8 +495,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(.separator())
         menu.addItem(ModelsMenu.menuItem())
         menu.addItem(MCPIntegrationWindowController.menuItem())
-        let syncItem = NSMenuItem(title: L("跨设备同步…", "Cross-device sync…")
-                              + "（\(sync?.status.enabled == true ? L("已开启", "on") : L("未开启", "off"))）",
+        let syncItem = NSMenuItem(title: L("跨设备同步…（\(LOnOff(sync?.status.enabled == true))）",
+                                 "Cross-device sync… (\(LOnOff(sync?.status.enabled == true)))"),
                                   action: #selector(openSyncWindow), keyEquivalent: "")
         syncItem.target = self
         menu.addItem(syncItem)
@@ -521,9 +520,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // 库没开的时候读不到 app_policies，这一档只是"临时判定"，别让菜单看起来像已生效的设置。
         if !CapturePolicyStore.shared.isStoreBacked { label += L("（库未打开，临时判定）", " (database closed — provisional)") }
         if let until = CapturePolicyStore.shared.temporaryPause(bundleID: bundleID) {
-            let formatter = DateFormatter()
-            formatter.dateFormat = "HH:mm"
-            label += L("（今日暂停至 \(formatter.string(from: until))）", " (paused today until \(formatter.string(from: until)))")
+            let clock = PolicyListRow.clockFormatter.string(from: until)
+            label += L("（今日暂停至 \(clock)）", " (paused today until \(clock))")
         }
         return label
     }

@@ -68,7 +68,7 @@ struct PolicyListRow: Sendable, Equatable {
     /// 这一刻真正生效的档（临时暂停压过存下来的那一档，与 `CapturePolicyStore.decide` 同一口径）。
     var effectiveMode: CapturePolicyMode { temporaryUntil == nil ? mode : .none }
 
-    /// 用户显式设过档吗（列表里标一个L("你设的", "Set by you")，好和默认判定区分开）。
+    /// 用户显式设过档吗（列表里标一个「你设的」，好和默认判定区分开）。
     var isUserSet: Bool { source == .user }
 
     /// 完整性分布那一列。**四态都写出来，包括 0**——3.12 说这一列是给人判断"值不值得留"的，
@@ -105,14 +105,20 @@ struct PolicyListRow: Sendable, Equatable {
     }
 
     /// 状态那一列：运行中 / 今日暂停 / 用户设过。
+    /// `HH:mm` 格式器共用一个：每 `DateFormatter()` 一次实测 16.6 µs，而这里是逐行调用。
+    static let clockFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "HH:mm"
+        return formatter
+    }()
+
     func statusLabel(now: Date = Date()) -> String {
         var parts: [String] = []
         if running { parts.append(L("运行中", "Running")) }
         if let until = temporaryUntil, until > now {
-            let formatter = DateFormatter()
-            formatter.dateFormat = "HH:mm"
-            parts.append(L("今日暂停至 \(formatter.string(from: until))",
-                           "paused until \(formatter.string(from: until))"))
+            // 先算出来再进 L()：`L(zh, en)` 两个参数都会求值，直接内插等于格式化两次。
+            let clock = PolicyListRow.clockFormatter.string(from: until)
+            parts.append(L("今日暂停至 \(clock)", "paused until \(clock)"))
         }
         if isUserSet { parts.append(L("你设的", "Set by you")) }
         if source == .builtinDenylist { parts.append(L("内置清单", "Built-in list")) }

@@ -8,11 +8,11 @@ import Foundation
 //
 // 三条口径写在最前面：
 // 1. **默认零模型**（3.11）：app 不内置、不自动下载任何模型。这个面板打开之前，
-//    向量检索一律显示L("未启用", "off")，其余功能完全不受影响。
+//    向量检索一律显示「未启用」，其余功能完全不受影响。
 // 2. **三条来源（D30）**：清单里的条目可联网下载（下载器在 `BrosisModels/Downloader.swift`，
 //    E9 实测过；默认允许，把 `models.allowDownload` 设成 false 可彻底禁网），
 //    也可以从本地目录导入（复制）或关联外部目录（不复制，例如 LM Studio 的 MLX 模型目录）。
-//    只放行已批准家族 `Qwen3-Embedding-*` 的清单项；清单外的目录只能L("关联", "Link")，标记为未验证。
+//    只放行已批准家族 `Qwen3-Embedding-*` 的清单项；清单外的目录只能「关联」，标记为未验证。
 // 3. **不改 AppDelegate**：菜单项由 `ModelsMenu.menuItem()` 造好，
 //    由主会话在 `refreshMenu()` 里插一行。接入方式见
 //    tools/bench/results/m2_c_vectors_2026-09-08.md。
@@ -142,13 +142,7 @@ final class ModelsWindowController: NSObject, NSWindowDelegate,
     // MARK: - 窗口
 
     private var window: NSWindow?
-
-    /// 界面语言换了就把窗口关掉：contentView 是打开时一次性搭出来的，
-    /// 就地把每个控件的文案换一遍既繁琐又容易漏，重开一次就全对了。
-    func closeForLanguageChange() {
-        window?.close()
-        window = nil
-    }
+    private var registeredLanguageHandler = false
     private var tableView: NSTableView?
     private var statusLabel: NSTextField?
     private var vectorSwitch: NSButton?
@@ -170,6 +164,16 @@ final class ModelsWindowController: NSObject, NSWindowDelegate,
 
     func present() {
         if window == nil { buildWindow() }
+        // 语言换了就把窗口关掉：contentView 是搭窗口时一次性造出来的，
+        // 就地把每个控件的文案换一遍既繁琐又容易漏，重开一次全对。
+        // **谁搭窗口谁登记**——不靠 AppDelegate 点名，那份名单结构上补不齐。
+        if !registeredLanguageHandler {
+            registeredLanguageHandler = true
+            L10n.onLanguageChange { [weak self] in
+                self?.window?.close()
+                self?.window = nil
+            }
+        }
         reload()
         NSApp.activate(ignoringOtherApps: true)
         window?.makeKeyAndOrderFront(nil)
@@ -313,7 +317,9 @@ final class ModelsWindowController: NSObject, NSWindowDelegate,
     }
 
     private struct ColumnSpec { var id: String; var title: String; var width: CGFloat }
-    private static let columns: [ColumnSpec] = [
+    /// **`var` 不是 `let`**：`static let` 一个进程只算一次，表头会冻在第一次开窗时的语言上，
+    /// 而这个窗口的设计前提正是"关掉重开就是新语言"。
+    private static var columns: [ColumnSpec] = [
         ColumnSpec(id: "current", title: L("当前", "Now"), width: 40),
         ColumnSpec(id: "id", title: L("模型", "Model"), width: 240),
         ColumnSpec(id: "purpose", title: L("用途", "Purpose"), width: 60),
@@ -332,14 +338,15 @@ final class ModelsWindowController: NSObject, NSWindowDelegate,
             lines.append(L("清单读不出来：\(error)", "Could not read the catalog: \(error)"))
         }
         if let vector = state.vector {
+            let modelName = vector.model ?? L("未启用", "off")
             lines.append(L("向量索引：\(vector.embeddedChunks) / \(vector.chunks) 块已嵌入，"
                            + "待办 \(vector.pendingChunks) 块，未分块的文本版本 \(vector.unchunkedTextVersions) 个，"
                            + "维度 \(vector.dimension)（\(vector.elementType)，sqlite-vec \(vector.sqliteVecVersion)）"
-                           + "，模型 \(vector.model ?? L("未启用", "off"))",
+                           + "，模型 \(modelName)",
                            "Vector index: \(vector.embeddedChunks) / \(vector.chunks) chunks embedded, "
                            + "\(vector.pendingChunks) pending, \(vector.unchunkedTextVersions) text versions "
                            + "not yet chunked, \(vector.dimension) dimensions (\(vector.elementType), "
-                           + "sqlite-vec \(vector.sqliteVecVersion)), model \(vector.model ?? L("未启用", "off"))"))
+                           + "sqlite-vec \(vector.sqliteVecVersion)), model \(modelName)"))
         } else {
             lines.append(L("库没打开，向量索引状态未知（解锁后再看）。", "Database not open — vector index status unknown (check again after unlocking)."))
         }
@@ -355,7 +362,7 @@ final class ModelsWindowController: NSObject, NSWindowDelegate,
             OvernightIndexJob.shared.statusText + " · " + QueryEmbedderService.shared.statusDescription
             + L(" · 模型目录 \(state.modelsRoot?.lastPathComponent ?? "?")（来源 \(state.modelsRootSource)）",
                   " · model folder \(state.modelsRoot?.lastPathComponent ?? "?") (source \(state.modelsRootSource))")
-            + " · 自动建索引：\(AutoIndexScheduler.isEnabled ? L("开", "on") : L("关", "off"))"
+            + L(" · 自动建索引：", " · auto-index: ") + LOnOff(AutoIndexScheduler.isEnabled)
             + L("（上次 \(Self.autoText(AutoIndexScheduler.shared.lastDecision))）",
                   " (last: \(Self.autoText(AutoIndexScheduler.shared.lastDecision)))")
             + (lastAction.map { " · " + $0 } ?? "")
@@ -387,26 +394,8 @@ final class ModelsWindowController: NSObject, NSWindowDelegate,
         }
     }
 
-    /// 门控原因翻成人话。与 `EmbeddingGatePolicy.decide` 的字符串一一对应。
-    static func gateText(_ reason: String) -> String {
-        switch reason {
-        case "disabled_by_user": L("夜间自动建索引没打开", "nightly auto-index is off")
-        case "model_not_installed": L("嵌入模型未安装（功能显示为未启用）", "no embedding model installed (feature shows as off)")
-        case "nothing_pending": L("没有待办的块，索引已经是最新的", "nothing pending — the index is up to date")
-        case "paused": L("采集已暂停（锁屏 / 用户暂停）", "capture is paused (screen locked or paused by you)")
-        case "on_battery": L("在用电池，等接电", "on battery — waiting for AC power")
-        case "not_idle": L("你还在用这台机器，等空闲 5 分钟", "you are still using this Mac — waiting for 5 minutes idle")
-        case "gpu_budget_exhausted": L("今天的 GPU 预算已用完", "today’s GPU budget is used up")
-        default:
-            if reason.hasPrefix("thermal_") {
-                L("机器偏热（\(reason.dropFirst(8))），等降温",
-                  "running hot (\(reason.dropFirst(8))) — waiting to cool down")
-            } else if reason.hasPrefix("locked_") {
-                L("数据库未解锁（\(reason.dropFirst(7))）", "database is locked (\(reason.dropFirst(7)))")
-            }
-            else { reason }
-        }
-    }
+    /// 门控原因翻成人话。表在 `GateReasonText`（nonisolated，三个调度器共用）。
+    static func gateText(_ reason: String) -> String { GateReasonText.text(reason) }
 
     // MARK: - 动作
 
@@ -675,11 +664,12 @@ final class ModelsWindowController: NSObject, NSWindowDelegate,
         let alert = NSAlert()
         alert.messageText = L("重建向量索引？", "Rebuild the vector index?")
         alert.informativeText = L("会清掉全部分块与向量，下一次夜间任务从头再来。库里的正文一个字节都不动。", "All chunks and vectors are cleared and the next nightly pass starts from scratch. Not a byte of the stored text is touched.")
-        alert.addButton(withTitle: "重建")
+        alert.addButton(withTitle: L("重建", "Rebuild"))
         alert.addButton(withTitle: L("取消", "Cancel"))
         guard alert.runModal() == .alertFirstButtonReturn else { return }
         let removed = recorder?.withStore { try? $0.rebuildEmbeddings() } ?? nil
-        lastAction = "已清掉 \(removed ?? 0) 个块，索引待重建"
+        lastAction = L("已清掉 \(removed ?? 0) 个块，索引待重建",
+                       "Cleared \(removed ?? 0) chunks — the index needs rebuilding")
         reload()
     }
 
@@ -687,26 +677,26 @@ final class ModelsWindowController: NSObject, NSWindowDelegate,
     @objc private func overnightClicked(_ sender: Any?) {
         if OvernightIndexJob.shared.isRunning {
             OvernightIndexJob.shared.cancel()
-            lastAction = "已请求取消整晚建索引（当前这一批跑完就停）"
+            lastAction = L("已请求取消整晚建索引（当前这一批跑完就停）", "Cancellation requested — overnight indexing stops after the current batch")
             reload()
             return
         }
         guard let root = currentState().modelsRoot else { return }
         let alert = NSAlert()
-        alert.messageText = "现在开始建索引？"
+        alert.messageText = L("现在开始建索引？", "Start building the index now?")
         alert.informativeText = """
             会连续跑到全部块嵌完或你取消，可能要几小时（1 个月合成库实测 1 小时 32 分）。
             只放开「空闲 5 分钟」这道门：**仍然要求接电**，机器偏热会自动暂停、真烫了会停，\
             锁库 / 暂停采集也会停。这次的 GPU 时间单独记账，不占夜间增量的 10 分钟日预算。
             """
-        alert.addButton(withTitle: "开始")
+        alert.addButton(withTitle: L("开始", "Start"))
         alert.addButton(withTitle: L("取消", "Cancel"))
         guard alert.runModal() == .alertFirstButtonReturn else { return }
         if OvernightIndexJob.shared.start(modelsRoot: root, recorder: recorder) {
-            lastAction = "整晚建索引已开始（进度写进 jobs 与事件）"
+            lastAction = L("整晚建索引已开始（进度写进 jobs 与事件）", "Overnight indexing started (progress is written to jobs and events)")
             startOvernightRefresh()
         } else {
-            lastAction = "整晚建索引已经在跑了"
+            lastAction = L("整晚建索引已经在跑了", "Overnight indexing is already running")
         }
         reload()
     }
@@ -734,7 +724,7 @@ final class ModelsWindowController: NSObject, NSWindowDelegate,
         UserDefaults.standard.set(on, forKey: QueryEmbedderService.vectorsEnabledKey)
         // M2 d / T15：关掉就立刻把查询嵌入器卸了，不等 10 分钟空闲。
         QueryEmbedderService.shared.setVectorsEnabled(on, store: recorder?.withStore { $0 })
-        lastAction = on ? "向量通道已打开" : "向量通道已关闭（只走精确字段 + FTS）"
+        lastAction = on ? L("向量通道已打开", "Vector channel turned on") : L("向量通道已关闭（只走精确字段 + FTS）", "Vector channel turned off (exact fields + FTS only)")
         reload()
     }
 
@@ -751,7 +741,7 @@ final class ModelsWindowController: NSObject, NSWindowDelegate,
 
     @objc private func nightlyToggled(_ sender: NSButton) {
         EmbeddingScheduler.shared.isEnabled = sender.state == .on
-        lastAction = sender.state == .on ? "夜间自动建索引已打开" : "夜间自动建索引已关闭"
+        lastAction = sender.state == .on ? L("夜间自动建索引已打开", "Nightly auto-index turned on") : L("夜间自动建索引已关闭", "Nightly auto-index turned off")
         reload()
     }
 
@@ -762,7 +752,7 @@ final class ModelsWindowController: NSObject, NSWindowDelegate,
         let alert = NSAlert()
         alert.messageText = title
         alert.informativeText = body
-        alert.addButton(withTitle: "好")
+        alert.addButton(withTitle: L("好", "OK"))
         alert.runModal()
     }
 

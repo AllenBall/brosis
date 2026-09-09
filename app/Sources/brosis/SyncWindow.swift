@@ -24,14 +24,15 @@ final class SyncWindowController: NSObject, NSWindowDelegate {
 
     private weak var controller: SyncController?
     private var window: NSWindow?
+    private var registeredLanguageHandler = false
 
-    private let toggle = NSButton(checkboxWithTitle: L("打开跨设备同步（D17）", "Enable cross-device sync"), target: nil, action: nil)
+    private let toggle = NSButton(checkboxWithTitle: "", target: nil, action: nil)
     private let directoryField = NSTextField(string: "")
-    private let chooseButton = NSButton(title: L("选择目录…", "Choose folder…"), target: nil, action: nil)
+    private let chooseButton = NSButton(title: "", target: nil, action: nil)
     private let passphraseField = NSSecureTextField(string: "")
     private let statusText = NSTextField(labelWithString: "")
     private let peersText = NSTextField(labelWithString: "")
-    private let syncNowButton = NSButton(title: L("立即同步", "Sync now"), target: nil, action: nil)
+    private let syncNowButton = NSButton(title: "", target: nil, action: nil)
 
     func configure(controller: SyncController) {
         self.controller = controller
@@ -40,6 +41,16 @@ final class SyncWindowController: NSObject, NSWindowDelegate {
 
     func present() {
         if window == nil { buildWindow() }
+        // 语言换了就把窗口关掉：contentView 是搭窗口时一次性造出来的，
+        // 就地把每个控件的文案换一遍既繁琐又容易漏，重开一次全对。
+        // **谁搭窗口谁登记**——不靠 AppDelegate 点名，那份名单结构上补不齐。
+        if !registeredLanguageHandler {
+            registeredLanguageHandler = true
+            L10n.onLanguageChange { [weak self] in
+                self?.window?.close()
+                self?.window = nil
+            }
+        }
         reload()
         NSApp.activate(ignoringOtherApps: true)
         window?.makeKeyAndOrderFront(nil)
@@ -48,6 +59,10 @@ final class SyncWindowController: NSObject, NSWindowDelegate {
     // MARK: - 构建
 
     private func buildWindow() {
+        // 同上：标题在搭窗口时设，属性初始化里设的话切语言不会变。
+        toggle.title = L("打开跨设备同步", "Enable cross-device sync")
+        chooseButton.title = L("选择目录…", "Choose folder…")
+        syncNowButton.title = L("立即同步", "Sync now")
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 620, height: 460),
                               styleMask: [.titled, .closable, .miniaturizable],
                               backing: .buffered, defer: false)

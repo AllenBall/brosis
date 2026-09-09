@@ -13,13 +13,7 @@ final class MCPIntegrationWindowController: NSObject, NSWindowDelegate,
 
     private weak var recorder: Recorder?
     private var window: NSWindow?
-
-    /// 界面语言换了就把窗口关掉：contentView 是打开时一次性搭出来的，
-    /// 就地把每个控件的文案换一遍既繁琐又容易漏，重开一次就全对了。
-    func closeForLanguageChange() {
-        window?.close()
-        window = nil
-    }
+    private var registeredLanguageHandler = false
     private var tableView: NSTableView?
     private var statusLabel: NSTextField?
     private var noteLabel: NSTextField?
@@ -42,6 +36,16 @@ final class MCPIntegrationWindowController: NSObject, NSWindowDelegate,
 
     func present() {
         if window == nil { buildWindow() }
+        // 语言换了就把窗口关掉：contentView 是搭窗口时一次性造出来的，
+        // 就地把每个控件的文案换一遍既繁琐又容易漏，重开一次全对。
+        // **谁搭窗口谁登记**——不靠 AppDelegate 点名，那份名单结构上补不齐。
+        if !registeredLanguageHandler {
+            registeredLanguageHandler = true
+            L10n.onLanguageChange { [weak self] in
+                self?.window?.close()
+                self?.window = nil
+            }
+        }
         reload()
         NSApp.activate(ignoringOtherApps: true)
         window?.makeKeyAndOrderFront(nil)
@@ -115,7 +119,9 @@ final class MCPIntegrationWindowController: NSObject, NSWindowDelegate,
         self.window = window
     }
 
-    private static let columns: [(String, String, Double)] = [
+    /// **`var` 不是 `let`**：`static let` 一个进程只算一次，表头会冻在第一次开窗时的语言上，
+    /// 而这个窗口的设计前提正是"关掉重开就是新语言"。
+    private static var columns: [(String, String, Double)] = [
         ("harness", "Harness", 130),
         ("state", L("状态", "Status"), 300),
         ("grant", L("授权", "Grant"), 90),
@@ -278,15 +284,15 @@ final class MCPIntegrationWindowController: NSObject, NSWindowDelegate,
                                       "A client identifying itself as client=\(client) just connected and "
                                       + "was refused because it has no grant. Issuing a grant "
                                       + "(evidence, 30 days, all apps) will let it through.")
-            alert.addButton(withTitle: "发")
-            alert.addButton(withTitle: "跳过")
+            alert.addButton(withTitle: L("发", "Grant"))
+            alert.addButton(withTitle: L("跳过", "Skip"))
             guard alert.runModal() == .alertFirstButtonReturn else { continue }
             do {
                 try MCPIntegration.grantClient(client, store: store)
-                lastAction = "已给 \(client) 发 grant"
+                lastAction = L("已给 \(client) 发 grant", "Granted access to \(client)")
                 recorder?.logEvent(kind: "mcp_grant_learned", detail: "client=\(client)")
             } catch {
-                lastAction = "给 \(client) 发 grant 失败：\(error)"
+                lastAction = L("给 \(client) 发 grant 失败：\(error)", "Granting \(client) failed: \(error)")
             }
         }
         learned = []
@@ -298,7 +304,7 @@ final class MCPIntegrationWindowController: NSObject, NSWindowDelegate,
         let alert = NSAlert()
         alert.messageText = title
         alert.informativeText = body
-        alert.addButton(withTitle: "好")
+        alert.addButton(withTitle: L("好", "OK"))
         alert.runModal()
     }
 
@@ -314,7 +320,7 @@ final class MCPIntegrationWindowController: NSObject, NSWindowDelegate,
         switch column {
         case "harness": text = status.harness.displayName
         case "state":   text = status.stateText
-        case "grant":   text = status.hasGrant ? "已授权" : "无"
+        case "grant":   text = status.hasGrant ? L("已授权", "Granted") : L("无", "None")
         case "config":  text = (status.harness.expandedConfigPath() as NSString)
                                    .abbreviatingWithTildeInPath
         default:        text = ""

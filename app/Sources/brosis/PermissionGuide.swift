@@ -14,11 +14,12 @@ import Foundation
 final class PermissionGuide: NSObject, NSWindowDelegate {
 
     private var window: NSWindow?
+    private var registeredLanguageHandler = false
     private var timer: Timer?
     private let axStatus = NSTextField(labelWithString: "")
     private let screenStatus = NSTextField(labelWithString: "")
     private let hint = NSTextField(wrappingLabelWithString: "")
-    private let relaunchButton = NSButton(title: L("退出并重新打开 brosis", "Quit and reopen brosis"), target: nil, action: nil)
+    private let relaunchButton = NSButton(title: "", target: nil, action: nil)
 
     private let onAllGranted: () -> Void
     private let onRerequest: () -> Void
@@ -38,6 +39,16 @@ final class PermissionGuide: NSObject, NSWindowDelegate {
     /// 显示（已显示则前置）并开始轮询。
     func show() {
         if window == nil { window = makeWindow() }
+        // 语言换了就把窗口关掉：contentView 是搭窗口时一次性造出来的，
+        // 就地把每个控件的文案换一遍既繁琐又容易漏，重开一次全对。
+        // **谁搭窗口谁登记**——不靠 AppDelegate 点名，那份名单结构上补不齐。
+        if !registeredLanguageHandler {
+            registeredLanguageHandler = true
+            L10n.onLanguageChange { [weak self] in
+                self?.window?.close()
+                self?.window = nil
+            }
+        }
         refresh()
         NSApp.activate(ignoringOtherApps: true)
         window?.center()
@@ -152,6 +163,7 @@ final class PermissionGuide: NSObject, NSWindowDelegate {
     // MARK: - 界面
 
     private func makeWindow() -> NSWindow {
+        relaunchButton.title = L("退出并重新打开 brosis", "Quit and reopen brosis")
         let title = NSTextField(labelWithString: L("brosis 需要两项权限才能开始记录", "brosis needs two permissions before it can record"))
         title.font = .boldSystemFont(ofSize: 15)
 

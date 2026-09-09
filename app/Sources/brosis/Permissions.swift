@@ -22,9 +22,12 @@ enum Permissions {
 
         var missingDescription: String {
             var missing: [String] = []
-            if !screenRecording { missing.append("屏幕录制") }
-            if !accessibility { missing.append("辅助功能") }
-            return missing.joined(separator: "、")
+            // 这两个名字**跟着界面语言走**：它会被插进菜单栏那句
+            // 「权限缺失（…）」/「Missing permissions (…)」里，写死中文的话
+            // 英文界面就会渲染成 `Missing permissions (屏幕录制)`。
+            if !screenRecording { missing.append(L("屏幕录制", "Screen Recording")) }
+            if !accessibility { missing.append(L("辅助功能", "Accessibility")) }
+            return missing.joined(separator: L("、", ", "))
         }
     }
 

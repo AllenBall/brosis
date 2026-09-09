@@ -71,6 +71,13 @@ if [ -z "${MLX_METALLIB:-}" ]; then
   ensure_metal_toolchain || fail "第 1d 步要现编 mlx.metallib，没有 metal 编译器走不下去。"
 fi
 
+# ------------------------------------------------- 0b. 界面文案漏翻检查
+# `L("中文","English")` 的行内写法，编译器只保证**已经包起来**的字面量两种语言都在，
+# 对忘了包的那一句一个字都保证不了——首次全量转换 500 处就漏了 20 处。这道扫描是兜底。
+step "0b. 界面文案漏翻检查"
+env PYTHONDONTWRITEBYTECODE=1 python3 "$APP_SRC/Support/check_ui_strings.py" "$APP_SRC/Sources/brosis" \
+  || fail "界面上还有没包 L() 的中文字面量（见上），英文界面会露中文。"
+
 # ---------------------------------------------------------------- 0. 签名身份
 if [ "${SKIP_SIGN:-0}" != "1" ]; then
   step "0. 确认签名身份"

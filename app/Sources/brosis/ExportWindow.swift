@@ -228,9 +228,10 @@ final class ExportWindowController: NSObject, NSWindowDelegate {
 
     private weak var controller: ExportController?
     private var window: NSWindow?
+    private var registeredLanguageHandler = false
 
     private let directoryField = NSTextField(string: "")
-    private let chooseButton = NSButton(title: L("选择位置…", "Choose location…"), target: nil, action: nil)
+    private let chooseButton = NSButton(title: "", target: nil, action: nil)
     private let rangePopUp = NSPopUpButton(frame: .zero, pullsDown: false)
     private let appsField = NSTextField(string: "")
     private let passphraseField = NSSecureTextField(string: "")
@@ -239,8 +240,8 @@ final class ExportWindowController: NSObject, NSWindowDelegate {
     private let quotaLabel = NSTextField(labelWithString: "")
     private let statusLabel = NSTextField(labelWithString: "")
     private let progressBar = NSProgressIndicator()
-    private let exportButton = NSButton(title: L("开始加密导出", "Start encrypted export"), target: nil, action: nil)
-    private let acknowledgeButton = NSButton(title: L("我已了解，允许按最旧先删", "I understand — allow deleting oldest first"), target: nil, action: nil)
+    private let exportButton = NSButton(title: "", target: nil, action: nil)
+    private let acknowledgeButton = NSButton(title: "", target: nil, action: nil)
 
     private var chosenDirectory: URL?
 
@@ -251,6 +252,16 @@ final class ExportWindowController: NSObject, NSWindowDelegate {
 
     func present() {
         if window == nil { buildWindow() }
+        // 语言换了就把窗口关掉：contentView 是搭窗口时一次性造出来的，
+        // 就地把每个控件的文案换一遍既繁琐又容易漏，重开一次全对。
+        // **谁搭窗口谁登记**——不靠 AppDelegate 点名，那份名单结构上补不齐。
+        if !registeredLanguageHandler {
+            registeredLanguageHandler = true
+            L10n.onLanguageChange { [weak self] in
+                self?.window?.close()
+                self?.window = nil
+            }
+        }
         controller?.refreshQuota()
         reload()
         NSApp.activate(ignoringOtherApps: true)
@@ -260,6 +271,11 @@ final class ExportWindowController: NSObject, NSWindowDelegate {
     // MARK: - 构建
 
     private func buildWindow() {
+        // 标题在**搭窗口时**设，不在属性初始化里——控制器是长命的 lazy var，
+        // 属性只算一次，切语言后关窗重开也换不掉那几个字。
+        chooseButton.title = L("选择位置…", "Choose location…")
+        exportButton.title = L("开始加密导出", "Start encrypted export")
+        acknowledgeButton.title = L("我已了解，允许按最旧先删", "I understand — allow deleting oldest first")
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 640, height: 560),
                               styleMask: [.titled, .closable, .miniaturizable],
                               backing: .buffered, defer: false)
@@ -416,12 +432,12 @@ final class ExportWindowController: NSObject, NSWindowDelegate {
 
     @objc private func startExport(_ sender: Any?) {
         guard let controller, let directory = chosenDirectory else {
-            statusLabel.stringValue = "先选一个保存位置"
+            statusLabel.stringValue = L("先选一个保存位置", "Choose a save location first")
             return
         }
         let passphrase = passphraseField.stringValue
         guard passphrase == confirmField.stringValue else {
-            statusLabel.stringValue = "两次输入的口令不一样"
+            statusLabel.stringValue = L("两次输入的口令不一样", "The two passphrases do not match")
             return
         }
         var request = ExportRequest()
@@ -459,7 +475,7 @@ final class ExportWindowController: NSObject, NSWindowDelegate {
             quotaLabel.stringValue = quota.message
             acknowledgeButton.isHidden = quota.level != .full || quota.acknowledgedAt != nil
         } else {
-            quotaLabel.stringValue = "库没打开（锁定中），看不到存储用量。"
+            quotaLabel.stringValue = L("库没打开（锁定中），看不到存储用量。", "Database not open (locked) — storage usage is unavailable.")
             acknowledgeButton.isHidden = true
         }
 
@@ -472,7 +488,8 @@ final class ExportWindowController: NSObject, NSWindowDelegate {
             progressBar.isHidden = false
             progressBar.isIndeterminate = true
             progressBar.startAnimation(nil)
-            statusLabel.stringValue = "正在导出：已写 \(progress.observations) 条观察、"
+            statusLabel.stringValue = L("正在导出：已写 \(progress.observations) 条观察、",
+                                    "Exporting: \(progress.observations) observations written, ")
                 + "\(progress.blocks) 块、\(progress.bytes) 字节…"
         case .done(let outcome):
             progressBar.stopAnimation(nil)
@@ -481,7 +498,7 @@ final class ExportWindowController: NSObject, NSWindowDelegate {
         case .failed(let message):
             progressBar.stopAnimation(nil)
             progressBar.isHidden = true
-            statusLabel.stringValue = "导出失败：\(message)"
+            statusLabel.stringValue = L("导出失败：\(message)", "Export failed: \(message)")
         }
     }
 

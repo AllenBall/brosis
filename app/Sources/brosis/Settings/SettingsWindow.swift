@@ -12,13 +12,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
 
     private weak var recorder: Recorder?
     private var window: NSWindow?
-
-    /// 界面语言换了就把窗口关掉：contentView 是打开时一次性搭出来的，
-    /// 就地把每个控件的文案换一遍既繁琐又容易漏，重开一次就全对了。
-    func closeForLanguageChange() {
-        window?.close()
-        window = nil
-    }
+    private var registeredLanguageHandler = false
     private var quotaField: NSTextField?
     private var quotaStepper: NSStepper?
     private var usageLabel: NSTextField?
@@ -29,7 +23,6 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     private var intervalField: NSTextField?
     private var vectorsSwitch: NSButton?
     private var strictLockSwitch: NSButton?
-    private var languagePopup: NSPopUpButton?
     private var noteLabel: NSTextField?
     private var lastAction: String?
     /// 最近一次配额检查的结果，只在真查过之后才有值（查一次很贵，见 reload 的注释）。
@@ -47,6 +40,16 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
 
     func present() {
         if window == nil { buildWindow() }
+        // 语言换了就把窗口关掉：contentView 是搭窗口时一次性造出来的，
+        // 就地把每个控件的文案换一遍既繁琐又容易漏，重开一次全对。
+        // **谁搭窗口谁登记**——不靠 AppDelegate 点名，那份名单结构上补不齐。
+        if !registeredLanguageHandler {
+            registeredLanguageHandler = true
+            L10n.onLanguageChange { [weak self] in
+                self?.window?.close()
+                self?.window = nil
+            }
+        }
         reload()
         NSApp.activate(ignoringOtherApps: true)
         window?.makeKeyAndOrderFront(nil)
@@ -149,14 +152,10 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
 
         let language = NSPopUpButton(frame: NSRect(x: 0, y: 0, width: 200,
                                                    height: Metrics.controlHeight))
-        for option in UILanguage.allCases {
-            language.addItem(withTitle: option.displayName)
-            language.lastItem?.representedObject = option.rawValue
-        }
+        for option in UILanguage.allCases { language.addItem(withTitle: option.displayName) }
         language.selectItem(at: UILanguage.allCases.firstIndex(of: L10n.preference) ?? 0)
         language.target = self
         language.action = #selector(languageChanged)
-        languagePopup = language
         layout.row(L("界面语言", "Language"), language, height: Metrics.controlHeight)
         layout.hint(L("跟随系统时按系统语言判断：中文系统用中文，其余用英文。"
                       + "自检与命令行输出始终是中文（面向开发排障）。",
@@ -319,11 +318,13 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         reload()
     }
 
-    /// 换语言：存下来 → 广播 → 把自己也关掉（会连同其它窗口一起重开成新语言）。
-    @objc private func languageChanged() {
-        guard let raw = languagePopup?.selectedItem?.representedObject as? String,
-              let picked = UILanguage(rawValue: raw) else { return }
-        L10n.set(picked)
+    /// 换语言：存下来 → 广播 → 登记过的窗口自己关掉，重开即新语言。
+    /// 直接用 sender 的选中序号取值，与 `PoliciesWindow.globalDefaultChanged` 同一写法——
+    /// 不额外存一个 popup 的 ivar，也不靠 representedObject 再解析一遍 rawValue。
+    @objc private func languageChanged(_ sender: NSPopUpButton) {
+        let index = sender.indexOfSelectedItem
+        guard index >= 0, index < UILanguage.allCases.count else { return }
+        L10n.set(UILanguage.allCases[index])
     }
 
     @objc private func quotaChanged() { applyQuota(quotaField?.doubleValue ?? Settings.quotaGiB) }
@@ -361,8 +362,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
 
     @objc private func strictLockToggled() {
         Settings.strictLock = strictLockSwitch?.state == .on
-        lastAction = L("严格锁屏：", "Strict lock: ")
-                   + (Settings.strictLock ? L("开", "on") : L("关", "off"))
+        lastAction = L("严格锁屏：", "Strict lock: ") + LOnOff(Settings.strictLock)
         reload()
     }
 
@@ -371,15 +371,13 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     @objc private func vectorsToggled() {
         QueryEmbedderService.shared.setVectorsEnabled(vectorsSwitch?.state == .on,
                                                       store: recorder?.withStore { $0 } ?? nil)
-        lastAction = L("向量检索：", "Vector search: ")
-                   + (Settings.vectorsEnabled ? L("开", "on") : L("关", "off"))
+        lastAction = L("向量检索：", "Vector search: ") + LOnOff(Settings.vectorsEnabled)
         reload()
     }
 
     @objc private func autoIndexToggled() {
         Settings.autoIndex = autoIndexSwitch?.state == .on
-        lastAction = L("自动建索引：", "Auto-index: ")
-                   + (Settings.autoIndex ? L("开", "on") : L("关", "off"))
+        lastAction = L("自动建索引：", "Auto-index: ") + LOnOff(Settings.autoIndex)
         reload()
     }
 
