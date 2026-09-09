@@ -25,7 +25,12 @@ KEY_SERVICE="https://sparkle-project.org"   # Sparkle 私钥在钥匙串里的 s
 ED_KEY_FILE=""
 REPO_URL="${BROSIS_REPO_URL:-https://github.com/AllenBall/brosis}"
 DOWNLOAD_PREFIX=""
-MAX_VERSIONS="${MAX_VERSIONS:-5}"
+# **只留最新一版**。`--download-url-prefix` 会把**本次新写**的条目全部指到同一个 tag，
+# 而一次 GitHub Release 只传得了这一版的 DMG——留着老条目就等于在 appcast 里挂
+# 4 个 404 链接（2026-09-09 实测：0.4.0 / 0.3.1 / 0.3.0 / 0.2.9 的 url 全变成了 v0.4.1）。
+# Sparkle 判断"有没有新版"只看最新那条；老条目除了下载失败没有别的用处。
+# 增量包（delta）挂在最新那条 item 下面，不受影响，照常生成、照常要一起上传。
+MAX_VERSIONS="${MAX_VERSIONS:-1}"
 
 step() { printf '\n==> %s\n' "$1"; }
 fail() { printf 'ERROR: %s\n' "$1" >&2; exit 1; }
@@ -124,9 +129,14 @@ echo "下载地址前缀：$DOWNLOAD_PREFIX"
 step "5. 自检"
 # 每个 item 都必须有 edSignature，否则装不上（Sparkle 会拒）。
 ITEMS="$(grep -c '<item>' "$ARCHIVE/appcast.xml" || true)"
+# **按 enclosure 数，不按 item 数**：一个 item 里除了正片还可能挂若干 delta，
+# 每个 delta 也是一条 enclosure、也各有自己的签名。2026-09-09 首次带 delta 发版时，
+# 老写法（item 数 == 签名数）算出「有 -5 个 item 没有 edSignature」这种假失败。
+ENCLOSURES="$(grep -c '<enclosure' "$ARCHIVE/appcast.xml" || true)"
 SIGS="$(grep -c 'sparkle:edSignature' "$ARCHIVE/appcast.xml" || true)"
-echo "item 数 $ITEMS，edSignature 数 $SIGS"
-[ "$ITEMS" = "$SIGS" ] || fail "有 $((ITEMS - SIGS)) 个 item 没有 edSignature"
+echo "item 数 $ITEMS，enclosure 数 $ENCLOSURES，edSignature 数 $SIGS"
+[ "$ENCLOSURES" = "$SIGS" ] \
+  || fail "有 $((ENCLOSURES - SIGS)) 条 enclosure 没有 edSignature（缺签名的下载装不上）"
 grep -o 'url="[^"]*"' "$ARCHIVE/appcast.xml" | sed 's/^/  /'
 
 printf '\n完成：%s\n' "$ARCHIVE/appcast.xml"
