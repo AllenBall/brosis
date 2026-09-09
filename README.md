@@ -231,6 +231,6 @@ Electron 应用需要先设 `AXManualAccessibility` 才暴露无障碍树；一�
 
 ## 许可
 
-**尚未声明许可。** 在仓库加入 LICENSE 之前，默认保留所有权利——你可以阅读代码，但没有被授予使用、修改或再分发的许可。
+[MIT](LICENSE)。
 
 依赖各自的许可另计：SQLCipher（BSD 类）、sqlite-vec（Apache 2.0 / MIT）、mlx-swift（MIT）、Sparkle（MIT）、Qwen3-Embedding 模型权重（Apache 2.0）。
