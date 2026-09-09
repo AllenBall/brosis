@@ -59,7 +59,9 @@ enum OvernightIndexPolicy {
     static func decide(_ input: EmbeddingGateInput, cancelled: Bool) -> OvernightDecision {
         if cancelled { return .stop("cancelled") }
         if !input.modelInstalled { return .stop("model_not_installed") }
-        if input.pendingChunks == 0 { return .stop("complete") }
+        // "没有待办的块"不等于"做完了"：还没分块的文本版本也是活，而分块正是这个任务
+        // 自己在 runEmbeddingJob 里干的（planBatch）。只看块数就会在空库上永远不启动。
+        if !input.hasWork { return .stop("complete") }
         if input.lockPhase != .unlocked { return .stop("locked_" + input.lockPhase.rawValue) }
         if input.paused { return .stop("paused") }
         // serious / critical：真烫了，收工（D27：critical 时锁定状态机自己也会关库）
@@ -331,7 +333,12 @@ final class OvernightIndexJob: @unchecked Sendable {
                           + "\"gpu_seconds\":\(String(format: "%.1f", progress.gpuSeconds)),"
                           + "\"thermal\":\"\(ModelProc.thermalState)\"}")
             }
-            if report.chunksRemaining == 0 { stopReason = "complete"; break loop }
+            // 这一批的块嵌完了，但可能还有没分块的文本版本——下一轮 planBatch 会把它们变成块。
+            // 只有两边都空才是真做完（多查一次库，只在 remaining 归零时发生）。
+            if report.chunksRemaining == 0,
+               scheduler.currentInput(modelsRoot: modelsRoot).unchunkedTextVersions == 0 {
+                stopReason = "complete"; break loop
+            }
             // 一段都没嵌进去（门控在第一批就叫停）：别空转，去 pause 分支等一等。
             if report.chunksEmbedded == 0 {
                 Thread.sleep(forTimeInterval: 5)

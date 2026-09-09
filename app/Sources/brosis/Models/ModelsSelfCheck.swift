@@ -142,6 +142,7 @@ enum ModelsSelfCheck {
             var modelUsable = true
             var running = false
             var pending = 100
+            var unchunked = 0
             var phase: LockPhase = .unlocked
             var paused = false
             var want: String?
@@ -152,6 +153,10 @@ enum ModelsSelfCheck {
             AutoCase(label: "没有可用模型", modelUsable: false, want: "model_not_installed"),
             AutoCase(label: "上一轮还在跑 ⇒ 不叠加", running: true, want: "already_running"),
             AutoCase(label: "没有待办的块", pending: 0, want: "nothing_pending"),
+            // 2026-09-09 的真实故障：库删重建后一个块都没有，而分块只发生在任务内部
+            // （runEmbeddingJob 的 planBatch）⇒ 门说"没活" ⇒ 任务不跑 ⇒ 没人分块 ⇒ 死锁。
+            AutoCase(label: "块空但还有没分块的文本版本 ⇒ 照踢", pending: 0, unchunked: 2195,
+                     want: nil),
             AutoCase(label: "库锁着", phase: .locked, want: "locked_locked"),
             AutoCase(label: "采集暂停", paused: true, want: "paused"),
             // 顺序：开关 > 模型 > 锁 > 暂停 > 在跑 > 待办。锁着时不该报"没待办"。
@@ -161,6 +166,7 @@ enum ModelsSelfCheck {
         for c in autoCases {
             let got = AutoIndexScheduler.decide(enabled: c.enabled, modelUsable: c.modelUsable,
                                                 alreadyRunning: c.running, pendingChunks: c.pending,
+                                                unchunkedTextVersions: c.unchunked,
                                                 lockPhase: c.phase, paused: c.paused)
             if got != c.want {
                 autoFailures.append("\(c.label)→\(got ?? "踢")（期望 \(c.want ?? "踢")）")
@@ -291,6 +297,8 @@ enum ModelsSelfCheck {
         gate("用户没开", { $0.enabledByUser = false }, expect: .skip("disabled_by_user"))
         gate("模型没装", { $0.modelInstalled = false }, expect: .skip("model_not_installed"))
         gate("没有待办", { $0.pendingChunks = 0 }, expect: .skip("nothing_pending"))
+        gate("块空但还有没分块的文本版本 ⇒ 有活",
+             { $0.pendingChunks = 0; $0.unchunkedTextVersions = 2195 }, expect: .run)
         gate("库锁着", { $0.lockPhase = .locked }, expect: .skip("locked_locked"))
         gate("采集暂停（锁屏）", { $0.paused = true }, expect: .skip("paused"))
         gate("在用电池", { $0.onACPower = false }, expect: .skip("on_battery"))

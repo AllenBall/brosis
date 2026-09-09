@@ -4,7 +4,7 @@ import Foundation
 /// 版本与固定标识。bundle id 必须与 Info.plist、LaunchAgent plist 保持一致，
 /// 否则 TCC 授权会作废（报告 3.3）。
 enum BuildInfo {
-    static let version = "0.5.4"
+    static let version = "0.5.5"
     static let bundleIdentifier = "com.brosis.app"
     static let agentPlistName = "com.brosis.agent.plist"
     /// 菜单与自检里打印的阶段名。

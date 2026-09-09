@@ -40,6 +40,18 @@ struct EmbeddingGateInput: Sendable, Equatable {
     var budgetGPUSeconds: Double
     /// 还有没有待办的块。
     var pendingChunks: Int
+    /// 还没分块的文本版本数。**它和 `pendingChunks` 一样是"还有活要干"**。
+    ///
+    /// 分块（`text_versions → chunks`）发生在 `Store.runEmbeddingJob` 里面
+    /// （`options.planBatch`），也就是说**只有任务真的跑起来才会分块**。而三道门以前
+    /// 只看 `pendingChunks == 0` 就判"没活了"，于是空库里形成死锁：
+    /// 没有块 ⇒ 门说没活 ⇒ 任务不跑 ⇒ 没人分块 ⇒ 永远没有块。
+    /// 2026-09-09 库被删重建之后就卡在这里：2195 个文本版本一个都没分块，
+    /// 面板却显示"索引已经是最新的"。默认 0 是为了让既有调用点不用改。
+    var unchunkedTextVersions: Int = 0
+
+    /// 还有没有活要干（分块的活也算）。
+    var hasWork: Bool { pendingChunks > 0 || unchunkedTextVersions > 0 }
 }
 
 /// 判定结果。`.run` 才跑；其余都带一个**机器可读**的原因，事件与自检都按它对。
@@ -69,7 +81,7 @@ enum EmbeddingGatePolicy {
     static func decide(_ input: EmbeddingGateInput) -> EmbeddingGateDecision {
         if !input.enabledByUser { return .skip("disabled_by_user") }
         if !input.modelInstalled { return .skip("model_not_installed") }
-        if input.pendingChunks == 0 { return .skip("nothing_pending") }
+        if !input.hasWork { return .skip("nothing_pending") }
         if input.lockPhase != .unlocked { return .skip("locked_" + input.lockPhase.rawValue) }
         if input.paused { return .skip("paused") }
         if !input.onACPower { return .skip("on_battery") }
@@ -238,9 +250,12 @@ final class EmbeddingScheduler: @unchecked Sendable {
     func currentInput(modelsRoot: URL?) -> EmbeddingGateInput {
         let snapshot = lockSnapshot?() ?? LockSnapshot()
         let installed = currentModelID(modelsRoot: modelsRoot) != nil
-        let pending = recorder?.withStore { store -> Int in
-            (try? store.vectorStatus().pendingChunks) ?? 0
-        } ?? 0
+        // 一次 vectorStatus() 同时拿"待办块"和"没分块的文本版本"——两个数来自同一张快照，
+        // 分开查会在跑着任务时读到互相矛盾的一对。
+        let work = recorder?.withStore { store -> (pending: Int, unchunked: Int) in
+            guard let status = try? store.vectorStatus() else { return (0, 0) }
+            return (status.pendingChunks, status.unchunkedTextVersions)
+        } ?? (pending: 0, unchunked: 0)
         let ledger = GPUBudgetLedger()
         return EmbeddingGateInput(
             onACPower: EmbeddingEnvironment.onACPower(),
@@ -252,7 +267,8 @@ final class EmbeddingScheduler: @unchecked Sendable {
             enabledByUser: isEnabled,
             usedGPUSecondsToday: ledger.usedToday(),
             budgetGPUSeconds: ledger.budgetSeconds,
-            pendingChunks: pending)
+            pendingChunks: work.pending,
+            unchunkedTextVersions: work.unchunked)
     }
 
     private func tick() {

@@ -92,14 +92,17 @@ final class AutoIndexScheduler: @unchecked Sendable {
     }
 
     /// 一次判定。返回值只用于自检与状态行。
+    /// `unchunkedTextVersions`：还没分块的文本版本也算"有活"。分块只发生在任务内部
+    /// （`runEmbeddingJob` 的 planBatch），所以只看块数会死锁——空库里永远不启动。
     static func decide(enabled: Bool, modelUsable: Bool, alreadyRunning: Bool,
-                       pendingChunks: Int, lockPhase: LockPhase, paused: Bool) -> String? {
+                       pendingChunks: Int, unchunkedTextVersions: Int = 0,
+                       lockPhase: LockPhase, paused: Bool) -> String? {
         if !enabled { return "auto_disabled" }
         if !modelUsable { return "model_not_installed" }
         if lockPhase != .unlocked { return "locked_" + lockPhase.rawValue }
         if paused { return "paused" }
         if alreadyRunning { return "already_running" }
-        if pendingChunks == 0 { return "nothing_pending" }
+        if pendingChunks == 0 && unchunkedTextVersions == 0 { return "nothing_pending" }
         return nil
     }
 
@@ -118,6 +121,7 @@ final class AutoIndexScheduler: @unchecked Sendable {
                                  modelUsable: input.modelInstalled,
                                  alreadyRunning: OvernightIndexJob.shared.isRunning,
                                  pendingChunks: input.pendingChunks,
+                                 unchunkedTextVersions: input.unchunkedTextVersions,
                                  lockPhase: input.lockPhase,
                                  paused: input.paused)
         if let reason {
@@ -129,6 +133,7 @@ final class AutoIndexScheduler: @unchecked Sendable {
             try $0.recordRuntimeEvent(
                 kind: "auto_index_started",
                 detail: "{\"pending_chunks\":\(input.pendingChunks),"
+                      + "\"unchunked_text_versions\":\(input.unchunkedTextVersions),"
                       + "\"interval_minutes\":\(Int(Self.intervalMinutes))}")
         }
         // 跑到待办清空为止；接电与温度的门控在 OvernightIndexPolicy 里。
