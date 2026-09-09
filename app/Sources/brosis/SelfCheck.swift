@@ -142,6 +142,34 @@ enum SelfCheck {
                   + "（剩的应当只有本进程正在用的那几个）；"
                   + "removePersistentDomain 只清值不删文件，这台机器一度攒到 582 个空 plist")
 
+            // —— 权限巡检（e 批 ⑤）——
+            // 被动路径（截图失败 → 弹引导 → 授权后重新武装）本来就有；这条补的是
+            // "撤销发生在机器空闲时没人发现"。首次巡检必须**不动作**，否则启动时会弹两次。
+            typealias PS = Permissions.Snapshot
+            let bothOn = PS(screenRecording: true, accessibility: true)
+            let screenOff = PS(screenRecording: false, accessibility: true)
+            let bothOff = PS(screenRecording: false, accessibility: false)
+            let permCases: [(String, PS?, PS, PermissionWatcher.Action)] = [
+                ("首次巡检不动作（启动路径已经弹过引导）", nil, bothOff, .none),
+                ("月度撤销屏幕录制 ⇒ 提示", bothOn, screenOff,
+                 .lost(description: screenOff.missingDescription)),
+                ("两项都被撤 ⇒ 提示", bothOn, bothOff,
+                 .lost(description: bothOff.missingDescription)),
+                ("用户补回授权 ⇒ 重新武装", screenOff, bothOn, .regained),
+                ("一直正常 ⇒ 不动作", bothOn, bothOn, .none),
+                ("一直缺 ⇒ 不重复打扰", screenOff, screenOff, .none),
+            ]
+            var permBad: [String] = []
+            for (label, previous, current, want) in permCases {
+                let got = PermissionWatcher.decide(previous: previous, current: current)
+                if got != want { permBad.append(label) }
+            }
+            check("权限巡检判定 \(permCases.count) 条（月度再授权 / 补回 / 不重复打扰）",
+                  permBad.isEmpty,
+                  permBad.isEmpty
+                    ? "每 \(Int(PermissionWatcher.interval / 60)) 分钟比一次，只在状态**翻转**时动作"
+                    : permBad.joined(separator: " "))
+
             let suiteName = SelfCheckDefaults.name("policy")
             let policyDefaults = UserDefaults(suiteName: suiteName) ?? .standard
             defer { SelfCheckDefaults.discard(policyDefaults, name: suiteName) }

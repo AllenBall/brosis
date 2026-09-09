@@ -29,6 +29,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// 语言变更观察者的 token，`applicationWillTerminate` 里撤掉。
     private var languageObserver: NSObjectProtocol?
 
+    /// 权限巡检（e 批 ⑤）：定时器 + 上一次看到的状态。判定在 `PermissionWatcher.decide`。
+    private var permissionTimer: Timer?
+    private var lastPermissionSnapshot: Permissions.Snapshot?
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         // 必须在任何 AX 读取之前装上进程级全局 0.5 s 超时（见 AXSupport 的说明）。
         // 这一步不弹窗、不需要权限。
@@ -40,6 +44,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             forName: NSLocale.currentLocaleDidChangeNotification, object: nil, queue: nil) { _ in
             L10n.invalidate()
         }
+
+        startPermissionWatch()
 
         let lock = LockController(recorder: recorder)
         self.lock = lock
@@ -261,6 +267,39 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         guard let capture, capture.currentDisplayID != displayID else { return }
         capture.setDisplay(displayID)
         capture.requestCapture(reason: "display_changed")
+    }
+
+    /// 每 10 分钟比一次权限。macOS 大约每月撤一次屏幕录制授权，而撤销发生在机器空闲时
+    /// 不会触发任何截图失败——没有这条巡检，菜单会一直显示"录制中"却什么都没记下来。
+    private func startPermissionWatch() {
+        let timer = Timer(timeInterval: PermissionWatcher.interval, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.checkPermissionDrift() }
+        }
+        timer.tolerance = PermissionWatcher.tolerance
+        RunLoop.main.add(timer, forMode: .common)
+        permissionTimer = timer
+        // 先记一次基线，但**不产生动作**：启动路径已经查过权限并弹过引导了。
+        lastPermissionSnapshot = Permissions.snapshot()
+    }
+
+    private func checkPermissionDrift() {
+        let current = Permissions.snapshot()
+        let action = PermissionWatcher.decide(previous: lastPermissionSnapshot, current: current)
+        lastPermissionSnapshot = current
+        switch action {
+        case .none:
+            return
+        case .lost(let description):
+            recorder.logEvent(kind: "permission_revoked_detected",
+                              detail: "missing=\(description) source=watcher")
+            // 走和采集失败同一条路：解除武装由 CaptureController 自己在下次尝试时做，
+            // 这里负责让用户看见。
+            promptForPermissions(reason: "permission_revoked_detected")
+        case .regained:
+            recorder.logEvent(kind: "permission_regained_detected", detail: "source=watcher")
+            permissionsBecameComplete(source: "watcher")
+        }
+        refreshMenu()
     }
 
     private func handleCaptureEvent(_ event: CaptureEvent) {
