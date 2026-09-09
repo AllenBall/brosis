@@ -89,6 +89,55 @@ enum AdapterRegistry {
              + "发送者与时间取自行内子元素，行结构变了就退化成整行文本。",
         limits: AX.BFSLimits(maxNodes: 1_200, maxDepth: 14))
 
+    // MARK: - 飞书会议（**另一个 app**，AX 是死的）
+
+    /// 飞书会议不是飞书的一个窗口，是**另一个 app**：bundle id
+    /// `com.bytedance.macos.feishu.iron`，进程是 Lark Framework 里的 `Lark Helper (Iron).app`。
+    /// 所以上面 `feishu` 那条规则的 bundleIDs 根本匹配不到它。
+    ///
+    /// 它落到哪儿了：`Lark Helper (Iron).app` 里没有 `Contents/Frameworks`，通用 Chromium
+    /// 检测的结构信号抓不到，人工清单里也没有它 ⇒ 拿到的是 `generic`，而 `generic` 的
+    /// `ocrFallback` 是 **false** ⇒ **一次 OCR 都不会排**。2026-09-09 库里 17:33–17:37 的
+    /// 18 条飞书会议观察全部 0 字符，就是这条路走出来的。
+    ///
+    /// 为什么直接 `.ocr`，而不是"BFS 读不到再回退"：`--ax-probe` 在**会议进行中**实测
+    /// （0.5.0，窗口 1470×868，pid 97873）——整棵树**只有 2 个节点**（AXWindow + AXGroup），
+    /// 0 字符，**没有 AXWebArea**；`AXManualAccessibility` 被拒；t=0/100/250/500/1000/2000/4000 ms
+    /// 七个取样点全是 0；maxDepth 8→60、clipToViewport 开关，结果都不变。
+    /// AX 通道在这个应用上是**死的**，不是"读得太早"（那是 Claude 桌面版那次的结论，别照搬）。
+    /// 所以走微信那条路：直接视口 OCR，不浪费一次 BFS。
+    ///
+    /// 为什么整窗一块、不切区域：会议窗口的布局随状态大改（共享屏幕 / 宫格 / 演讲者 /
+    /// 聊天面板开合 / 字幕条升降），定点或比例切都会在换布局时切到空处；而每多一个区域
+    /// 就多一次 Vision 请求（限流是**按区域**算的），整窗一块反而最省。
+    ///
+    /// 代价（说清楚）：会议窗口有实时画面，dHash 那道"画面没变就跳过"基本拦不住，
+    /// 于是在会议窗口位于前台期间会按最小间隔跑满 —— 默认 5 s 一次整窗 accurate OCR，
+    /// 一小时约 720 次 × 约 169 ms ≈ 2 分钟 Vision 时间。嫌多就调间隔，不用重编译：
+    /// `defaults write com.brosis.app capture.ocrMinInterval -float 15`
+    static let feishuMeeting = AdapterRule(
+        id: "feishu_meeting",
+        name: "飞书会议",
+        bundleIDs: [
+            // 实测的那个（国内版飞书 7.x）。
+            "com.bytedance.macos.feishu.iron",
+            // 另外两个是按同一命名规律补的：`feishu` 规则里列了三个包名变体，
+            // 会议子 app 就是在各自后面加 `.iron`。没有这两台机器可验，先放着；
+            // 命中不了的后果只是退回今天的行为（0 字符），不会更差。
+            "com.electron.lark.iron", "com.larksuite.larkApp.iron",
+        ],
+        electron: false,   // 实测不认 AXManualAccessibility，标 true 只会每次白设一遍
+        regions: [
+            RegionRule(name: "window", kind: .body, locator: .wholeWindow,
+                       read: .ocr, ocrFallback: false, required: true, clipToViewport: true),
+        ],
+        chatLayout: nil,
+        notes: "独立 app（Lark Helper (Iron)），AX 树实测只有 2 个节点、0 字符、无 AXWebArea，"
+             + "所以直接整窗视口 OCR。能记到的是屏幕上**显示出来的字**："
+             + "共享屏幕里的内容、字幕、会中聊天、参会人名、会议标题；"
+             + "语音本身不记，没显示在屏幕上的也不记。",
+        limits: AX.BFSLimits(maxNodes: 200, maxDepth: 6))
+
     // MARK: - 微信（原生但 AX 空）
 
     /// 微信左侧「竖排功能栏 + 会话列表」的总宽（点）。默认 340 ≈ 功能栏 60 + 会话列表 280。
@@ -220,7 +269,7 @@ enum AdapterRegistry {
     }()
 
     /// 首批规则（有序，进 README 与结果文件的规则表）。
-    static let all: [AdapterRule] = [safari, claudeDesktop, feishu, wechat]
+    static let all: [AdapterRule] = [safari, claudeDesktop, feishu, feishuMeeting, wechat]
 
     /// bundle id → 规则；查不到就是兜底规则。
     /// 没有专属规则时兜底走哪一条，由**这里**决定，不再让每个调用点自己 derive——

@@ -1045,6 +1045,17 @@ enum SelfCheck {
                 routingOK = false
             }
         }
+        // 飞书会议是**另一个 app**，不是飞书的窗口。上面那个循环只保证"列进规则的包名能命中
+        // 自己"，保证不了"这个包名有没有被列进去"——而 2026-09-09 的故障恰恰是没列：
+        // 它一路落到 generic，而 generic 的 ocrFallback 是 false，于是一次 OCR 都不排，
+        // 库里 18 条飞书会议观察全是 0 字符。这条断言钉的就是"别再漏"。
+        let meetingRule = AdapterRegistry.rule(for: "com.bytedance.macos.feishu.iron")
+        let meetingDeclaresOCR = meetingRule.regions.contains { $0.read.declaresOCR }
+        check("飞书会议（.iron）单独命中会议规则，且真的会排 OCR（AX 实测 2 节点 0 字符）",
+              meetingRule.id == AdapterRegistry.feishuMeeting.id
+                && meetingRule.id != AdapterRegistry.feishu.id && meetingDeclaresOCR,
+              "\(meetingRule.id)，声明 OCR=\(meetingDeclaresOCR)")
+
         let fallbackRule = AdapterRegistry.rule(for: "com.apple.finder")
         check("适配规则路由：\(AdapterRegistry.all.count) 条首批规则 + 兜底",
               routingOK && fallbackRule.bundleIDs.isEmpty
