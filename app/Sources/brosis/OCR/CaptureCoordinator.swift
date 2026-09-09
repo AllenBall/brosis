@@ -217,6 +217,12 @@ final class CaptureCoordinator: @unchecked Sendable {
             guard context.bundleID == frontmost else {
                 self.context = nil
                 stats.ocrStaleContext += 1
+                if !context.ocrRequests.isEmpty {
+                    BrosisLog.capture.notice(
+                        """
+                        丢帧：上下文是 \(context.bundleID, privacy: .public)，                        这一帧的前台是 \(frontmost, privacy: .public)，                        \(context.ocrRequests.count, privacy: .public) 个 OCR 请求作废
+                        """)
+                }
                 return nil
             }
             guard !context.ocrRequests.isEmpty || auditDue else { return nil }
@@ -394,6 +400,16 @@ final class CaptureCoordinator: @unchecked Sendable {
                 region: "ocr:\(pending.ruleID).\(request.regionName)",
                 confidence: result.meanConfidence,
                 note: result.note(rect: rect)))
+        }
+
+        if fragments.isEmpty, !pending.ocrRequests.isEmpty {
+            // 本来该出字却一个字都没出：把每一种放弃的**当前累计值**打出来。
+            // 只有这一行能区分「没跑」和「跑了但是空的」——两者在库里长得一模一样。
+            let snapshot = lock.withLock { stats }
+            BrosisLog.capture.notice(
+                """
+                没出字：\(pending.bundleID, privacy: .public) 规则 \(pending.ruleID, privacy: .public)，                请求 \(pending.ocrRequests.count, privacy: .public) 个、实跑 \(regionsRun, privacy: .public) 个、                裁剪或识别落空 \(missingRegions, privacy: .public) 个，gated=\(gated, privacy: .public)；                累计 限流 \(snapshot.ocrRateLimited, privacy: .public)、                画面没变跳过 \(snapshot.ocrGatedUnchanged, privacy: .public)、                认出来是空 \(snapshot.ocrEmpty, privacy: .public)、                文本没变 \(snapshot.ocrUnchanged, privacy: .public)、                失败 \(snapshot.ocrFailures, privacy: .public)、                上下文过期 \(snapshot.ocrStaleContext, privacy: .public)
+                """)
         }
 
         if !fragments.isEmpty {

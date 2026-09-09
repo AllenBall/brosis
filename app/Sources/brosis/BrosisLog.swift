@@ -17,4 +17,12 @@ enum BrosisLog {
     static let lifecycle = Logger(subsystem: subsystem, category: "lifecycle")
     /// 锁定状态机与开库结果。
     static let lock = Logger(subsystem: subsystem, category: "lock")
+    /// 截图 → OCR 这条通路**为什么没出字**。
+    ///
+    /// 2026-09-09 加的，因为排查「飞书会议记不到内容」时发现：协调者早就把每一种放弃
+    /// 都数进了 `stats`（上下文过期 / 限流 / 画面没变 / 裁剪落空 / 认出来是空），
+    /// 可这些数**在跑着的 app 里一个都看不到**——自检里那份是新造的协调者，菜单里只有
+    /// 截图张数。于是"OCR 请求排了但没出字"这件事只能靠读代码猜，猜了一轮全错。
+    /// 这里只记决策与计数，**不记任何被采集的内容**（硬约束：正文不进日志）。
+    static let capture = Logger(subsystem: subsystem, category: "capture")
 }
