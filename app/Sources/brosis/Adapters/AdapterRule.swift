@@ -129,6 +129,7 @@ enum RegionKind: String, Sendable {
 
 /// 一个正文区域的规则。
 struct RegionRule: Sendable {
+
     /// 区域名，进 `occurrences.region` 的前缀之后那一截（`adapter:feishu.message_list`）。
     var name: String
     var kind: RegionKind
@@ -153,6 +154,15 @@ struct RegionRule: Sendable {
             + (ocrFallback ? " ocr_fallback=yes" : "")
             + (pane.map { " pane=\($0.rawValue)" } ?? "")
     }
+
+    /// 定位器命中多个节点时，挑**内容最多**的那个，而不是第一个。
+    ///
+    /// 为什么需要（2026-09-09 实测 Claude 桌面版）：一个 Electron 窗口里有好几个
+    /// `AXWebArea`——第一个是外壳 `file://…/index.html`（子树 2 个节点、0 字符），
+    /// 真正的会话在第二个 `https://claude.ai/…`（687 个节点、115 个 AXStaticText、
+    /// 2832 字符）。规则取第一个匹配，于是永远落在空壳上、读出 0 字符 →
+    /// 记成 unavailable → 掉进 OCR 回退。这就是「不可用」占 85% 的主因。
+    var preferRichestMatch = false
 }
 
 /// 三栏布局量不到边界时的兜底值（点，从窗口边缘算）。

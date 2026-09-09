@@ -560,6 +560,48 @@ enum SelfCheck {
                   completenessBad.isEmpty,
                   completenessBad.isEmpty ? "失活记 excluded，历史行不改写"
                                           : completenessBad.joined(separator: " "))
+            // —— 同角色多候选时挑内容最多的那个（Electron 多 AXWebArea）——
+            // 造一棵和 Claude 桌面版实测形态一样的树：外壳 WebArea 空、第二个才有正文。
+            let shellArea = SyntheticAXNode(role: "AXWebArea", kids: [
+                SyntheticAXNode(role: "AXGroup"),
+            ])
+            let realArea = SyntheticAXNode(role: "AXWebArea", kids: [
+                SyntheticAXNode(role: "AXGroup", kids: [
+                    SyntheticAXNode(role: "AXStaticText", value: "第一条消息，足够长以便超过阈值"),
+                    SyntheticAXNode(role: "AXStaticText", value: "第二条消息，同样有实际内容在里面"),
+                ]),
+            ])
+            let fakeWindow = SyntheticAXNode(role: "AXWindow", kids: [shellArea, realArea])
+            var richBudget = AdapterEngine.Budget(
+                limits: AX.BFSLimits(maxNodes: 2_000, maxDepth: 20), maxFrameProbes: 0)
+            let firstMatch = AdapterEngine.find(.role("AXWebArea"), from: fakeWindow,
+                                                budget: &richBudget)
+            var richBudget2 = AdapterEngine.Budget(
+                limits: AX.BFSLimits(maxNodes: 2_000, maxDepth: 20), maxFrameProbes: 0)
+            let richest = AdapterEngine.findRichest(.role("AXWebArea"), from: fakeWindow,
+                                                    budget: &richBudget2)
+            // find 取到的是空壳（现象就是读出 0 字符），findRichest 必须绕开它。
+            check("多个 AXWebArea 时挑内容最多的那个（Claude 空壳 WebArea 的坑）",
+                  firstMatch?.children.first?.children.isEmpty == true
+                    && richest?.children.first?.children.count == 2,
+                  "第一个匹配的子树 \(firstMatch?.children.first?.children.count ?? -1) 个节点，"
+                  + "挑出来的 \(richest?.children.first?.children.count ?? -1) 个")
+            // 只有一个候选时不该白跑估算。
+            var soloBudget = AdapterEngine.Budget(
+                limits: AX.BFSLimits(maxNodes: 2_000, maxDepth: 20), maxFrameProbes: 0)
+            let solo = AdapterEngine.findRichest(
+                .role("AXWebArea"),
+                from: SyntheticAXNode(role: "AXWindow", kids: [realArea]), budget: &soloBudget)
+            check("只有一个候选时直接返回，不做估算", solo != nil, "命中")
+
+            // —— 文本还可能挂在 AXTitle 上（此前只看 AXValue / AXDescription）——
+            let titleOnly = SyntheticAXNode(role: "AXStaticText", title: "只有标题没有值")
+            let descOnly = SyntheticAXNode(role: "AXStaticText", descriptionText: "只有描述")
+            check("正文取值顺序 AXValue → AXDescription → AXTitle",
+                  titleOnly.visibleText == "只有标题没有值" && descOnly.visibleText == "只有描述"
+                    && AX.textRoles.contains("AXHeading"),
+                  "AXTitle 兜底可用，AXHeading 已计入文本角色")
+
             let plan = try uiStore.appObservationStatsPlan().joined(separator: " | ")
             check("清单统计走 idx_obs_live 部分索引", plan.contains("idx_obs_live"), plan)
 

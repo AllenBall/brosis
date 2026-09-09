@@ -162,7 +162,9 @@ enum AdapterEngine {
                 located = window
                 result.rect = windowFrame
             default:
-                located = find(region.locator, from: window, budget: &budget)
+                located = region.preferRichestMatch
+                    ? findRichest(region.locator, from: window, budget: &budget)
+                    : find(region.locator, from: window, budget: &budget)
                 result.rect = located.flatMap { probeFrame($0, budget: &budget) } ?? windowFrame
             }
             result.located = located != nil
@@ -330,6 +332,63 @@ enum AdapterEngine {
             }
         }
         return nil
+    }
+
+    /// 找**内容最多**的那个命中节点（`preferRichestMatch` 的实现）。
+    ///
+    /// 一个 Electron 窗口常有多个 `AXWebArea`：外壳一个、真正的应用一个、内嵌预览再一个。
+    /// 取第一个就会稳定落在空壳上（实测 Claude 桌面版：外壳子树 2 个节点、0 字符）。
+    ///
+    /// 代价控制：候选最多 `maxCandidates` 个；每个候选只用 `weightBudget` 个节点粗估字数；
+    /// 一旦某个候选估出的字数超过 `goodEnough` 就不再往下比——绝大多数情况第一个有内容的
+    /// 就是要找的那个，不必把所有候选都走一遍。只有一个候选时完全不估。
+    static func findRichest(_ locator: ElementLocator, from window: any AXNodeSource,
+                            budget: inout Budget,
+                            maxCandidates: Int = 4, weightBudget: Int = 250,
+                            goodEnough: Int = 200) -> (any AXNodeSource)? {
+        var candidates: [any AXNodeSource] = []
+        var queue: [(any AXNodeSource, Int)] = [(window, 0)]
+        while !queue.isEmpty, candidates.count < maxCandidates {
+            let (node, depth) = queue.removeFirst()
+            guard budget.visit() else { break }
+            if matches(locator, node) {
+                // 命中的节点自己就是候选，不再往它里面找同类（嵌套 iframe 另算）。
+                candidates.append(node)
+                continue
+            }
+            if depth < budget.limits.maxDepth {
+                for child in node.children { queue.append((child, depth + 1)) }
+            } else {
+                budget.reachedDepthLimit = true
+            }
+        }
+        guard candidates.count > 1 else { return candidates.first }
+        var best: (node: any AXNodeSource, weight: Int)?
+        for candidate in candidates {
+            let weight = textWeight(of: candidate, budget: &budget, maxNodes: weightBudget)
+            if best == nil || weight > best!.weight { best = (candidate, weight) }
+            if weight >= goodEnough { break }
+        }
+        return best?.node
+    }
+
+    /// 粗估一棵子树里有多少字，只用来在同角色候选之间挑一个。**不是真正的读取**：
+    /// 不裁视口、不去重、不管字符上限，走的节点也计入同一份预算。
+    private static func textWeight(of root: any AXNodeSource, budget: inout Budget,
+                                   maxNodes: Int) -> Int {
+        var total = 0
+        var seen = 0
+        var queue: [any AXNodeSource] = [root]
+        while !queue.isEmpty, seen < maxNodes {
+            let node = queue.removeFirst()
+            seen += 1
+            guard budget.visit() else { break }
+            if textRoles.contains(node.role), let text = node.visibleText {
+                total += text.count
+            }
+            queue.append(contentsOf: node.children)
+        }
+        return total
     }
 
     private static func descend(_ path: [String], from window: any AXNodeSource,

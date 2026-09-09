@@ -49,10 +49,16 @@ enum AdapterRegistry {
         electron: true,
         regions: [
             RegionRule(name: "conversation", kind: .body, locator: .role("AXWebArea"),
-                       read: .axSubtree, ocrFallback: true, required: true, clipToViewport: true),
+                       read: .axSubtree, ocrFallback: true, required: true, clipToViewport: true,
+                       // 窗口里有三个 AXWebArea：外壳 file://（2 节点 0 字）、会话
+                       // https://claude.ai/…（687 节点 2832 字）、内嵌预览 localhost（106 节点）。
+                       // 取第一个就永远是空壳，必须挑内容最多的那个。
+                       preferRichestMatch: true),
         ],
         chatLayout: nil,
-        limits: AX.BFSLimits(maxNodes: 1_200, maxDepth: 14),
+        // 实测会话那棵子树 687 个节点，加上定位与挑选的开销，1200 太紧（会在读到一半时
+        // 耗光预算、把 completeness 压成 partial）。2026-09-09 放到 3000。
+        limits: AX.BFSLimits(maxNodes: 3_000, maxDepth: 30),
         notes: "Electron，必须先设 AXManualAccessibility。M0 实测未设时 AX 正文为 0；"
              + "设上之后若仍读不到 AXWebArea 就整窗口视口 OCR。代码块用的是等宽小字，"
              + "OCR 回退时按 D24 不降采样；折叠起来的长回复只记展开部分。")

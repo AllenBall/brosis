@@ -47,6 +47,27 @@ final class EventSkeleton {
     private var lastFingerprint: String?
     private var lastElementScanAt: Double = 0
     private var throttledElementNotifications = 0
+
+    // MARK: - Chromium 异步建树的重扫
+    //
+    // 设了 `AXManualAccessibility` 之后 Chromium 才开始把渲染进程的无障碍树推上来，
+    // 这是异步的，而且**比传闻慢得多**：2026-09-09 实测 Claude 桌面版，同一个进程里
+    // 连读 4 秒都只有 16 个节点，几次探测之后才涨到几千个（别人的 issue 说等 200 ms）。
+    // 所以第一次读到空树时不能就此认命，隔一会儿再读一次。
+    //
+    // 花销由两件事兜住：① 只对 Chromium 系应用重扫；② 一个进程只要**成功读到过文本**
+    // 就永久标记为"已热"，之后再也不重扫（树建起来就不会退回去）；
+    // ③ 每个进程最多重扫 `maxAXRetries` 次。
+
+    /// 曾经读到过正文的进程：树已经建好了，不必再重扫。
+    private var axWarmedPIDs = Set<pid_t>()
+    /// 已经排了重扫的进程，避免同一个进程排一堆。
+    private var pendingAXRetryPIDs = Set<pid_t>()
+    /// 每个进程已经重扫过几次。
+    private var axRetryCounts: [pid_t: Int] = [:]
+
+    static let axRetryDelays: [Double] = [1.5, 5.0]
+    static var maxAXRetries: Int { axRetryDelays.count }
     /// 每个 bundle id 命中 BFS 限额的次数，用来控制 `ax_bfs_limit_hit` 的写入频次。
     private var bfsLimitHits: [String: Int] = [:]
     /// 累计脱敏命中数，按类型分。`stop()` 时汇总写一条事件。
@@ -351,6 +372,41 @@ final class EventSkeleton {
         return .unavailable
     }
 
+    /// 记下这次 AX 读到没读到东西；读到空树且这个应用是 Chromium 系时排一次重扫。
+    ///
+    /// 重扫**会写一条新的观察**，这是有意的：它是一次真正的新采样，
+    /// 前面那条空的仍然如实记成 unavailable，不做追改。
+    private func noteAXOutcome(app: NSRunningApplication, pid: pid_t,
+                               trigger: ObservationTrigger, chars: Int) {
+        guard chars == 0 else {
+            // 读到了 → 这个进程的树已经热了，撤掉所有重扫状态。
+            axWarmedPIDs.insert(pid)
+            pendingAXRetryPIDs.remove(pid)
+            axRetryCounts[pid] = nil
+            return
+        }
+        guard !axWarmedPIDs.contains(pid), !pendingAXRetryPIDs.contains(pid) else { return }
+        let detection = AX.chromiumDetection(bundleID: app.bundleIdentifier,
+                                             bundleURL: app.bundleURL).detection
+        guard detection != .notChromium else { return }
+        let attempt = axRetryCounts[pid] ?? 0
+        guard attempt < Self.maxAXRetries else { return }
+        axRetryCounts[pid] = attempt + 1
+        pendingAXRetryPIDs.insert(pid)
+        let delay = Self.axRetryDelays[attempt]
+        recorder.logEvent(kind: "ax_empty_retry_scheduled",
+                          detail: "bundle=\(app.bundleIdentifier ?? "?") 第 \(attempt + 1) 次"
+                                + "，\(delay) s 后重扫")
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+            guard let self else { return }
+            self.pendingAXRetryPIDs.remove(pid)
+            // 应用已经退了、或者用户早就切走了就别补了：补出来的是别人的窗口。
+            guard !app.isTerminated,
+                  NSWorkspace.shared.frontmostApplication?.processIdentifier == pid else { return }
+            self.record(app: app, trigger: trigger, collectText: true)
+        }
+    }
+
     // MARK: - 写观察记录
 
     private func record(app: NSRunningApplication, trigger: ObservationTrigger, collectText: Bool) {
@@ -422,6 +478,7 @@ final class EventSkeleton {
             completeness = scan.completeness
             captureMethod = scan.captureMethod
             visibleRange = scan.visibleRange
+            noteAXOutcome(app: app, pid: pid, trigger: trigger, chars: scan.totalChars)
             if scan.truncated || scan.regions.contains(where: { $0.truncated }) {
                 noteAdapterLimitHit(bundleID: app.bundleIdentifier, scan: scan)
             }

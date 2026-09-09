@@ -334,7 +334,11 @@ enum AX {
     /// **M1 起正文本身也要入库**（`text_versions` / `occurrences`），不再只留统计。
     /// completeness 仍是占位规则：非空 = partial，空 = unavailable
     /// （评审 F5：AX 非空不等于正文完整，真正的 complete 判定要等 E5 的适配规则与 OCR 对照）。
-    static let textRoles = ["AXTextArea", "AXTextField", "AXStaticText", "AXWebArea"]
+    /// 算作"带正文"的角色。
+    ///
+    /// `AXHeading` 是 2026-09-09 加的：Chromium 把网页里的标题层级映射成这个角色，
+    /// 而聊天 / 文档界面的分节标题正是判断"这段在讲什么"的关键，漏掉它等于把目录扔了。
+    static let textRoles = ["AXTextArea", "AXTextField", "AXStaticText", "AXWebArea", "AXHeading"]
 
     /// 单个角色一次遍历最多留多少字符。
     ///

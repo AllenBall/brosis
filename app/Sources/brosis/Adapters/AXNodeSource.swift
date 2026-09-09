@@ -37,11 +37,16 @@ protocol AXNodeSource {
 
 extension AXNodeSource {
 
-    /// 这个节点自带的可见文字：`kAXValue` 优先，其次 `kAXDescription`。
+    /// 这个节点自带的可见文字：`kAXValue` 优先，其次 `kAXDescription`，最后 `kAXTitle`。
     /// 与 `AX.textScan` 的取值顺序一致，换掉实现不改口径。
+    ///
+    /// 补上 `kAXTitle`（2026-09-09）：Claude 桌面版实测一棵树里 AXValue 3274 字符、
+    /// AXDescription 2295 字符、**AXTitle 1644 字符**，最后这份此前直接丢掉。
+    /// Chromium 把按钮标签、标题这类可读文字放在 AXTitle 上，它们是正文的一部分。
     var visibleText: String? {
         if let value, !value.isEmpty { return value }
         if let descriptionText, !descriptionText.isEmpty { return descriptionText }
+        if let title, !title.isEmpty { return title }
         return nil
     }
 
