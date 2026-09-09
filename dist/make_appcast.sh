@@ -152,6 +152,17 @@ for url in $(grep -oE 'url="[^"]*"' "$ARCHIVE/appcast.xml" | sed 's/url="//; s/"
   [ -f "$ARCHIVE/$name" ] || { printf 'ERROR: 归档里没有这个文件：%s\n' "$name" >&2; BAD_URL=1; }
 done
 [ "$BAD_URL" = 0 ] || fail "appcast 里有指不到的下载链接（见上），发出去就是 404。"
+
+# **条目版本必须等于 tag 版本。**
+# 2026-09-09 差点发错一次：0.4.8 的 build_dmg 在装订那步失败退出，DMG 没被复制进归档，
+# 于是归档里最新的还是 0.4.7，appcast 就把 0.4.7 那条挂到了 v0.4.8 的 tag 下。
+# 上面那条 url 校验拦不住——它只验"文件在归档里"，而 0.4.7 的 DMG 确实在。
+ITEM_VERSION="$(grep -oE '<sparkle:shortVersionString>[^<]+' "$ARCHIVE/appcast.xml" \
+  | head -1 | sed 's/.*>//')"
+[ "$ITEM_VERSION" = "$VERSION" ] \
+  || fail "appcast 里的条目是 $ITEM_VERSION，而这次要发的是 $VERSION。
+      多半是 build_dmg.sh 没跑完（DMG 没进归档目录 $ARCHIVE）。
+      先确认 $ARCHIVE/brosis-$VERSION.dmg 在不在，再重跑这个脚本。"
 grep -o 'url="[^"]*"' "$ARCHIVE/appcast.xml" | sed 's/^/  /'
 
 printf '\n完成：%s\n' "$ARCHIVE/appcast.xml"
