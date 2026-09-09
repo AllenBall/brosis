@@ -19,6 +19,7 @@ final class MCPIntegrationWindowController: NSObject, NSWindowDelegate,
     private var noteLabel: NSTextField?
     private var rows: [MCPIntegration.Status] = []
     private var lastAction: String?
+    private var autoCheckbox: NSButton?
     /// 学习模式：定时轮询审计里被 `no_grant` 拒掉的 client 名。
     private var learnTimer: Timer?
     private var learnDeadline: Date?
@@ -83,12 +84,21 @@ final class MCPIntegrationWindowController: NSObject, NSWindowDelegate,
             column.width = spec.2
             table.addTableColumn(column)
         }
-        let scroll = NSScrollView(frame: NSRect(x: 16, y: 88, width: 868, height: 308))
+        let scroll = NSScrollView(frame: NSRect(x: 16, y: 116, width: 868, height: 280))
         scroll.autoresizingMask = [.width, .height]
         scroll.hasVerticalScroller = true
         scroll.documentView = table
         content.addSubview(scroll)
         tableView = table
+
+        let auto = NSButton(checkboxWithTitle:
+            L("自动集成：装了哪家就自动写它的用户级配置并发授权",
+              "Auto-integrate: wire up and grant every harness that is installed"),
+            target: self, action: #selector(autoToggled(_:)))
+        auto.frame = NSRect(x: 16, y: 82, width: 868, height: 22)
+        auto.autoresizingMask = [.width, .minYMargin]
+        content.addSubview(auto)
+        autoCheckbox = auto
 
         var x = 16.0
         func button(_ title: String, _ action: Selector, _ width: Double) {
@@ -136,6 +146,7 @@ final class MCPIntegrationWindowController: NSObject, NSWindowDelegate,
         let store = self.store
         rows = HarnessCatalog.all.map { MCPIntegration.status(of: $0, store: store) }
         tableView?.reloadData()
+        autoCheckbox?.state = MCPAutoIntegration.isEnabled ? .on : .off
         var lines: [String] = []
         if store == nil { lines.append(L("库没打开：能改配置，但发不了 grant——解锁后再开一次开关。", "Database not open: the config can be written but no grant can be issued — unlock and toggle again.")) }
         lines.append(L("开关 = 写这个 harness 的用户级配置 + 发 / 撤 grants 表里的授权。"
@@ -157,6 +168,9 @@ final class MCPIntegrationWindowController: NSObject, NSWindowDelegate,
                       " · learn mode saw ungranted clients: \(learned.joined(separator: " ")) "
                       + "(the selected row is unaffected; you will be asked which one to grant)")
         }
+        note += L(" · 自动集成\(LOnOff(MCPAutoIntegration.isEnabled))（上次：\(MCPAutoIntegration.shared.lastDecision)）",
+                  " · auto-integration \(LOnOff(MCPAutoIntegration.isEnabled)) "
+                  + "(last run: \(MCPAutoIntegration.shared.lastDecision))")
         if let deadline = learnDeadline, deadline > Date() {
             note += L(" · 学习模式剩 \(Int(deadline.timeIntervalSinceNow)) s",
                       " · learn mode: \(Int(deadline.timeIntervalSinceNow))s left")
@@ -174,6 +188,27 @@ final class MCPIntegrationWindowController: NSObject, NSWindowDelegate,
     // MARK: - 动作
 
     @objc private func refreshClicked() { reload() }
+
+    /// 总开关。**关掉不撤销已经接好的集成**——那是另一件事，要撤在列表里一行一行点。
+    /// 打开时立刻跑一次，不然用户要等最多 30 分钟才看得到效果。
+    @objc private func autoToggled(_ sender: NSButton) {
+        let on = sender.state == .on
+        MCPAutoIntegration.isEnabled = on
+        if on {
+            MCPAutoIntegration.shared.runNow()
+            lastAction = L("自动集成已打开：这就扫一遍，装了但没接的会自动写配置并发授权。"
+                           + "已经接好的不动，手动关过的也不会被重新打开。",
+                           "Auto-integration on: scanning now — anything installed but not wired "
+                           + "gets its config written and a grant issued. Already-wired harnesses "
+                           + "are left alone, and so are ones you turned off by hand.")
+        } else {
+            lastAction = L("自动集成已关闭。已经接好的**不会**被撤销——要撤请在列表里选中那行点「关闭集成」。",
+                           "Auto-integration off. Existing integrations are NOT removed — to remove "
+                           + "one, select its row and click Disable.")
+        }
+        recorder?.logEvent(kind: "mcp_auto_integration_toggled", detail: "enabled=\(on)")
+        reload()
+    }
 
     @objc private func enableClicked() { toggle(true) }
     @objc private func disableClicked() { toggle(false) }
@@ -204,6 +239,11 @@ final class MCPIntegrationWindowController: NSObject, NSWindowDelegate,
                 lastAction? += L("；写不了，片段已复制到剪贴板，请手动加进配置文件",
                                  "; could not write — the snippet was copied to the clipboard, "
                                  + "please add it to the config file manually")
+            }
+            if !on {
+                lastAction? += L("；已记下「手动关闭」，自动集成不会再把它打开",
+                                 "; recorded as turned-off-by-hand — auto-integration will not "
+                                 + "re-enable it")
             }
             recorder?.logEvent(kind: "mcp_integration_changed",
                                detail: "harness=\(status.harness.id) enabled=\(on)")
@@ -319,7 +359,10 @@ final class MCPIntegrationWindowController: NSObject, NSWindowDelegate,
         let text: String
         switch column {
         case "harness": text = status.harness.displayName
-        case "state":   text = status.stateText
+        case "state":   text = MCPAutoIntegration.optedOut.contains(status.harness.id)
+                            ? status.stateText + L("（已手动关闭，不会自动开）",
+                                                   " (turned off by hand; will not be auto-enabled)")
+                            : status.stateText
         case "grant":   text = status.hasGrant ? L("已授权", "Granted") : L("无", "None")
         case "config":  text = (status.harness.expandedConfigPath() as NSString)
                                    .abbreviatingWithTildeInPath

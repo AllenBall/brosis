@@ -106,7 +106,11 @@ brosis 是菜单栏应用（无 Dock 图标）。内置 Sparkle 自动更新，�
 
 ## 接入 AI 助手（MCP）
 
-菜单栏 →「MCP 集成」，一键为主流 harness 写入用户级配置：Claude Code、Codex CLI、Cursor、Grok CLI、ZCode、Kimi Code。优先调用各家官方 CLI 写配置，CLI 不可用时才直接改配置文件（改前备份、原子替换，文件解析不了就拒绝写并给出手动片段）。
+**默认自动完成。** brosis 每 30 分钟看一遍你装了哪些 harness——Claude Code、Codex CLI、Cursor、Grok CLI、ZCode、Kimi Code——给装了的那几家写好用户级配置并发授权。没装的一律不碰：不会为你根本没装的软件建出目录。不想要就在菜单栏 →「MCP 集成」里去掉那个勾，改成自己一行一行接。
+
+**手动关掉的会一直关着。** 在那个窗口里关掉某一家会被记下来，自动集成永远不会再把它打开。而去掉总开关的勾**不会**撤销已经接好的集成——要撤请在列表里一行一行点。
+
+优先调用各家官方 CLI 写配置，CLI 不可用时才直接改配置文件（改前备份、原子替换，文件解析不了就拒绝写并给出手动片段）。
 
 也可以手动接：
 
@@ -122,13 +126,17 @@ brosis-mcp admin grant list
 brosis-mcp admin audit --limit 20     # 谁读过什么（不含正文）
 ```
 
-不确定客户端自报什么名字时，MCP 集成窗口有「学习模式」：开启 60 秒，被拒绝的连接会把自报的名字捞出来给你确认。
+grant 是按 client id 发的，而这个名字由客户端连过来时自己报——对不上就会被全拒。所以凡是 brosis 自己写的配置，都会把 `BROSIS_CLIENT_ID` 钉成该 harness 的 id：名字对得上是设计保证的，不是碰运气。
+
+落在这之外的情况——你手写的配置，或者经 harness 自己的 CLI 加进去的条目——MCP 集成窗口里有「学习模式」：开启 60 秒，被拒绝的连接会把自报的名字捞出来给你确认。它是人按一次、只跑 60 秒的轮询，不是常驻的后台监视。
 
 命令行也能管：
 
 ```bash
 brosis --mcp list                          # 各 harness 的配置与授权状态
 brosis --mcp enable --harness claude-code
+brosis --mcp auto                          # 自动集成开着没有、哪几家被手动关过
+brosis --mcp auto --set off
 ```
 
 ## 隐私与数据

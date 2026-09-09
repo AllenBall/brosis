@@ -32,6 +32,11 @@ enum MCPIntegration {
         /// 配置文件读不出来的原因（有值时开关只能给"复制片段"）。
         var configProblem: String?
         var hasGrant: Bool
+        /// 现有条目里的 `BROSIS_CLIENT_ID` 钉的是这个 harness 的 id 吗。`currentCommand`
+        /// 只比 command，比不出条目缺了这个 env（老版本写的条目就没有）——自动集成据此补写。
+        /// 走官方 CLI 的那家（`allowDirectWrite == false`）恒为 true：条目是 CLI 写的，
+        /// 本来就不带我们的 env，拿它当"过期"会变成每轮都重跑一次 CLI。
+        var configMatchesTarget = true
 
         var configured: Bool { currentCommand != nil }
         /// 配了但指向别的可执行文件（旧路径 / 构建目录）。
@@ -88,11 +93,19 @@ enum MCPIntegration {
         }
         var command: String?
         var problem: String?
+        var matches = true
         if exists {
             do {
                 let text = (try? String(contentsOfFile: configPath, encoding: .utf8)) ?? ""
                 command = try MCPConfigWriter.currentCommand(format: harness.format, text: text,
                                                              name: HarnessCatalog.serverName)
+                // 只对我们自己写的那几家算：CLI 写的条目不带我们的 env，算了也只会永远为假，
+                // 于是每轮都去重跑一次官方 CLI。
+                if command != nil, harness.allowDirectWrite {
+                    matches = try MCPConfigWriter.currentClientID(
+                        format: harness.format, text: text,
+                        name: HarnessCatalog.serverName) == harness.id
+                }
             } catch {
                 problem = "\(error)"
             }
@@ -100,7 +113,7 @@ enum MCPIntegration {
         let granted = (try? store?.grant(clientID: harness.id)) ?? nil
         return Status(harness: harness, installed: exists || probed || cli != nil,
                       cliPath: cli, currentCommand: command, configProblem: problem,
-                      hasGrant: granted != nil)
+                      hasGrant: granted != nil, configMatchesTarget: matches)
     }
 
     // MARK: - 开关
@@ -115,8 +128,14 @@ enum MCPIntegration {
     /// 顺序：先动配置（失败就整个不做），再动 grant——反过来会留下"有授权没入口"的悬空状态。
     /// `grantHandledExternally`：命令行入口把 grant 交给 `brosis-mcp admin grant`（经 IPC 连
     /// 正在跑的 app），所以那边传 `store: nil` 不代表"库没开"，不该提示用户解锁后重来。
+    /// `manualToggle`：人点的（面板、命令行）要记进 optOut，自动集成那条路传 false——
+    /// **记在这里而不是各个入口**，两个入口才不会各记一套、各漏一处。
     static func setEnabled(_ enabled: Bool, harness: Harness, store: Store?,
-                           grantHandledExternally: Bool = false) throws -> Outcome {
+                           grantHandledExternally: Bool = false,
+                           manualToggle: Bool = true) throws -> Outcome {
+        if manualToggle {
+            MCPAutoIntegration.rememberManualToggle(harnessID: harness.id, enabled: enabled)
+        }
         let command = HarnessCatalog.serverCommand()
         let entry = MCPConfigWriter.entry(for: harness, command: command)
         var notes: [String] = []

@@ -1,7 +1,7 @@
 import BrosisCore
 import Foundation
 
-/// `brosis --mcp <list|enable|disable> [--harness <id>]`（D33）。
+/// `brosis --mcp <list|enable|disable|auto> [--harness <id>] [--set on|off]`（D33）。
 ///
 /// 为什么要有命令行入口：brosis 是 `LSUIElement`（菜单栏常驻、没有 Dock 图标），
 /// **自动化工具看不见它**——computer-use 的 `request_access` 对 `com.brosis.app` 与 `brosis`
@@ -26,8 +26,11 @@ enum MCPIntegrationCLI {
                 return 2
             }
             return set(action == "enable", harnessID: harnessID)
+        case "auto":
+            return auto(value(of: "--set", in: arguments))
         default:
-            FileHandle.standardError.write(Data("用法：--mcp list|enable|disable [--harness <id>]\n".utf8))
+            FileHandle.standardError.write(Data(
+                "用法：--mcp list|enable|disable|auto [--harness <id>] [--set on|off]\n".utf8))
             return 2
         }
     }
@@ -38,9 +41,31 @@ enum MCPIntegrationCLI {
         return next.hasPrefix("--") ? nil : next
     }
 
+    /// `--mcp auto [--set on|off]`。不带 `--set` 就只读。
+    ///
+    /// 这个进程和常驻的 app 是**同一个 bundle**，所以写的是同一个 UserDefaults 域；
+    /// 常驻进程的定时器每次 tick 都重读 `isEnabled`，所以这里改完下一轮就生效，
+    /// 不需要（也没法）去戳它的定时器。
+    private static func auto(_ setting: String?) -> Int32 {
+        if let setting {
+            guard let on = ["on": true, "off": false][setting] else {
+                FileHandle.standardError.write(Data("--set 只认 on / off\n".utf8))
+                return 2
+            }
+            MCPAutoIntegration.isEnabled = on
+        }
+        let optedOut = MCPAutoIntegration.optedOut.sorted()
+        print("自动集成：\(MCPAutoIntegration.isEnabled ? "开" : "关")"
+              + " · 手动关过的：\(optedOut.isEmpty ? "无" : optedOut.joined(separator: " "))")
+        print("说明：开着时每 30 分钟扫一遍，装了但没接的自动写配置 + 发 grant；"
+              + "手动关过的永远跳过；关掉它不会撤销已经接好的集成。")
+        return 0
+    }
+
     private static func list() -> Int32 {
         let grants = grantedClients()
         print("服务器路径：\(HarnessCatalog.serverCommand())")
+        _ = auto(nil)
         // 状态判定只有一份：`MCPIntegration.status` + `Status.stateText`（窗口用的也是它），
         // 以前 CLI 自己又推了一遍，措辞已经和窗口不一致。
         for harness in HarnessCatalog.all {

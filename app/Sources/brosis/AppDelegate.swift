@@ -86,6 +86,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         AutoIndexScheduler.shared.configure(recorder: recorder)
         // D33：MCP 集成窗口（把 brosis 注册进各家 harness 的用户级配置 + 发 grant）。
         MCPIntegrationWindowController.shared.configure(recorder: recorder)
+        // 2026-09-09：同一件事的自动版，默认开。只登记依赖，启停跟着锁定状态走。
+        MCPAutoIntegration.shared.configure(recorder: recorder)
         // D34：设置窗口 + 配额执行。配额此前只显示不执行（expireWithNotice 没人调），这里接上。
         SettingsWindowController.shared.configure(recorder: recorder)
         // 2026-09-08：用户决定不要叙述功能，夜间叙述调度器**不再接线、不再启动**，
@@ -201,6 +203,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if lock.snapshot.phase == .unlocked {
             AutoIndexScheduler.shared.start()
             QuotaScheduler.shared.start()
+            MCPAutoIntegration.shared.start()
         }
 
         if recording && permissions.screenRecording {
@@ -215,6 +218,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func stopSubsystems(reason: String) {
         AutoIndexScheduler.shared.stop()
         QuotaScheduler.shared.stop()
+        MCPAutoIntegration.shared.stop()
         events?.stop()
         events = nil
         guard let capture else { return }

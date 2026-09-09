@@ -106,7 +106,11 @@ Capture itself **ignores power state** — it keeps recording on battery. The AC
 
 ## Connecting an AI assistant (MCP)
 
-Menu bar → "MCP integration" writes user-level config for the major harnesses in one click: Claude Code, Codex CLI, Cursor, Grok CLI, ZCode, Kimi Code. Each harness's official CLI is preferred; only when the CLI is unavailable does brosis edit the config file directly (backing it up first, replacing atomically, and refusing to write — with a snippet for you to paste — if the file cannot be parsed).
+**This is automatic by default.** brosis checks every 30 minutes for harnesses you have installed — Claude Code, Codex CLI, Cursor, Grok CLI, ZCode, Kimi Code — writes each one's user-level config and issues it a grant. Harnesses you do not have installed are left alone: no directories are created for software you never installed. Turn the whole thing off with the checkbox in Menu bar → "MCP integration", and wire up individual harnesses by hand there instead.
+
+**Turning one off by hand sticks.** Disabling a harness in that window records the choice, and auto-integration will never re-enable it. Turning the global checkbox off does *not* remove integrations that already exist — remove those one row at a time.
+
+Each harness's official CLI is preferred; only when the CLI is unavailable does brosis edit the config file directly (backing it up first, replacing atomically, and refusing to write — with a snippet for you to paste — if the file cannot be parsed).
 
 Manual setup works too:
 
@@ -122,13 +126,17 @@ brosis-mcp admin grant list
 brosis-mcp admin audit --limit 20     # who read what (never the content itself)
 ```
 
-If you are not sure what name a client reports, the MCP integration window has a **learn mode**: turn it on for 60 seconds and any refused connection surfaces the name it claimed, for you to confirm.
+Grants are issued per client id, and a client picks its own name when it connects — so the name has to match or everything is refused. Every config brosis writes itself therefore pins `BROSIS_CLIENT_ID` to the harness's id, which makes the name match by construction rather than by luck.
+
+For the cases that fall outside that — a config you wrote by hand, or an entry added through a harness's own CLI — the MCP integration window has a **learn mode**: turn it on for 60 seconds and any refused connection surfaces the name it claimed, for you to confirm. It is a 60-second, manually started poll, not a background watcher.
 
 The command line works as well:
 
 ```bash
 brosis --mcp list                          # config and grant status per harness
 brosis --mcp enable --harness claude-code
+brosis --mcp auto                          # is auto-integration on, and what is opted out
+brosis --mcp auto --set off
 ```
 
 ## Privacy and your data

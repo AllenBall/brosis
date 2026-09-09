@@ -33,10 +33,27 @@ enum MCPConfigWriter {
 
     /// 按描述表造一条 Entry。差异（例如 Claude Code 要 `type: "stdio"`）取自 `Harness` 的字段，
     /// 调用方不再各写一遍 id 判断。
+    ///
+    /// **`BROSIS_CLIENT_ID` 是这条 Entry 的要害**（2026-09-09）：grants 表按 client_id 发，
+    /// 而 client_id 默认取 MCP `initialize` 里客户端自报的 `clientInfo.name`——那是它说了算的，
+    /// 各家叫什么只有连过来才知道，对不上就被全拒。面板的「学习模式」本来就是为这件事存在的：
+    /// 每 2 秒查一次 `mcp_audit`，人盯着看谁来连。
+    ///
+    /// 而 `brosis-mcp` 认 `BROSIS_CLIENT_ID` **覆盖**自报名（见 core/Sources/brosis-mcp 的
+    /// `Config.clientIDOverride`）。所以只要配置是我们写的，就把名字钉死成 harness id，
+    /// 发 grant 用的也是同一个 id——**名字对不上从设计上没有了**，自动集成也就不需要轮询。
+    ///
+    /// 唯一钉不死的是走官方 CLI 增删的那家（Claude Code）：`claude mcp add` 的 `-e` 是
+    /// 变长选项，拼进模板要赌它的解析顺序，而赌输了写坏的是 100 KB 的 `~/.claude.json`。
+    /// 不赌——它自报的就是 `claude-code`，与 harness id 本来就相等（本机 grants 表实测）。
     static func entry(for harness: Harness, command: String) -> Entry {
         Entry(name: HarnessCatalog.serverName, command: command,
+              env: [Self.clientIDEnvKey: harness.id],
               includeStdioType: harness.entryIncludesStdioType)
     }
+
+    /// `brosis-mcp` 用它覆盖客户端自报的名字。
+    static let clientIDEnvKey = "BROSIS_CLIENT_ID"
 
     /// 目标状态与现状一致时返回 nil（调用方据此"什么都不写"）。
     static func apply(format: HarnessFormat, text: String,
@@ -51,9 +68,26 @@ enum MCPConfigWriter {
     /// 现在这份配置里 brosis 指向哪个可执行文件。nil = 没有这一项。
     static func currentCommand(format: HarnessFormat, text: String, name: String) throws -> String? {
         switch format {
-        case .mcpServersJSON:  try jsonCommand(text: text, path: ["mcpServers"], name: name)
-        case .zcodeNestedJSON: try jsonCommand(text: text, path: ["mcp", "servers"], name: name)
-        case .mcpServersTOML:  tomlCommand(text: text, name: name)
+        case .mcpServersJSON:  try jsonValue(text: text, path: ["mcpServers"], name: name, env: nil)
+        case .zcodeNestedJSON: try jsonValue(text: text, path: ["mcp", "servers"], name: name, env: nil)
+        case .mcpServersTOML:  tomlValue(text: text, section: "mcp_servers.\(name)", key: "command")
+        }
+    }
+
+    /// 现在这份配置里 brosis 那条钉的 `BROSIS_CLIENT_ID`。nil = 没这条、或者它没带这个 env。
+    ///
+    /// **比的是这一个键，不是整段文本。** 曾经想用"`apply` 返回 nil 就算最新"来判断，
+    /// 但那等价于逐字节比：TOML 是"摘掉自己那几节再追加到末尾"，只要 harness 自己重排过
+    /// 文件、把我们的节挪回中间，比较就永远为假——于是每 30 分钟重写一次配置、
+    /// 每次留一份带时间戳的备份，一天攒 48 个。判据要正好落在我们在乎的那件事上。
+    static func currentClientID(format: HarnessFormat, text: String, name: String) throws -> String? {
+        switch format {
+        case .mcpServersJSON:  try jsonValue(text: text, path: ["mcpServers"], name: name,
+                                             env: clientIDEnvKey)
+        case .zcodeNestedJSON: try jsonValue(text: text, path: ["mcp", "servers"], name: name,
+                                             env: clientIDEnvKey)
+        case .mcpServersTOML:  tomlValue(text: text, section: "mcp_servers.\(name).env",
+                                         key: clientIDEnvKey)
         }
     }
 
@@ -118,10 +152,13 @@ enum MCPConfigWriter {
         }
     }
 
-    private static func jsonCommand(text: String, path: [String], name: String) throws -> String? {
+    /// `env == nil` 取 command；否则取 env 子表里那个键。
+    private static func jsonValue(text: String, path: [String], name: String,
+                                  env: String?) throws -> String? {
         let root = try parse(text)
         let node = read(root, path: path)[name] as? [String: Any]
-        return node?["command"] as? String
+        guard let env else { return node?["command"] as? String }
+        return (node?["env"] as? [String: Any])?[env] as? String
     }
 
     // MARK: - TOML（逐行手术：原文一个字节都不动，只增删自己那几节）
@@ -185,18 +222,19 @@ enum MCPConfigWriter {
         return result == text ? nil : result
     }
 
-    private static func tomlCommand(text: String, name: String) -> String? {
+    /// 读 `[<section>]` 这一节里的 `<key> = "…"`。command 与 env 子表用的是同一段扫描——
+    /// 以前只有 command 一个读法，加 env 时照抄一份的话，反转义会立刻漂成两套。
+    private static func tomlValue(text: String, section: String, key: String) -> String? {
         var inside = false
         for line in text.components(separatedBy: "\n") {
             if isSectionHeader(line) {
-                let t = line.trimmingCharacters(in: .whitespaces)
-                inside = t == "[mcp_servers.\(name)]"
+                inside = line.trimmingCharacters(in: .whitespaces) == "[\(section)]"
                 continue
             }
             guard inside else { continue }
             let parts = line.split(separator: "=", maxSplits: 1, omittingEmptySubsequences: false)
             guard parts.count == 2,
-                  parts[0].trimmingCharacters(in: .whitespaces) == "command" else { continue }
+                  parts[0].trimmingCharacters(in: .whitespaces) == key else { continue }
             var value = parts[1].trimmingCharacters(in: .whitespaces)
             if value.hasPrefix("\""), value.hasSuffix("\""), value.count >= 2 {
                 value = String(value.dropFirst().dropLast())
