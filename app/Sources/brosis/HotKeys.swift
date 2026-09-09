@@ -113,8 +113,8 @@ enum HotKeyAction: String, Sendable, CaseIterable {
 
     var title: String {
         switch self {
-        case .pause: return "暂停 / 继续采集"
-        case .lock:  return "锁定数据库"
+        case .pause: return L("暂停 / 继续采集", "Pause / resume capture")
+        case .lock:  return L("锁定数据库", "Lock database")
         }
     }
 
@@ -301,7 +301,8 @@ struct HotKeyRegistration: Sendable, Equatable {
         let combo = spec?.display ?? raw
         return registered
             ? "\(action.title) \(combo)"
-            : "\(action.title) \(combo) 注册失败（\(note)，OSStatus \(status)）"
+            : L("\(action.title) \(combo) 注册失败（\(note)，OSStatus \(status)）",
+                "\(action.title) \(combo) failed to register (\(note), OSStatus \(status))")
     }
 }
 
@@ -401,8 +402,9 @@ final class HotKeys {
                                             registered: true, note: spec.display))
             } else {
                 let note = status == OSStatus(eventHotKeyExistsErr)
-                    ? "组合已被本进程占用（eventHotKeyExistsErr）"
-                    : "RegisterEventHotKey 失败"
+                    ? L("组合已被本进程占用（eventHotKeyExistsErr）",
+                        "this combination is already taken by this process (eventHotKeyExistsErr)")
+                    : L("RegisterEventHotKey 失败", "RegisterEventHotKey failed")
                 results.append(HotKeyRegistration(action: action, raw: raw, spec: spec, status: status,
                                             registered: false, note: note))
             }
@@ -460,12 +462,14 @@ final class HotKeys {
 
     /// 菜单里那一行。注册失败要看得见（T18 的要求）。
     var menuDescription: String {
-        guard installed, !registrations.isEmpty else { return "全局热键：未注册" }
+        guard installed, !registrations.isEmpty else {
+            return L("全局热键：未注册", "Global hotkeys: not registered")
+        }
         let failed = registrations.filter { !$0.registered }
         if failed.isEmpty {
-            return "全局热键：" + registrations.map { "\($0.spec?.display ?? $0.raw) \($0.action.title)" }
+            return L("全局热键：", "Global hotkeys: ") + registrations.map { "\($0.spec?.display ?? $0.raw) \($0.action.title)" }
                 .joined(separator: " · ")
         }
-        return "全局热键：" + failed.map(\.summary).joined(separator: "；")
+        return L("全局热键：", "Global hotkeys: ") + failed.map(\.summary).joined(separator: "；")
     }
 }

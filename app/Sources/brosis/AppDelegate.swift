@@ -26,10 +26,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// 最近一次「导出存储统计…」的结果，只在菜单里回显一行。
     private var lastStatsExport: String?
 
+    /// 语言变更观察者的 token，`applicationWillTerminate` 里撤掉。
+    private var languageObserver: NSObjectProtocol?
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         // 必须在任何 AX 读取之前装上进程级全局 0.5 s 超时（见 AXSupport 的说明）。
         // 这一步不弹窗、不需要权限。
         let axTimeoutError = AX.installGlobalMessagingTimeout()
+
+        // 界面语言换了：把已经打开的窗口全关掉（重开就是新语言），菜单本来就每次重建。
+        // 用 block observer + 显式回主线程，不用 @objc 方法——温度通知那次 SIGTRAP
+        // 的教训是 @MainActor 的 @objc 方法可能被后台队列直接调用。
+        languageObserver = NotificationCenter.default.addObserver(
+            forName: L10n.didChange, object: nil, queue: .main) { _ in
+            MainActor.assumeIsolated {
+                SettingsWindowController.shared.closeForLanguageChange()
+                ModelsWindowController.shared.closeForLanguageChange()
+                PoliciesWindowController.shared.closeForLanguageChange()
+                MCPIntegrationWindowController.shared.closeForLanguageChange()
+            }
+        }
 
         let lock = LockController(recorder: recorder)
         self.lock = lock
@@ -345,13 +361,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// 菜单栏可见状态（2.2 硬约束 2）：**录制 / 暂停 / 锁定 / 权限缺失**四选一。
     private var statusTitle: String {
         let permissions = Permissions.snapshot()
-        if !permissions.allGranted { return "权限缺失（\(permissions.missingDescription)）" }
-        guard let snapshot = lock?.snapshot else { return "锁定" }
+        if !permissions.allGranted { return L("权限缺失（\(permissions.missingDescription)）", "Missing permissions (\(permissions.missingDescription))") }
+        guard let snapshot = lock?.snapshot else { return L("锁定", "Locked") }
         switch snapshot.phase {
-        case .locked:    return "锁定"
-        case .unlocking: return "解锁中"
-        case .locking:   return "锁定中"
-        case .unlocked:  return snapshot.isPaused ? "暂停（\(snapshot.pauseDescription)）" : "录制"
+        case .locked:    return L("锁定", "Locked")
+        case .unlocking: return L("解锁中", "Unlocking")
+        case .locking:   return L("锁定中", "Locking")
+        case .unlocked:  return snapshot.isPaused ? L("暂停（\(snapshot.pauseDescription)）", "Paused (\(snapshot.pauseDescription))") : L("录制", "Recording")
         }
     }
 
@@ -373,40 +389,45 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         let permissions = Permissions.snapshot()
         menu.addItem(disabledItem("brosis \(BuildInfo.version) · \(BuildInfo.stage)"))
-        menu.addItem(disabledItem("状态：\(statusTitle)"))
-        menu.addItem(disabledItem("数据库：\(lock.snapshot.phase.rawValue)"
-                                  + "（\(lock.directory.lastPathComponent)，来源 \(lock.directorySource)）"))
+        menu.addItem(disabledItem(L("状态：\(statusTitle)", "Status: \(statusTitle)")))
+        menu.addItem(disabledItem(L("数据库：\(lock.snapshot.phase.rawValue)（\(lock.directory.lastPathComponent)，来源 \(lock.directorySource)）",
+                                       "Database: \(lock.snapshot.phase.rawValue) (\(lock.directory.lastPathComponent), source \(lock.directorySource))")))
         if let error = lock.lastError {
-            menu.addItem(disabledItem("开库失败：\(error.prefix(70))"))
+            menu.addItem(disabledItem(L("开库失败：\(error.prefix(70))", "Could not open database: \(error.prefix(70))")))
         }
-        menu.addItem(disabledItem("写入：\(recorder.stats.summary)"))
-        menu.addItem(disabledItem("屏幕录制：\(permissions.screenRecording ? "已授权" : "未授权")"))
-        menu.addItem(disabledItem("辅助功能：\(permissions.accessibility ? "已授权" : "未授权")"))
+        menu.addItem(disabledItem(L("写入：\(recorder.stats.summary)", "Writes: \(recorder.stats.summary)")))
+        menu.addItem(disabledItem(L("屏幕录制：", "Screen Recording: ")
+                             + (permissions.screenRecording ? L("已授权", "granted") : L("未授权", "not granted"))))
+        menu.addItem(disabledItem(L("辅助功能：", "Accessibility: ")
+                             + (permissions.accessibility ? L("已授权", "granted") : L("未授权", "not granted"))))
         menu.addItem(disabledItem(HotKeys.shared.menuDescription))
         if let capture, capture.isRunning, let displayID = capture.currentDisplayID {
             let stats = capture.currentStats
             let ago = stats.lastCaptureAt > 0
-                ? "\(Int(Date().timeIntervalSince1970 - stats.lastCaptureAt)) s 前" : "尚未截图"
-            menu.addItem(disabledItem("按需截图：显示器 \(displayID)，已截 \(stats.captures) 张，上次 \(ago)"))
+                ? L("\(Int(Date().timeIntervalSince1970 - stats.lastCaptureAt)) s 前",
+                    "\(Int(Date().timeIntervalSince1970 - stats.lastCaptureAt))s ago")
+                : L("尚未截图", "no screenshot yet")
+            menu.addItem(disabledItem(L("按需截图：显示器 \(displayID)，已截 \(stats.captures) 张，上次 \(ago)",
+                                       "On-demand screenshots: display \(displayID), \(stats.captures) taken, last \(ago)")))
         } else {
-            menu.addItem(disabledItem("按需截图：未武装（缺权限 / 已暂停 / 已锁定）"))
+            menu.addItem(disabledItem(L("按需截图：未武装（缺权限 / 已暂停 / 已锁定）", "On-demand screenshots: not armed (missing permission / paused / locked)")))
         }
         if let lastCaptureError {
-            menu.addItem(disabledItem("最近错误：\(lastCaptureError.prefix(60))"))
+            menu.addItem(disabledItem(L("最近错误：\(lastCaptureError.prefix(60))", "Last error: \(lastCaptureError.prefix(60))")))
         }
-        menu.addItem(disabledItem("当前应用：\(foregroundLabel)"))
+        menu.addItem(disabledItem(L("当前应用：\(foregroundLabel)", "Current app: \(foregroundLabel)")))
         // 3.6：MCP 的本地 IPC 服务端状态（socket 起没起、现在服不服务）。
         menu.addItem(disabledItem(lock.ipc.menuDescription))
         menu.addItem(.separator())
 
         let paused = lock.snapshot.pauseReasons.contains(.user)
-        let toggle = NSMenuItem(title: paused ? "继续采集" : "暂停采集",
+        let toggle = NSMenuItem(title: paused ? L("继续采集", "Resume capture") : L("暂停采集", "Pause capture"),
                                 action: #selector(togglePause), keyEquivalent: "p")
         toggle.target = self
         menu.addItem(toggle)
 
         let lockedNow = lock.snapshot.phase != .unlocked
-        let lockItem = NSMenuItem(title: lockedNow ? "解锁数据库…" : "锁定数据库",
+        let lockItem = NSMenuItem(title: lockedNow ? L("解锁数据库…", "Unlock database…") : L("锁定数据库", "Lock database"),
                                   action: #selector(toggleLock), keyEquivalent: "l")
         lockItem.target = self
         lockItem.isEnabled = lock.snapshot.phase == .unlocked || lock.snapshot.phase == .locked
@@ -415,7 +436,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(appPolicyMenuItem())
 
         // 3.12：设置里那一页"应用"。库锁着也能打开（只是改不了档，窗口里有横幅说明）。
-        let policies = NSMenuItem(title: "应用采集清单…",
+        let policies = NSMenuItem(title: L("应用采集清单…", "App capture list…"),
                                   action: #selector(openPoliciesWindow), keyEquivalent: "")
         policies.target = self
         menu.addItem(policies)
@@ -425,7 +446,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if let newApp = CapturePolicyStore.shared.pendingNewAppNotices().first {
             let mode = CapturePolicyStore.shared.mode(for: newApp)
             let notice = NSMenuItem(
-                title: "新应用 \(newApp) 已按默认档「\(Self.modeLabel(mode))」记录（点此改档）",
+                title: L("新应用 \(newApp) 已按默认档「\(Self.modeLabel(mode))」记录（点此改档）",
+                         "New app \(newApp) is being recorded at the default mode “\(Self.modeLabel(mode))” (click to change)"),
                 action: #selector(openNewAppNotice(_:)), keyEquivalent: "")
             notice.target = self
             notice.representedObject = newApp
@@ -433,7 +455,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
 
         if !permissions.allGranted {
-            let request = NSMenuItem(title: "请求权限…",
+            let request = NSMenuItem(title: L("请求权限…", "Request permissions…"),
                                      action: #selector(requestPermissions), keyEquivalent: "")
             request.target = self
             menu.addItem(request)
@@ -441,28 +463,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         let loginTitle: String
         switch LoginItem.status() {
-        case .enabled:          loginTitle = "取消登录项（已注册）"
-        case .requiresApproval: loginTitle = "登录项待批准，打开设置…"
-        default:                loginTitle = "注册为登录项"
+        case .enabled:          loginTitle = L("取消登录项（已注册）", "Remove login item (registered)")
+        case .requiresApproval: loginTitle = L("登录项待批准，打开设置…", "Login item awaiting approval — open settings…")
+        default:                loginTitle = L("注册为登录项", "Add as login item")
         }
         let login = NSMenuItem(title: loginTitle,
                                action: #selector(toggleLoginItem), keyEquivalent: "")
         login.target = self
         menu.addItem(login)
 
-        let reveal = NSMenuItem(title: "打开数据目录",
+        let reveal = NSMenuItem(title: L("打开数据目录", "Open data folder"),
                                 action: #selector(revealDataDirectory), keyEquivalent: "")
         reveal.target = self
         menu.addItem(reveal)
 
         // 库是加密的，外部工具读不了；存储统计只能由本进程导出（见 StatsExport）。
-        let exportStats = NSMenuItem(title: "导出存储统计…",
+        let exportStats = NSMenuItem(title: L("导出存储统计…", "Export storage stats…"),
                                      action: #selector(exportStats), keyEquivalent: "")
         exportStats.target = self
         exportStats.isEnabled = lock.snapshot.phase == .unlocked
         menu.addItem(exportStats)
         if let lastStatsExport {
-            menu.addItem(disabledItem("上次导出：\(lastStatsExport)"))
+            menu.addItem(disabledItem(L("上次导出：\(lastStatsExport)", "Last export: \(lastStatsExport)")))
         }
 
         // T10（分发管线）留下的入口，按 tools/bench/results/m1_r2b_distribution_2026-09-08.md
@@ -474,33 +496,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(.separator())
         menu.addItem(ModelsMenu.menuItem())
         menu.addItem(MCPIntegrationWindowController.menuItem())
-        let syncItem = NSMenuItem(title: "跨设备同步…（\(sync?.status.enabled == true ? "已开启" : "未开启")）",
+        let syncItem = NSMenuItem(title: L("跨设备同步…", "Cross-device sync…")
+                              + "（\(sync?.status.enabled == true ? L("已开启", "on") : L("未开启", "off"))）",
                                   action: #selector(openSyncWindow), keyEquivalent: "")
         syncItem.target = self
         menu.addItem(syncItem)
-        let exportItem = NSMenuItem(title: "加密导出…", action: #selector(openExport), keyEquivalent: "")
+        let exportItem = NSMenuItem(title: L("加密导出…", "Encrypted export…"), action: #selector(openExport), keyEquivalent: "")
         exportItem.target = self
         menu.addItem(exportItem)
         // 设置排在加密导出下面（用户 2026-09-08 指定的顺序）。
         menu.addItem(SettingsWindowController.menuItem())
 
         menu.addItem(.separator())
-        let quit = NSMenuItem(title: "退出 brosis", action: #selector(quit), keyEquivalent: "q")
+        let quit = NSMenuItem(title: L("退出 brosis", "Quit brosis"), action: #selector(quit), keyEquivalent: "q")
         quit.target = self
         menu.addItem(quit)
     }
 
     private var foregroundLabel: String {
-        guard let bundleID = foregroundBundleID else { return "（未知）" }
+        guard let bundleID = foregroundBundleID else { return L("（未知）", "(unknown)") }
         let mode = CapturePolicyStore.shared.mode(for: bundleID)
         let name = foregroundName ?? bundleID
         var label = "\(name) · \(Self.modeLabel(mode))"
         // 库没开的时候读不到 app_policies，这一档只是"临时判定"，别让菜单看起来像已生效的设置。
-        if !CapturePolicyStore.shared.isStoreBacked { label += "（库未打开，临时判定）" }
+        if !CapturePolicyStore.shared.isStoreBacked { label += L("（库未打开，临时判定）", " (database closed — provisional)") }
         if let until = CapturePolicyStore.shared.temporaryPause(bundleID: bundleID) {
             let formatter = DateFormatter()
             formatter.dateFormat = "HH:mm"
-            label += "（今日暂停至 \(formatter.string(from: until))）"
+            label += L("（今日暂停至 \(formatter.string(from: until))）", " (paused today until \(formatter.string(from: until)))")
         }
         return label
     }
@@ -511,23 +534,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     /// 3.12 的菜单快捷项：「暂停采集当前应用（今天 / 永久）」。
     private func appPolicyMenuItem() -> NSMenuItem {
-        let item = NSMenuItem(title: "暂停采集当前应用", action: nil, keyEquivalent: "")
+        let item = NSMenuItem(title: L("暂停采集当前应用", "Pause capture for the current app"), action: nil, keyEquivalent: "")
         guard let bundleID = foregroundBundleID else {
             item.isEnabled = false
             return item
         }
         let submenu = NSMenu()
         submenu.addItem(disabledItem(bundleID))
-        let today = NSMenuItem(title: "今天（到今日 24:00）",
+        let today = NSMenuItem(title: L("今天（到今日 24:00）", "Today (until 24:00)"),
                                action: #selector(pauseCurrentAppToday), keyEquivalent: "")
         today.target = self
         submenu.addItem(today)
-        let forever = NSMenuItem(title: "永久（改档为「不采集」）",
+        let forever = NSMenuItem(title: L("永久（改档为「不采集」）", "Permanently (set mode to “Do not capture”)"),
                                  action: #selector(pauseCurrentAppForever), keyEquivalent: "")
         forever.target = self
         submenu.addItem(forever)
         submenu.addItem(.separator())
-        let resume = NSMenuItem(title: "恢复采集（改回「事件 + 内容」）",
+        let resume = NSMenuItem(title: L("恢复采集（改回「事件 + 内容」）", "Resume capture (back to “Events + content”)"),
                                 action: #selector(resumeCurrentApp), keyEquivalent: "")
         resume.target = self
         submenu.addItem(resume)
@@ -610,7 +633,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             }
         } catch {
             recorder.logEvent(kind: "login_item_error", detail: "\(error)")
-            presentFatal("登录项操作失败：\(error.localizedDescription)")
+            presentFatal(L("登录项操作失败：\(error.localizedDescription)", "Login item operation failed: \(error.localizedDescription)"))
         }
         refreshMenu()
     }
@@ -631,12 +654,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             return try StatsExport.export(store: store, directory: directory)
         }
         guard let outcome else {
-            lastStatsExport = "失败（见「写入」那一行的错误计数）"
+            lastStatsExport = L("失败（见「写入」那一行的错误计数）", "failed (see the error count on the “Writes” line)")
             refreshMenu()
             return
         }
         recorder.logEvent(kind: "stats_exported", detail: outcome.detail)
-        lastStatsExport = "\(outcome.url.lastPathComponent)（\(outcome.fileBytes) 字节）"
+        lastStatsExport = L("\(outcome.url.lastPathComponent)（\(outcome.fileBytes) 字节）",
+                            "\(outcome.url.lastPathComponent) (\(outcome.fileBytes) bytes)")
         NSWorkspace.shared.activateFileViewerSelecting([outcome.url])
         refreshMenu()
     }

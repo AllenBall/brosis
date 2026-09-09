@@ -40,10 +40,13 @@ enum MCPIntegration {
             return currentCommand != HarnessCatalog.serverCommand()
         }
         var stateText: String {
-            if let configProblem { return "配置读不出来：\(configProblem)" }
-            if !configured { return installed ? "已安装，未配置" : "未检测到" }
-            if pointsElsewhere { return "已配置，但指向 \(currentCommand ?? "?")" }
-            return hasGrant ? "已配置并已授权" : "已配置，但没有授权（会被全拒）"
+            if let configProblem { return L("配置读不出来：\(configProblem)", "config unreadable: \(configProblem)") }
+            if !configured { return installed ? L("已安装，未配置", "installed, not configured") : L("未检测到", "not detected") }
+            if pointsElsewhere {
+                return L("已配置，但指向 \(currentCommand ?? "?")",
+                         "configured, but points to \(currentCommand ?? "?")")
+            }
+            return hasGrant ? L("已配置并已授权", "configured and granted") : L("已配置，但没有授权（会被全拒）", "configured, but no grant (everything is refused)")
         }
     }
 
@@ -126,9 +129,12 @@ enum MCPIntegration {
                                     : ($0 == "$CMD" ? command : $0) }
             let result = runProcess(cliPath, args)
             if result.status == 0 {
-                notes.append("用官方 CLI \(harness.cliName ?? "")（\(cliPath)）")
+                notes.append(L("用官方 CLI \(harness.cliName ?? "")（\(cliPath)）",
+                               "used the official CLI \(harness.cliName ?? "") (\(cliPath))"))
             } else {
-                notes.append("官方 CLI 失败（\(result.output.prefix(120))），改为直接改配置文件")
+                notes.append(L("官方 CLI 失败（\(result.output.prefix(120))），改为直接改配置文件",
+                               "official CLI failed (\(result.output.prefix(120))) — "
+                               + "editing the config file directly instead"))
                 snippet = try? writeConfig(enabled, harness: harness, entry: entry, notes: &notes)
             }
         } else {
@@ -141,15 +147,16 @@ enum MCPIntegration {
                 if (try store.grant(clientID: harness.id)) == nil {
                     try store.setGrant(Grant(clientID: harness.id, mode: .strictLocal,
                                              apps: ["*"], timeWindowDays: 30, fields: .evidence))
-                    notes.append("已发 grant（client=\(harness.id)，evidence、30 天、全部应用）")
+                    notes.append(L("已发 grant（client=\(harness.id)，evidence、30 天、全部应用）",
+                               "grant issued (client=\(harness.id), evidence, 30 days, all apps)"))
                 } else {
-                    notes.append("grant 已存在（client=\(harness.id)）")
+                    notes.append(L("grant 已存在（client=\(harness.id)）", "grant already exists (client=\(harness.id))"))
                 }
             } else if try store.removeGrant(clientID: harness.id) {
-                notes.append("已撤销 grant（client=\(harness.id)）")
+                notes.append(L("已撤销 grant（client=\(harness.id)）", "grant revoked (client=\(harness.id))"))
             }
         } else if !grantHandledExternally {
-            notes.append("库没开，grant 没动——解锁后再开一次")
+            notes.append(L("库没开，grant 没动——解锁后再开一次", "database closed, grant unchanged — unlock and toggle again"))
         }
         return Outcome(summary: notes.joined(separator: "；"), manualSnippet: snippet)
     }
@@ -161,7 +168,7 @@ enum MCPIntegration {
         let path = harness.expandedConfigPath()
         let text = (try? String(contentsOfFile: path, encoding: .utf8)) ?? ""
         guard harness.allowDirectWrite else {
-            notes.append("这个 harness 不允许直接改配置（文件太大且它自己在频繁重写）")
+            notes.append(L("这个 harness 不允许直接改配置（文件太大且它自己在频繁重写）", "this harness does not allow direct config edits (the file is large and it rewrites it often)"))
             return snippet(for: harness, entry: entry)
         }
         let updated: String?
@@ -173,7 +180,7 @@ enum MCPIntegration {
             return snippet(for: harness, entry: entry)
         }
         guard let updated else {
-            notes.append("配置已经是目标状态，没动文件")
+            notes.append(L("配置已经是目标状态，没动文件", "config already matches the target state; file untouched"))
             return nil
         }
         let fm = FileManager.default
@@ -185,14 +192,18 @@ enum MCPIntegration {
                 .replacingOccurrences(of: ":", with: "")
             let backup = path + ".brosis-backup-" + stamp
             try? text.write(toFile: backup, atomically: true, encoding: .utf8)
-            notes.append("已备份到 \((backup as NSString).lastPathComponent)")
+            notes.append(L("已备份到 \((backup as NSString).lastPathComponent)",
+                           "backed up to \((backup as NSString).lastPathComponent)"))
         }
         // 原子写：临时文件 + 替换。
         let temporary = path + ".brosis-tmp"
         try updated.write(toFile: temporary, atomically: true, encoding: .utf8)
         _ = try fm.replaceItemAt(URL(filePath: path), withItemAt: URL(filePath: temporary))
-        notes.append(enabled ? "已写入 \((path as NSString).abbreviatingWithTildeInPath)"
-                             : "已从 \((path as NSString).abbreviatingWithTildeInPath) 删除")
+        notes.append(enabled
+                     ? L("已写入 \((path as NSString).abbreviatingWithTildeInPath)",
+                         "written to \((path as NSString).abbreviatingWithTildeInPath)")
+                     : L("已从 \((path as NSString).abbreviatingWithTildeInPath) 删除",
+                         "removed from \((path as NSString).abbreviatingWithTildeInPath)"))
         return nil
     }
 
@@ -248,7 +259,7 @@ enum MCPIntegration {
         environment["PATH"] = path
         process.environment = environment
         do { try process.run() } catch {
-            return ProcessResult(status: -1, output: "起不来：\(error)")
+            return ProcessResult(status: -1, output: L("起不来：\(error)", "could not start: \(error)"))
         }
         // 边跑边读：等进程退出再 readToEnd，输出超过管道缓冲（64 KB）就会双方死等。
         let collected = OutputBuffer()

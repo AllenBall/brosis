@@ -12,6 +12,13 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
 
     private weak var recorder: Recorder?
     private var window: NSWindow?
+
+    /// 界面语言换了就把窗口关掉：contentView 是打开时一次性搭出来的，
+    /// 就地把每个控件的文案换一遍既繁琐又容易漏，重开一次就全对了。
+    func closeForLanguageChange() {
+        window?.close()
+        window = nil
+    }
     private var quotaField: NSTextField?
     private var quotaStepper: NSStepper?
     private var usageLabel: NSTextField?
@@ -22,6 +29,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     private var intervalField: NSTextField?
     private var vectorsSwitch: NSButton?
     private var strictLockSwitch: NSButton?
+    private var languagePopup: NSPopUpButton?
     private var noteLabel: NSTextField?
     private var lastAction: String?
     /// 最近一次配额检查的结果，只在真查过之后才有值（查一次很贵，见 reload 的注释）。
@@ -30,7 +38,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     func configure(recorder: Recorder) { self.recorder = recorder }
 
     static func menuItem() -> NSMenuItem {
-        let item = NSMenuItem(title: "设置…", action: #selector(openFromMenu(_:)), keyEquivalent: ",")
+        let item = NSMenuItem(title: L("设置…", "Settings…"), action: #selector(openFromMenu(_:)), keyEquivalent: ",")
         item.target = SettingsWindowController.shared
         return item
     }
@@ -137,7 +145,26 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         let layout = Layout()
 
         // ---------------------------------------------------------------- 存储
-        layout.section("存储")
+        layout.section(L("通用", "General"))
+
+        let language = NSPopUpButton(frame: NSRect(x: 0, y: 0, width: 200,
+                                                   height: Metrics.controlHeight))
+        for option in UILanguage.allCases {
+            language.addItem(withTitle: option.displayName)
+            language.lastItem?.representedObject = option.rawValue
+        }
+        language.selectItem(at: UILanguage.allCases.firstIndex(of: L10n.preference) ?? 0)
+        language.target = self
+        language.action = #selector(languageChanged)
+        languagePopup = language
+        layout.row(L("界面语言", "Language"), language, height: Metrics.controlHeight)
+        layout.hint(L("跟随系统时按系统语言判断：中文系统用中文，其余用英文。"
+                      + "自检与命令行输出始终是中文（面向开发排障）。",
+                      "\"Follow system\" uses Chinese on a Chinese system and English otherwise. "
+                      + "Self-check and command-line output stay in Chinese (they are for debugging)."),
+                    lines: 2)
+
+        layout.section(L("存储", "Storage"))
 
         let quota = numberField(width: 76)
         quota.action = #selector(quotaChanged)
@@ -157,8 +184,8 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         quotaRow.addSubview(quota)
         quotaRow.addSubview(stepper)
         quotaRow.addSubview(unitLabel)
-        layout.row("最多占用磁盘", quotaRow, height: Metrics.controlHeight)
-        layout.hint("口径是原文净载荷——FTS 索引、向量、WAL 都不算在内，所以磁盘上的实际文件会比这个数大",
+        layout.row(L("最多占用磁盘", "Disk limit"), quotaRow, height: Metrics.controlHeight)
+        layout.hint(L("口径是原文净载荷——FTS 索引、向量、WAL 都不算在内，所以磁盘上的实际文件会比这个数大", "Counts raw text payload only — FTS index, vectors and WAL are excluded, so the files on disk are larger than this number"),
                     lines: 2)
 
         // labelWithString("") 会把自己缩成几个 pt 宽，进 row() 后文字被裁到一个字不剩，
@@ -169,41 +196,41 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         usage.maximumNumberOfLines = 2
         usage.frame = NSRect(x: 0, y: 0, width: Metrics.controlWidth, height: Metrics.usageHeight)
         usageLabel = usage
-        layout.row("当前用量", usage, height: Metrics.usageHeight)
+        layout.row(L("当前用量", "Current usage"), usage, height: Metrics.usageHeight)
 
-        let autoExpire = NSButton(checkboxWithTitle: "到线后自动清理最旧的原文（关掉就只提示不删）",
+        let autoExpire = NSButton(checkboxWithTitle: L("到线后自动清理最旧的原文（关掉就只提示不删）", "Delete the oldest text when the limit is reached (off: warn only, never delete)"),
                                   target: self, action: #selector(autoExpireToggled))
         autoExpireSwitch = autoExpire
         layout.row(nil, autoExpire, height: Metrics.checkboxHeight)
 
-        let checkNow = NSButton(title: "现在检查并清理", target: self, action: #selector(checkNowClicked))
+        let checkNow = NSButton(title: L("现在检查并清理", "Check and clean now"), target: self, action: #selector(checkNowClicked))
         checkNow.bezelStyle = .rounded
         checkNow.frame = NSRect(x: 0, y: 0, width: 130, height: 26)
         layout.row(nil, checkNow, height: 26)
 
         // ---------------------------------------------------------------- 采集
-        layout.section("采集")
+        layout.section(L("采集", "Capture"))
 
         let periodic = numberField(width: 76)
         periodic.action = #selector(periodicChanged)
         periodicField = periodic
-        layout.row("定时兜底截图", withUnit(periodic, "秒"), height: Metrics.controlHeight)
-        layout.hint("3–120 秒。事件触发之外的保底，间隔越短越费电")
+        layout.row(L("定时兜底截图", "Fallback screenshot interval"), withUnit(periodic, L("秒", "s")), height: Metrics.controlHeight)
+        layout.hint(L("3–120 秒。事件触发之外的保底，间隔越短越费电", "3–120 seconds. A safety net beyond event triggers; shorter intervals use more power"))
 
-        let strict = NSButton(checkboxWithTitle: "锁屏时直接关库（不只是暂停采集）",
+        let strict = NSButton(checkboxWithTitle: L("锁屏时直接关库（不只是暂停采集）", "Close the database on screen lock (not just pause capture)"),
                               target: self, action: #selector(strictLockToggled))
         strictLockSwitch = strict
         layout.row(nil, strict, height: Metrics.checkboxHeight)
 
         // ---------------------------------------------------------------- 索引与检索
-        layout.section("索引与检索")
+        layout.section(L("索引与检索", "Indexing and search"))
 
-        let vectors = NSButton(checkboxWithTitle: "在检索里使用向量（没装模型时强制关）",
+        let vectors = NSButton(checkboxWithTitle: L("在检索里使用向量（没装模型时强制关）", "Use vectors in search (forced off when no model is installed)"),
                                target: self, action: #selector(vectorsToggled))
         vectorsSwitch = vectors
         layout.row(nil, vectors, height: Metrics.checkboxHeight)
 
-        let autoIndex = NSButton(checkboxWithTitle: "打开时与每隔一段时间自动建索引",
+        let autoIndex = NSButton(checkboxWithTitle: L("打开时与每隔一段时间自动建索引", "Build the index on launch and periodically"),
                                  target: self, action: #selector(autoIndexToggled))
         autoIndexSwitch = autoIndex
         layout.row(nil, autoIndex, height: Metrics.checkboxHeight)
@@ -211,14 +238,14 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         let interval = numberField(width: 76)
         interval.action = #selector(intervalChanged)
         intervalField = interval
-        layout.row("自动建索引间隔", withUnit(interval, "分钟"), height: Metrics.controlHeight)
-        layout.hint("下限 5 分钟")
+        layout.row(L("自动建索引间隔", "Auto-index interval"), withUnit(interval, L("分钟", "min")), height: Metrics.controlHeight)
+        layout.hint(L("下限 5 分钟", "Minimum 5 minutes"))
 
         let gpu = numberField(width: 76)
         gpu.action = #selector(gpuChanged)
         gpuField = gpu
-        layout.row("日均 GPU 预算", withUnit(gpu, "秒"), height: Metrics.controlHeight)
-        layout.hint("夜间增量任务用；「现在开始建索引」另有一本账")
+        layout.row(L("日均 GPU 预算", "Daily GPU budget"), withUnit(gpu, L("秒", "s")), height: Metrics.controlHeight)
+        layout.hint(L("夜间增量任务用；「现在开始建索引」另有一本账", "For the nightly incremental job; “Build index now” has its own budget"))
 
         // ---------------------------------------------------------------- 底部状态
         let note = NSTextField(wrappingLabelWithString: "")
@@ -233,7 +260,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         let window = NSWindow(contentRect: content.frame,
                               styleMask: [.titled, .closable, .miniaturizable],
                               backing: .buffered, defer: false)
-        window.title = "brosis 设置"
+        window.title = L("brosis 设置", "brosis Settings")
         window.delegate = self
         window.isReleasedWhenClosed = false
         window.contentView = content
@@ -276,8 +303,9 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         // 而 text_versions 没有覆盖 byte_len 的索引、行里还带着正文，SQLCipher 要逐页解密，
         // 整个过程还占着 Store 的锁（采集写入被挡住）。以前每个 handler 都调 reload()，
         // 点一下步进器就扫一遍。现在只显示最近一次检查的结果，要新的就点「现在检查并清理」。
-        usageLabel?.stringValue = lastQuota?.message ?? "点「现在检查并清理」查看当前用量"
-        noteLabel?.stringValue = "上次配额检查：\(lastAction ?? QuotaScheduler.shared.lastNote)"
+        usageLabel?.stringValue = lastQuota?.message ?? L("点「现在检查并清理」查看当前用量", "Click “Check and clean now” to see current usage")
+        noteLabel?.stringValue = L("上次配额检查：\(lastAction ?? QuotaScheduler.shared.lastNote)",
+                                   "Last quota check: \(lastAction ?? QuotaScheduler.shared.lastNote)")
     }
 
     /// 配额只写设置——判定与清理时由调用方把它作为参数传给 core
@@ -286,8 +314,16 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         Settings.quotaGiB = giB
         recorder?.logEvent(kind: "settings_changed",
                            detail: "storage.quotaGiB=\(Settings.quotaGiB)")
-        lastAction = "配额已设为 \(String(format: "%.0f", Settings.quotaGiB)) GiB"
+        lastAction = L("配额已设为 \(String(format: "%.0f", Settings.quotaGiB)) GiB",
+                       "Disk limit set to \(String(format: "%.0f", Settings.quotaGiB)) GiB")
         reload()
+    }
+
+    /// 换语言：存下来 → 广播 → 把自己也关掉（会连同其它窗口一起重开成新语言）。
+    @objc private func languageChanged() {
+        guard let raw = languagePopup?.selectedItem?.representedObject as? String,
+              let picked = UILanguage(rawValue: raw) else { return }
+        L10n.set(picked)
     }
 
     @objc private func quotaChanged() { applyQuota(quotaField?.doubleValue ?? Settings.quotaGiB) }
@@ -295,14 +331,14 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
 
     @objc private func autoExpireToggled() {
         Settings.autoExpire = autoExpireSwitch?.state == .on
-        lastAction = Settings.autoExpire ? "自动清理已开" : "自动清理已关（到线只提示不删）"
+        lastAction = Settings.autoExpire ? L("自动清理已开", "Auto-clean on") : L("自动清理已关（到线只提示不删）", "Auto-clean off (warn only at the limit)")
         recorder?.logEvent(kind: "settings_changed", detail: "storage.autoExpire=\(Settings.autoExpire)")
         reload()
     }
 
     /// 扫描搬到后台队列：它是全表扫 + 解密 + 占 Store 锁，放主线程会卡住菜单栏。
     @objc private func checkNowClicked() {
-        lastAction = "正在检查…"
+        lastAction = L("正在检查…", "Checking…")
         reload()
         QuotaScheduler.shared.checkNowAsync { [weak self] note, action in
             self?.lastAction = note
@@ -315,7 +351,9 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         Settings.periodicInterval = periodicField?.doubleValue ?? Settings.periodicInterval
         // CaptureController 的间隔是 `private static let` 一次性解析并缓存的，
         // 写 UserDefaults 不会让本进程重读——如实说要重启，别写"下次起流生效"。
-        lastAction = "定时兜底改为 \(String(format: "%.0f", Settings.periodicInterval)) s（**重启 brosis 后生效**）"
+        lastAction = L("定时兜底改为 \(String(format: "%.0f", Settings.periodicInterval)) s（重启 brosis 后生效）",
+                       "Fallback interval set to \(String(format: "%.0f", Settings.periodicInterval))s "
+                       + "(takes effect after restarting brosis)")
         recorder?.logEvent(kind: "settings_changed",
                            detail: "capture.periodicInterval=\(Settings.periodicInterval)")
         reload()
@@ -323,7 +361,8 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
 
     @objc private func strictLockToggled() {
         Settings.strictLock = strictLockSwitch?.state == .on
-        lastAction = "严格锁屏：\(Settings.strictLock ? "开" : "关")"
+        lastAction = L("严格锁屏：", "Strict lock: ")
+                   + (Settings.strictLock ? L("开", "on") : L("关", "off"))
         reload()
     }
 
@@ -332,25 +371,29 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     @objc private func vectorsToggled() {
         QueryEmbedderService.shared.setVectorsEnabled(vectorsSwitch?.state == .on,
                                                       store: recorder?.withStore { $0 } ?? nil)
-        lastAction = "向量检索：\(Settings.vectorsEnabled ? "开" : "关")"
+        lastAction = L("向量检索：", "Vector search: ")
+                   + (Settings.vectorsEnabled ? L("开", "on") : L("关", "off"))
         reload()
     }
 
     @objc private func autoIndexToggled() {
         Settings.autoIndex = autoIndexSwitch?.state == .on
-        lastAction = "自动建索引：\(Settings.autoIndex ? "开" : "关")"
+        lastAction = L("自动建索引：", "Auto-index: ")
+                   + (Settings.autoIndex ? L("开", "on") : L("关", "off"))
         reload()
     }
 
     @objc private func intervalChanged() {
         Settings.autoIndexIntervalMinutes = intervalField?.doubleValue ?? Settings.autoIndexIntervalMinutes
-        lastAction = "自动建索引间隔改为 \(Int(Settings.autoIndexIntervalMinutes)) 分钟"
+        lastAction = L("自动建索引间隔改为 \(Int(Settings.autoIndexIntervalMinutes)) 分钟",
+                       "Auto-index interval set to \(Int(Settings.autoIndexIntervalMinutes)) min")
         reload()
     }
 
     @objc private func gpuChanged() {
         Settings.dailyGPUSeconds = gpuField?.doubleValue ?? Settings.dailyGPUSeconds
-        lastAction = "日均 GPU 预算改为 \(Int(Settings.dailyGPUSeconds)) s"
+        lastAction = L("日均 GPU 预算改为 \(Int(Settings.dailyGPUSeconds)) s",
+                       "Daily GPU budget set to \(Int(Settings.dailyGPUSeconds))s")
         reload()
     }
 }

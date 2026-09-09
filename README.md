@@ -1,236 +1,244 @@
 # brosis
 
-**本地 macOS 活动记录器。** 记录你在哪个应用、哪个窗口、看的是什么内容，整理成可查询的时间线与台账，加密存在本机，通过 MCP 供 AI 助手检索。
+[简体中文](README.zh-CN.md) · **English**
 
-一句话说清它和别的工具的区别：**数据不出本机，理解层不靠大模型。** 时间线、时长统计、模式识别全部由确定性规则生成，不调用任何模型也能用；向量检索是可选的第二层，模型也在本地跑。
+**A local activity recorder for macOS.** It records which app and window you were in and what was on the screen, turns that into a searchable timeline and ledger, keeps it encrypted on your own machine, and exposes it to AI assistants over MCP.
+
+What sets it apart, in one line: **your data never leaves the machine, and the understanding layer does not depend on a large model.** The timeline, time accounting and activity patterns are produced by deterministic rules — brosis is fully useful with no model installed at all. Vector search is an optional second layer, and that model runs locally too.
 
 ```
-你在屏幕上看到的  →  加密的本地数据库  →  MCP  →  你的 AI 助手
-                     （从不外发）
+what you see on screen  →  encrypted local database  →  MCP  →  your AI assistant
+                           (never sent anywhere)
 ```
 
 ---
 
-## 目录
+## Contents
 
-- [它能做什么](#它能做什么)
-- [四条硬约束](#四条硬约束)
-- [安装](#安装)
-- [使用](#使用)
-- [接入 AI 助手（MCP）](#接入-ai-助手mcp)
-- [隐私与数据](#隐私与数据)
-- [开发](#开发)
-- [架构](#架构)
-- [参考文献](#参考文献)
-- [许可](#许可)
+- [What it does](#what-it-does)
+- [Four hard constraints](#four-hard-constraints)
+- [Install](#install)
+- [Using it](#using-it)
+- [Connecting an AI assistant (MCP)](#connecting-an-ai-assistant-mcp)
+- [Privacy and your data](#privacy-and-your-data)
+- [Development](#development)
+- [Architecture](#architecture)
+- [References](#references)
+- [License](#license)
 
 ---
 
-## 它能做什么
+## What it does
 
-**记录。** 应用切换、窗口标题、URL、文件路径，以及屏幕上实际可见的正文。正文优先走 macOS 无障碍接口（AX）直接读文字；读不到的应用（Electron、自绘界面）退回到视口 OCR。只记录**当前视口内实际显示**的内容，不追溯你没滚动到的历史。
+**Record.** App switches, window titles, URLs, file paths, and the text actually visible on screen. Text is read through the macOS accessibility (AX) API where possible; apps that expose nothing that way (Electron, custom-drawn UIs) fall back to OCR of the viewport. Only what is **actually visible right now** is recorded — brosis does not scroll back to collect history you never looked at.
 
-**整理。** 把零散的观察合并成会话，生成日 / 周台账、时长统计、活动模式。这一层是纯规则，可复现、可解释、零模型调用。
+**Organize.** Scattered observations are merged into sessions, then into daily and weekly ledgers, time totals and activity patterns. This layer is pure rules: reproducible, explainable, zero model calls.
 
-**检索。** 三条通道融合：精确字段（应用、URL、路径）、全文检索（SQLite FTS5，中文按二元组切分）、可选的向量语义检索。融合用加权 RRF。
+**Search.** Three channels are fused: exact fields (app, URL, path), full-text search (SQLite FTS5, with bigram tokenization for Chinese), and optional vector semantic search. Fusion is weighted RRF.
 
-**交给 AI 助手。** 内置 MCP 服务器，9 个只读工具：`search`、`get_evidence`、`get_context`、`get_timeline`、`get_day_ledger`、`get_week_ledger`、`get_patterns`、`get_item`、`recent_activity`。
+**Hand it to an AI assistant.** A built-in MCP server exposes 9 read-only tools: `search`, `get_evidence`, `get_context`, `get_timeline`, `get_day_ledger`, `get_week_ledger`, `get_patterns`, `get_item`, `recent_activity`.
 
-## 四条硬约束
+## Four hard constraints
 
-这四条是设计前提，不是可配置项：
+These are design premises, not settings:
 
-1. **默认不外发。** 没有云端、没有账号、没有遥测。app 自己不会主动联网——`SUEnableAutomaticChecks` 是关的，连"要不要自动检查更新"那个许可框都不弹。只有两件事会走网络，都得你点：菜单里的「检查更新…」，和在模型面板里下载嵌入模型。
-2. **入库前脱敏。** 密码、验证码、令牌、密钥在**写进数据库之前**就被替换掉——库里从一开始就没有这些明文。标题和 URL 同样过脱敏（邮件标题里的验证码、URL 查询串里的 access_token 都是常见泄漏点）。
-3. **存储有上限。** 默认 10 GiB 原文净载荷，到线后先提示导出、确认后才删最旧的原文。可在设置里调。
-4. **app 自包含。** 所有依赖静态链接进 app bundle，不依赖构建目录、不依赖 Homebrew、不装任何后台守护进程。
+1. **Nothing leaves the machine by default.** No cloud, no account, no telemetry. The app never goes online on its own — `SUEnableAutomaticChecks` is off, so it does not even show the "check for updates automatically?" consent dialog. Exactly two things touch the network, and both need a click from you: "Check for Updates…" in the menu, and downloading an embedding model in the models panel.
+2. **Redaction happens before storage.** Passwords, verification codes, tokens and keys are replaced **before the row is written** — the plaintext was never in the database to begin with. Titles and URLs go through the same redaction (a verification code in an email subject, an `access_token` in a query string).
+3. **Storage is capped.** 10 GiB of raw text payload by default. At the limit brosis offers an encrypted export first and only deletes the oldest text after you confirm. Adjustable in Settings.
+4. **The app is self-contained.** Every dependency is statically linked into the bundle. No reliance on a build directory, no Homebrew, no background daemon installed anywhere.
 
-另外默认就**不采集**密码管理器、钥匙串、认证器、券商与银行类应用（内置 25 个 bundle id 的清单），以及浏览器的隐私窗口。
+On top of that, password managers, keychain access, authenticators, brokerage and banking apps are **excluded by default** (a built-in list of 25 bundle ids), as are browser private windows.
 
-## 安装
+## Install
 
-macOS 26 或更新（Apple Silicon）。
+macOS 26 or later, Apple Silicon.
 
-从 [Releases](https://github.com/AllenBall/brosis/releases) 下载 DMG，拖进「应用程序」。app 经过 Developer ID 签名与 Apple 公证，首次打开不需要绕过 Gatekeeper。
+Download the DMG from [Releases](https://github.com/AllenBall/brosis/releases) and drag it into Applications. The app is Developer ID signed and notarized by Apple, so no Gatekeeper workaround is needed on first launch.
 
-首次运行会引导你授予两项权限：
+First run walks you through two permissions:
 
-| 权限 | 用途 | 不给会怎样 |
+| Permission | Why | If you decline |
 |---|---|---|
-| 辅助功能 | 读窗口标题与正文 | 只能记录应用切换，没有内容 |
-| 屏幕录制 | AX 读不到时的 OCR 回退 | Electron 与自绘应用没有正文 |
-| 自动化（可选） | 无障碍接口读不到网址时，向浏览器要当前标签页的地址与标题 | 部分浏览器场景缺 URL，其余不受影响 |
+| Accessibility | Read window titles and text | Only app switches are recorded, with no content |
+| Screen Recording | OCR fallback when AX yields nothing | Electron and custom-drawn apps have no text |
+| Automation (optional) | Ask the browser for the current tab's URL and title when AX cannot provide them | Some browser cases lack a URL; everything else is unaffected |
 
-brosis 是菜单栏应用（无 Dock 图标）。内置 Sparkle 自动更新，签名验证失败时**拒绝更新**而不是降级放行。
+brosis lives in the menu bar (no Dock icon). Updates use Sparkle, and a signature that fails to verify causes the update to be **refused**, never installed anyway.
 
-## 使用
+## Using it
 
-菜单栏图标下有这些入口：
+From the menu bar icon:
 
-**应用采集清单** — 每个应用一行，三档可选：
+**App capture list** — one row per app, three modes:
 
-| 档位 | 记什么 |
+| Mode | What is recorded |
 |---|---|
-| 不采集 | 什么都不记 |
-| 只记事件 | 应用切换与窗口标题，不读正文 |
-| 事件 + 内容 | 完整记录（默认） |
+| Do not capture | Nothing |
+| Events only | App switches and window titles, no text |
+| Events + content | Everything (default) |
 
-同一行还显示最近 7 天的观察数与完整性分布（完整 / 部分 / 不可用 / 排除），方便判断哪些应用值得留。「不可用」会进一步拆成**读空**（应用给不出文本，要靠 OCR）、**超时**、**受阻**（权限、安全输入、锁屏），三类的处置方向完全不同。
+Each row also shows the last 7 days of observation counts and a completeness breakdown (complete / partial / unavailable / excluded), so you can judge which apps are worth keeping. "Unavailable" is broken down further into **no text** (the app exposes nothing — needs OCR), **timeout**, and **blocked** (permissions, secure input, screen locked). Those three call for completely different fixes.
 
-**模型** — 管理向量检索用的嵌入模型。可从 Hugging Face 下载、从本地目录导入，或关联到外部目录（例如 LM Studio 的模型目录，只记路径不复制）。支持 Qwen3-Embedding 的 0.6B / 4B / 8B 三档，面板里随时切换。
+**Models** — manage the embedding model used for vector search. Download from Hugging Face, import from a local folder, or link an external folder (an LM Studio model directory, for instance — the path is remembered, nothing is copied). Qwen3-Embedding is supported at 0.6B / 4B / 8B, switchable at any time.
 
-**设置** — 磁盘上限、自动清理、定时兜底截图间隔、严格锁屏、向量检索开关、自动建索引与间隔、日均 GPU 预算。
+**Settings** — interface language, disk limit, auto-clean, fallback screenshot interval, strict screen lock, vector search toggle, auto-index and its interval, daily GPU budget.
 
-**加密导出** — 导出为加密归档，用于备份或迁移到另一台机器。
+**Encrypted export** — export to an encrypted archive for backup or migration to another machine.
 
-**跨设备同步** — 可选，默认走你自己的 iCloud Drive（`iCloud Drive/brosis-sync/`）。同步的是加密后的内容，密钥不进同步目录。
+**Cross-device sync** — optional, through your own iCloud Drive (`iCloud Drive/brosis-sync/`). What syncs is encrypted content; the key never enters the sync folder.
 
-全局热键：`⌃⌥⌘P` 暂停 / 继续采集，`⌃⌥⌘L` 锁定数据库。
+Global hotkeys: `⌃⌥⌘P` pause / resume capture, `⌃⌥⌘L` lock the database.
 
-### 什么时候不采集
+### Interface language
 
-- 屏幕锁定、屏保、睡眠
-- 检测到安全输入（系统正在收密码）
-- 浏览器隐私窗口（事件仍记，正文、标题、URL 一律不存）
-- 你手动暂停时
+Settings → Language. Chinese and English, defaulting to **follow the system**: a Chinese system gets Chinese, everything else gets English. Changing it closes any open windows so they reopen in the new language; no restart is needed.
 
-采集本身**不看电源状态**，电池上照常记录。接电门控只管建索引这类 GPU 重活（拔电暂停、接回继续）。
+Self-check output and command-line tools stay in Chinese by design — they are debugging surfaces, and translating them would only make logs stop matching the notes that explain them.
 
-## 接入 AI 助手（MCP）
+### When it does not capture
 
-菜单栏 →「MCP 集成」，一键为主流 harness 写入用户级配置：Claude Code、Codex CLI、Cursor、Grok CLI、ZCode、Kimi Code。优先调用各家官方 CLI 写配置，CLI 不可用时才直接改配置文件（改前备份、原子替换，文件解析不了就拒绝写并给出手动片段）。
+- Screen locked, screensaver, sleep
+- Secure input detected (the system is collecting a password)
+- Browser private windows (the event is still recorded; text, title and URL are not stored at all)
+- While you have it paused
 
-也可以手动接：
+Capture itself **ignores power state** — it keeps recording on battery. The AC-power gate applies only to GPU-heavy work such as index building (which pauses when unplugged and resumes when you plug back in).
+
+## Connecting an AI assistant (MCP)
+
+Menu bar → "MCP integration" writes user-level config for the major harnesses in one click: Claude Code, Codex CLI, Cursor, Grok CLI, ZCode, Kimi Code. Each harness's official CLI is preferred; only when the CLI is unavailable does brosis edit the config file directly (backing it up first, replacing atomically, and refusing to write — with a snippet for you to paste — if the file cannot be parsed).
+
+Manual setup works too:
 
 ```bash
 claude mcp add brosis /Applications/brosis.app/Contents/MacOS/brosis-mcp
 ```
 
-**授权是真正的闸门。** 配置文件里有条目只表示"能连上"，能不能读数据由数据库里的 `grants` 表决定，没有授权的客户端**所有工具一律拒绝**。授权可以按客户端限定可见的应用、时间窗口和字段粒度（只给摘要 / 允许原文）：
+**The grant is the real gate.** An entry in a config file only means a client *can connect*. Whether it can read anything is decided by the `grants` table in the database, and a client with no grant is **refused on every tool**. A grant can restrict which apps are visible, over what time window, and at what field granularity (summary only, or full evidence):
 
 ```bash
 brosis-mcp admin grant add --client claude-code --fields evidence
 brosis-mcp admin grant list
-brosis-mcp admin audit --limit 20     # 谁读过什么（不含正文）
+brosis-mcp admin audit --limit 20     # who read what (never the content itself)
 ```
 
-不确定客户端自报什么名字时，MCP 集成窗口有「学习模式」：开启 60 秒，被拒绝的连接会把自报的名字捞出来给你确认。
+If you are not sure what name a client reports, the MCP integration window has a **learn mode**: turn it on for 60 seconds and any refused connection surfaces the name it claimed, for you to confirm.
 
-命令行也能管：
+The command line works as well:
 
 ```bash
-brosis --mcp list                          # 各 harness 的配置与授权状态
+brosis --mcp list                          # config and grant status per harness
 brosis --mcp enable --harness claude-code
 ```
 
-## 隐私与数据
+## Privacy and your data
 
-数据库用 SQLCipher 加密，密钥存在**数据保护钥匙串**里——屏幕锁定期间钥匙串不可读，所以新装的 app 在锁屏状态下打不开库，解锁后会自动重试。已经在跑的进程把密钥留在内存里，锁屏不受影响。
+The database is encrypted with SQLCipher and the key lives in the **data-protection keychain** — which is unreadable while the screen is locked. A freshly installed app therefore cannot open the database on a locked screen; it retries automatically once you unlock. An already-running process keeps the key in memory and is unaffected by locking.
 
-数据都在 `~/Library/Application Support/brosis/`。删掉这个目录就等于彻底删除，没有任何副本在别处。
+Everything lives in `~/Library/Application Support/brosis/`. Deleting that folder is a complete deletion — there is no copy anywhere else.
 
-单条删除、按应用删除、按时间段删除都会级联清掉全文索引与向量索引，不留孤儿行。
+Deleting a single record, an entire app's data, or a time range cascades through the full-text and vector indexes, leaving no orphaned rows.
 
-**在别的机器上读你的数据，需要同时拿到数据库文件和钥匙串里的密钥。** 只拷走数据库文件是打不开的。
+**Reading your data on another machine requires both the database file and the key from the keychain.** Copying the database file alone gets you nothing.
 
-## 开发
+## Development
 
-需要 Xcode 26（含 Metal Toolchain，用来现编 mlx 的着色器库）。仓库是两个独立的 SwiftPM 包。
+Requires Xcode 26 (including the Metal Toolchain, used to compile mlx's shader library). The repository is two independent SwiftPM packages.
 
 ```bash
-# 存储核心：加密库、检索、台账、MCP 服务
+# Storage core: encrypted database, search, ledgers, MCP service
 swift test --package-path core
 
-# 完整 app：构建 + 签名 + 公证前检查 + 发布闸门
+# Full app: build + sign + pre-notarization checks + release gate
 bash app/build_app.sh
 ```
 
-`build_app.sh` 会在签名之后把构建目录**临时改名**再跑一遍自检与嵌入自测——这道闸门保证 app 真的自包含，不会出现"靠构建目录才没崩"的产物。构建产物一律落在 `~/Library/Caches/brosis-build/`，不写进项目目录。
+After signing, `build_app.sh` **temporarily renames the build directory** and runs the self-check and embedding self-test again. That gate is what guarantees the app is genuinely self-contained — a bundle that only worked because the build directory happened to be there cannot pass. All build products land in `~/Library/Caches/brosis-build/`, never in the project directory.
 
-若 `xcode-select` 指向的是 Command Line Tools（那里没有 `metal` 编译器），脚本会自动切到 Xcode，不改你的全局设置。
+If `xcode-select` points at the Command Line Tools (which have no `metal` compiler), the script switches to Xcode for that build without touching your global setting.
 
-### 仓库结构
+### Repository layout
 
-| 目录 | 内容 |
+| Directory | Contents |
 |---|---|
-| `app/` | 菜单栏 app：事件骨架、AX 与适配规则、OCR、模型管理、各个窗口、MCP 集成 |
-| `core/` | 加密存储核心：SQLCipher、schema 与迁移、写入 / 删除 / 配额、检索、台账、同步、MCP 服务、`brosis-store` CLI |
-| `tools/eval/` | 检索评测流水线：合成语料、查询集、FTS-only 与混合检索对照、阈值扫描 |
-| `tools/bench/` | OCR 基准、FTS 分词对照、运行时基准 |
-| `tools/proto/` | schema 原型、合成数据生成、正确性与容量测量 |
-| `dist/` | DMG 打包、公证、appcast 生成 |
+| `app/` | Menu bar app: event skeleton, AX and adapter rules, OCR, model management, windows, MCP integration |
+| `core/` | Encrypted storage core: SQLCipher, schema and migrations, writes / deletes / quota, search, ledgers, sync, MCP service, the `brosis-store` CLI |
+| `tools/eval/` | Retrieval evaluation pipeline: synthetic corpus, query sets, FTS-only vs. hybrid comparison, threshold sweeps |
+| `tools/bench/` | OCR benchmarks, FTS tokenizer comparison, runtime benchmarks |
+| `tools/proto/` | Schema prototype, synthetic data generation, correctness and capacity measurement |
+| `dist/` | DMG packaging, notarization, appcast generation |
 
-### 诊断工具
+### Diagnostic tools
 
 ```bash
-brosis --self-check     # 200 项自检，覆盖每一条硬约束与关键判定
-brosis --ax-probe       # 量 Electron 应用的 AX 树到底给不给文本
-brosis --dump-ocr       # OCR 识别结果逐行核对
+brosis --self-check     # 202 assertions covering every hard constraint and key decision
+brosis --ax-probe       # measure whether an Electron app's AX tree actually yields text
+brosis --dump-ocr       # OCR results, line by line, for manual checking
 ```
 
-`--ax-probe` 在排查"某个应用读不到正文"时很有用：它会打印角色分布、逐层追踪 `AXWebArea`、扫描深度与视口裁剪两个可疑参数，走的是和生产完全相同的遍历路径。
+`--ax-probe` earns its keep when an app appears to have no readable text: it prints the role distribution, walks down from each `AXWebArea` level by level, and sweeps the two usual suspects (traversal depth and viewport clipping) — all along the exact same code path production uses.
 
-### 测试与自检的分工
+### Tests vs. self-check
 
-- `swift test --package-path core` — 存储核心的单元与端到端测试
-- `brosis --self-check` — 跑在真实 app bundle 里的 200 项断言，构建闸门会强制它通过
+- `swift test --package-path core` — unit and end-to-end tests for the storage core
+- `brosis --self-check` — 202 assertions that run inside the real app bundle; the build gate requires them all to pass
 
-自检刻意断言**关系而不是字面量**（例如"设置读的键 == 功能自己的常量"，而不是"默认值 == 12.0"）——写死字面量恰恰会漏掉归属方改动这种真正的漂移。
+The self-check deliberately asserts **relationships rather than literals** (for example, "the key Settings reads == the constant the feature itself owns", not "the default == 12.0"). Hard-coded literals are precisely what fails to catch a real drift when the owning side changes.
 
-## 架构
+## Architecture
 
 ```
-采集           AX 适配规则 → 视口 OCR 回退 → 入库前脱敏
+Capture       AX adapter rules → viewport OCR fallback → redaction before storage
   ↓
-存储           SQLCipher + FTS5（中文二元组）+ sqlite-vec（int8[1024] 余弦）
+Storage       SQLCipher + FTS5 (bigram for Chinese) + sqlite-vec (int8[1024], cosine)
   ↓
-理解           会话化 → 日 / 周台账 → 活动模式        ← 纯规则，零模型
+Understand    sessionization → daily / weekly ledgers → activity patterns   ← rules only, no model
   ↓
-检索           精确字段 ∪ FTS ∪ 向量  →  加权 RRF 融合
+Search        exact fields ∪ FTS ∪ vectors  →  weighted RRF fusion
   ↓
-出口           MCP（9 个只读工具，grants 授权）
+Egress        MCP (9 read-only tools, gated by grants)
 ```
 
-**采集适配规则。** 不同应用的界面结构差别很大，逐个写规则：Safari、Claude 桌面版、飞书、微信各有专门规则，其余走通用规则。规则描述"正文在哪个区域、怎么读、读不到时退回什么"。
+**Adapter rules.** App UIs differ enough that each gets its own rule: Safari, Claude desktop, Feishu/Lark and WeChat have dedicated rules; everything else uses a generic one. A rule describes where the text lives, how to read it, and what to fall back to when that fails.
 
-Electron 应用需要先设 `AXManualAccessibility` 才暴露无障碍树；一个窗口里往往有多个 `AXWebArea`（外壳一个、真正的应用一个、内嵌预览再一个），必须挑内容最多的那个而不是第一个。Chromium 建树是异步的，读到空树时会隔一会儿重扫。
+Electron apps need `AXManualAccessibility` set before they expose an accessibility tree at all. A single window often contains several `AXWebArea` nodes — the shell, the actual app, an embedded preview — and the one with the most content must be chosen rather than the first. Chromium builds the tree asynchronously, so an empty read is retried a moment later.
 
-**不使用 `AXEnhancedUserInterface`**，即使某些应用只认它。该属性会让 Chromium 进入屏幕阅读器模式并缓冲按键，客户端断开时把缓冲的按键**重放进用户当前的焦点输入框**——对一个常驻后台的记录器来说不可接受。这类应用维持 OCR 路径。
+**`AXEnhancedUserInterface` is deliberately not used**, even for apps that honor only that attribute. It puts Chromium into screen-reader mode, where it buffers keystrokes and, when the client disconnects, **replays those buffered keystrokes into whatever field the user is focused on**. For a recorder that runs in the background all day, that is not an acceptable risk. Such apps stay on the OCR path.
 
-**向量检索是可选的。** 所有尺寸的模型统一截断到 1024 维，换模型只需重建向量、不用改表。模型在本地用 mlx-swift 跑。建索引受门控：接电、温度正常、未锁定、日均 GPU 预算。没装模型时向量通道显示为未启用，精确字段与全文检索不受影响。
+**Vector search is optional.** Every model size is truncated to a uniform 1024 dimensions, so switching models only requires rebuilding vectors, never a schema change. Models run locally through mlx-swift. Index building is gated on AC power, normal thermal state, an unlocked database and a daily GPU budget. With no model installed the vector channel simply reports as off; exact fields and full-text search are unaffected.
 
-**schema 有版本与迁移**（当前 v9），升级时按序执行迁移，失败即回滚。
+**The schema is versioned and migrated** (currently v9), applying migrations in order and rolling back on failure.
 
-## 参考文献
+## References
 
-架构上直接参照或反复用到的工作：
+Work this project draws on directly or leans on repeatedly:
 
-**确定性台账层的直接参照**
+**The deterministic ledger layer**
 
-- *Activity Frames* — [arXiv:2608.05784](https://arxiv.org/abs/2608.05784)，代码 [nossa-y/activity-frames](https://github.com/nossa-y/activity-frames)。用零 LLM 调用把屏幕快照确定性地编译为结构化"活动帧"，可复现、可解释。本项目的会话化与台账层照这个思路做。
+- *Activity Frames* — [arXiv:2608.05784](https://arxiv.org/abs/2608.05784), code at [nossa-y/activity-frames](https://github.com/nossa-y/activity-frames). Deterministically compiles screen snapshots into structured "activity frames" with zero LLM calls — reproducible and explainable. brosis's sessionization and ledger layer follow this approach.
 
-  **引用它时请连同适用范围一起看**：作者标注为独立研究者；论文报告的 98.4% 问答准确率来自**单用户语料上 8 天、64 个问答**，问题集中在应用、时长、排名与域名访问，不涵盖文章内容与决策原因。论文本身也区分「停留」与「注意力」，并讨论双屏时长的重复计算。本项目把它当作**可解释活动台账**的证据，不当作通用记忆质量的证明——这个区分在设计里是认真对待的：前台停留、有输入的活跃区间、未知状态分开记录，不混成一个"使用时长"。
+  **Read the scope along with the result.** The author is listed as an independent researcher, and the reported 98.4% QA accuracy comes from **8 days of a single user's corpus and 64 questions**, concentrated on apps, durations, rankings and domain visits — not on article content or the reasons behind decisions. The paper itself distinguishes dwell time from attention and discusses double-counting across two displays. brosis treats it as evidence for an **explainable activity ledger**, not as proof of general memory quality — a distinction taken seriously in the design: foreground dwell, active intervals with input, and unknown state are recorded separately rather than collapsed into one "time used" number.
 
-**为什么必须 AX 与 OCR 双路径**
+**Why AX and OCR must both exist**
 
-- V. Muryn, M. Sumyk, M. Hirna, S. Garkot, M. Shamrai, *Screen2AX: Vision-Based Approach for Automatic macOS Accessibility Generation*, [arXiv:2507.16704](https://arxiv.org/abs/2507.16704)（MacPaw Research）。实测**只有约 33% 的 macOS 应用提供完整的无障碍支持**。这条数据是本项目不敢只走 AX 的直接依据——单靠无障碍接口，三分之二的应用读不全。
+- V. Muryn, M. Sumyk, M. Hirna, S. Garkot, M. Shamrai, *Screen2AX: Vision-Based Approach for Automatic macOS Accessibility Generation*, [arXiv:2507.16704](https://arxiv.org/abs/2507.16704) (MacPaw Research). Measured that **only about 33% of macOS apps offer full accessibility support**. That number is why brosis cannot rely on the accessibility API alone — two thirds of apps would be read incompletely.
 
-**检索**
+**Search**
 
-- G. V. Cormack, C. L. A. Clarke, S. Buettcher, *Reciprocal Rank Fusion Outperforms Condorcet and Individual Rank Learning Methods*, SIGIR 2009。多通道检索结果的融合方法；本项目融合精确字段、全文与向量三条通道，RRF 常数 k=60 取自该文。
+- G. V. Cormack, C. L. A. Clarke, S. Buettcher, *Reciprocal Rank Fusion Outperforms Condorcet and Individual Rank Learning Methods*, SIGIR 2009. The method for fusing results from multiple retrieval channels; brosis fuses exact fields, full text and vectors, and takes the RRF constant k=60 from this paper.
 
-- A. Kusupati et al., *Matryoshka Representation Learning*, [arXiv:2205.13147](https://arxiv.org/abs/2205.13147)。让同一个嵌入的前 N 维单独可用。本项目据此把 0.6B / 4B / 8B 三档模型统一截到 1024 维——换模型只需重建向量，不用改表结构。
+- A. Kusupati et al., *Matryoshka Representation Learning*, [arXiv:2205.13147](https://arxiv.org/abs/2205.13147). Makes the first N dimensions of an embedding usable on their own. brosis uses this to truncate the 0.6B / 4B / 8B models to a common 1024 dimensions — switching models then requires rebuilding vectors, not changing the schema.
 
-- Qwen Team, *Qwen3 Embedding: Advancing Text Embedding and Reranking Through Foundation Models*, [arXiv:2506.05176](https://arxiv.org/abs/2506.05176)。本项目使用的嵌入模型系列（Apache 2.0）。
+- Qwen Team, *Qwen3 Embedding: Advancing Text Embedding and Reranking Through Foundation Models*, [arXiv:2506.05176](https://arxiv.org/abs/2506.05176). The embedding model family used here (Apache 2.0).
 
-**采集**
+**Capture**
 
-- *Perceptual hash distance distributions*, [arXiv:2212.08035](https://arxiv.org/abs/2212.08035)。按需截图的帧去重阈值取自该文的距离分布数据（无关图像 pHash 归一化距离均值约 0.49，同图重压约 0.005）。
+- *Perceptual hash distance distributions*, [arXiv:2212.08035](https://arxiv.org/abs/2212.08035). The frame-deduplication threshold for on-demand screenshots comes from this paper's distance distributions (mean normalized pHash distance around 0.49 for unrelated images, around 0.005 for a recompression of the same image).
 
-工程实现上重度依赖的项目：[SQLCipher](https://github.com/sqlcipher/sqlcipher)、[sqlite-vec](https://github.com/asg017/sqlite-vec)、[mlx-swift](https://github.com/ml-explore/mlx-swift)、[Sparkle](https://sparkle-project.org/)、[Model Context Protocol](https://modelcontextprotocol.io/)。
+Projects this leans on heavily in implementation: [SQLCipher](https://github.com/sqlcipher/sqlcipher), [sqlite-vec](https://github.com/asg017/sqlite-vec), [mlx-swift](https://github.com/ml-explore/mlx-swift), [Sparkle](https://sparkle-project.org/), [Model Context Protocol](https://modelcontextprotocol.io/).
 
-## 许可
+## License
 
-[MIT](LICENSE)。
+[MIT](LICENSE).
 
-依赖各自的许可另计：SQLCipher（BSD 类）、sqlite-vec（Apache 2.0 / MIT）、mlx-swift（MIT）、Sparkle（MIT）、Qwen3-Embedding 模型权重（Apache 2.0）。
+Dependencies carry their own licenses: SQLCipher (BSD-style), sqlite-vec (Apache 2.0 / MIT), mlx-swift (MIT), Sparkle (MIT), Qwen3-Embedding weights (Apache 2.0).

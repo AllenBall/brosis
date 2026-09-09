@@ -26,9 +26,9 @@ enum PolicyGroup: Int, CaseIterable, Sendable, Comparable {
 
     var title: String {
         switch self {
-        case .adapter:    return "有适配器"
-        case .generic:    return "通用采集"
-        case .denylisted: return "默认不采集"
+        case .adapter:    return L("有适配器", "Has adapter")
+        case .generic:    return L("通用采集", "Generic capture")
+        case .denylisted: return L("默认不采集", "Excluded by default")
         }
     }
 
@@ -68,7 +68,7 @@ struct PolicyListRow: Sendable, Equatable {
     /// 这一刻真正生效的档（临时暂停压过存下来的那一档，与 `CapturePolicyStore.decide` 同一口径）。
     var effectiveMode: CapturePolicyMode { temporaryUntil == nil ? mode : .none }
 
-    /// 用户显式设过档吗（列表里标一个"你设的"，好和默认判定区分开）。
+    /// 用户显式设过档吗（列表里标一个L("你设的", "Set by you")，好和默认判定区分开）。
     var isUserSet: Bool { source == .user }
 
     /// 完整性分布那一列。**四态都写出来，包括 0**——3.12 说这一列是给人判断"值不值得留"的，
@@ -79,41 +79,43 @@ struct PolicyListRow: Sendable, Equatable {
     /// 只在有不可用时才括，否则每一行都拖一串 0。
     var completenessLabel: String {
         guard observations > 0 else { return "—" }
-        var text = "完整 \(complete) · 部分 \(partial) · 不可用 \(unavailable)"
+        var text = L("完整 \(complete) · 部分 \(partial) · 不可用 \(unavailable)",
+                     "complete \(complete) · partial \(partial) · unavailable \(unavailable)")
         if unavailable > 0 {
             var parts: [String] = []
-            if unavailableNoText > 0 { parts.append("读空 \(unavailableNoText)") }
-            if unavailableTimeout > 0 { parts.append("超时 \(unavailableTimeout)") }
-            if unavailableBlocked > 0 { parts.append("受阻 \(unavailableBlocked)") }
+            if unavailableNoText > 0 { parts.append(L("读空 \(unavailableNoText)", "no text \(unavailableNoText)")) }
+            if unavailableTimeout > 0 { parts.append(L("超时 \(unavailableTimeout)", "timeout \(unavailableTimeout)")) }
+            if unavailableBlocked > 0 { parts.append(L("受阻 \(unavailableBlocked)", "blocked \(unavailableBlocked)")) }
             if !parts.isEmpty { text += "（" + parts.joined(separator: " ") + "）" }
         }
-        return text + " · 排除 \(excluded)"
+        return text + L(" · 排除 \(excluded)", " · excluded \(excluded)")
     }
 
     /// 「最近出现」那一列。相对时间，避免把精确到秒的时间点摊在界面上。
     func lastSeenLabel(now: Date = Date()) -> String {
-        guard lastSeenMS > 0 else { return running ? "运行中，无观察" : "—" }
+        guard lastSeenMS > 0 else { return running ? L("运行中，无观察", "Running, no observations") : "—" }
         let seconds = now.timeIntervalSince1970 - Double(lastSeenMS) / 1000
         switch seconds {
-        case ..<0:      return "刚刚"
-        case ..<60:     return "\(Int(seconds)) 秒前"
-        case ..<3600:   return "\(Int(seconds / 60)) 分钟前"
-        case ..<86_400: return "\(Int(seconds / 3600)) 小时前"
-        default:        return "\(Int(seconds / 86_400)) 天前"
+        case ..<0:      return L("刚刚", "just now")
+        case ..<60:     return L("\(Int(seconds)) 秒前", "\(Int(seconds))s ago")
+        case ..<3600:   return L("\(Int(seconds / 60)) 分钟前", "\(Int(seconds / 60))m ago")
+        case ..<86_400: return L("\(Int(seconds / 3600)) 小时前", "\(Int(seconds / 3600))h ago")
+        default:        return L("\(Int(seconds / 86_400)) 天前", "\(Int(seconds / 86_400))d ago")
         }
     }
 
     /// 状态那一列：运行中 / 今日暂停 / 用户设过。
     func statusLabel(now: Date = Date()) -> String {
         var parts: [String] = []
-        if running { parts.append("运行中") }
+        if running { parts.append(L("运行中", "Running")) }
         if let until = temporaryUntil, until > now {
             let formatter = DateFormatter()
             formatter.dateFormat = "HH:mm"
-            parts.append("今日暂停至 \(formatter.string(from: until))")
+            parts.append(L("今日暂停至 \(formatter.string(from: until))",
+                           "paused until \(formatter.string(from: until))"))
         }
-        if isUserSet { parts.append("你设的") }
-        if source == .builtinDenylist { parts.append("内置清单") }
+        if isUserSet { parts.append(L("你设的", "Set by you")) }
+        if source == .builtinDenylist { parts.append(L("内置清单", "Built-in list")) }
         return parts.isEmpty ? "—" : parts.joined(separator: " · ")
     }
 }
@@ -264,9 +266,9 @@ extension CapturePolicyMode {
 
     var label: String {
         switch self {
-        case .none:             return "不采集"
-        case .eventsOnly:       return "只记事件"
-        case .eventsAndContent: return "事件 + 内容"
+        case .none:             return L("不采集", "Do not capture")
+        case .eventsOnly:       return L("只记事件", "Events only")
+        case .eventsAndContent: return L("事件 + 内容", "Events + content")
         }
     }
 }

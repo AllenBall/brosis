@@ -13,6 +13,13 @@ final class MCPIntegrationWindowController: NSObject, NSWindowDelegate,
 
     private weak var recorder: Recorder?
     private var window: NSWindow?
+
+    /// 界面语言换了就把窗口关掉：contentView 是打开时一次性搭出来的，
+    /// 就地把每个控件的文案换一遍既繁琐又容易漏，重开一次就全对了。
+    func closeForLanguageChange() {
+        window?.close()
+        window = nil
+    }
     private var tableView: NSTableView?
     private var statusLabel: NSTextField?
     private var noteLabel: NSTextField?
@@ -26,7 +33,7 @@ final class MCPIntegrationWindowController: NSObject, NSWindowDelegate,
     func configure(recorder: Recorder) { self.recorder = recorder }
 
     static func menuItem() -> NSMenuItem {
-        let item = NSMenuItem(title: "MCP 集成…", action: #selector(openFromMenu(_:)), keyEquivalent: "")
+        let item = NSMenuItem(title: L("MCP 集成…", "MCP integration…"), action: #selector(openFromMenu(_:)), keyEquivalent: "")
         item.target = MCPIntegrationWindowController.shared
         return item
     }
@@ -44,7 +51,7 @@ final class MCPIntegrationWindowController: NSObject, NSWindowDelegate,
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 900, height: 460),
                               styleMask: [.titled, .closable, .miniaturizable, .resizable],
                               backing: .buffered, defer: false)
-        window.title = "MCP 集成"
+        window.title = L("MCP 集成", "MCP integration")
         window.delegate = self
         window.center()
         window.isReleasedWhenClosed = false
@@ -87,12 +94,12 @@ final class MCPIntegrationWindowController: NSObject, NSWindowDelegate,
             content.addSubview(b)
             x += width + 8
         }
-        button("开启集成", #selector(enableClicked), 96)
-        button("关闭集成", #selector(disableClicked), 96)
-        button("打开配置文件", #selector(revealClicked), 120)
-        button("复制配置片段", #selector(copyClicked), 120)
-        button("学习模式（等 60 s 看谁来连）", #selector(learnClicked), 220)
-        button("刷新", #selector(refreshClicked), 72)
+        button(L("开启集成", "Enable"), #selector(enableClicked), 96)
+        button(L("关闭集成", "Disable"), #selector(disableClicked), 96)
+        button(L("打开配置文件", "Reveal config file"), #selector(revealClicked), 120)
+        button(L("复制配置片段", "Copy config snippet"), #selector(copyClicked), 120)
+        button(L("学习模式（等 60 s 看谁来连）", "Learn mode (watch 60s for connections)"), #selector(learnClicked), 220)
+        button(L("刷新", "Refresh"), #selector(refreshClicked), 72)
 
         let note = NSTextField(labelWithString: "")
         note.frame = NSRect(x: 16, y: 8, width: 868, height: 34)
@@ -110,9 +117,9 @@ final class MCPIntegrationWindowController: NSObject, NSWindowDelegate,
 
     private static let columns: [(String, String, Double)] = [
         ("harness", "Harness", 130),
-        ("state", "状态", 300),
-        ("grant", "授权", 90),
-        ("config", "用户级配置文件", 320),
+        ("state", L("状态", "Status"), 300),
+        ("grant", L("授权", "Grant"), 90),
+        ("config", L("用户级配置文件", "User-level config file"), 320),
     ]
 
     private var store: Store? { recorder?.withStore { $0 } ?? nil }
@@ -124,9 +131,12 @@ final class MCPIntegrationWindowController: NSObject, NSWindowDelegate,
         rows = HarnessCatalog.all.map { MCPIntegration.status(of: $0, store: store) }
         tableView?.reloadData()
         var lines: [String] = []
-        if store == nil { lines.append("库没打开：能改配置，但发不了 grant——解锁后再开一次开关。") }
-        lines.append("开关 = 写这个 harness 的用户级配置 + 发 / 撤 grants 表里的授权。"
-                   + "两件事缺一不可：没有 grant 的客户端所有工具都会被拒。")
+        if store == nil { lines.append(L("库没打开：能改配置，但发不了 grant——解锁后再开一次开关。", "Database not open: the config can be written but no grant can be issued — unlock and toggle again.")) }
+        lines.append(L("开关 = 写这个 harness 的用户级配置 + 发 / 撤 grants 表里的授权。"
+                       + "两件事缺一不可：没有 grant 的客户端所有工具都会被拒。",
+                       "Toggling does two things: writes this harness’s user-level config, and issues or "
+                       + "revokes the grant in the database. Both are required — a client without a "
+                       + "grant is refused on every tool."))
         if let lastAction { lines.append(lastAction) }
         statusLabel?.stringValue = lines.suffix(2).joined(separator: "\n")
         refreshNote()
@@ -134,14 +144,19 @@ final class MCPIntegrationWindowController: NSObject, NSWindowDelegate,
 
     /// 只重画底部那行字（学习模式倒计时走这条，不重探配置）。
     private func refreshNote() {
-        var note = "服务器路径：\(HarnessCatalog.serverCommand())"
+        var note = L("服务器路径：\(HarnessCatalog.serverCommand())",
+                     "Server path: \(HarnessCatalog.serverCommand())")
         if !learned.isEmpty {
-            note += " · 学习模式抓到未授权 client：\(learned.joined(separator: " "))（选中行不影响，按钮会问你给哪个发）"
+            note += L(" · 学习模式抓到未授权 client：\(learned.joined(separator: " "))（选中行不影响，按钮会问你给哪个发）",
+                      " · learn mode saw ungranted clients: \(learned.joined(separator: " ")) "
+                      + "(the selected row is unaffected; you will be asked which one to grant)")
         }
         if let deadline = learnDeadline, deadline > Date() {
-            note += " · 学习模式剩 \(Int(deadline.timeIntervalSinceNow)) s"
+            note += L(" · 学习模式剩 \(Int(deadline.timeIntervalSinceNow)) s",
+                      " · learn mode: \(Int(deadline.timeIntervalSinceNow))s left")
         }
-        note += " · 改完要重启对应的 harness 才生效"
+        note += L(" · 改完要重启对应的 harness 才生效",
+                  " · restart the harness for changes to take effect")
         noteLabel?.stringValue = note
     }
 
@@ -159,16 +174,19 @@ final class MCPIntegrationWindowController: NSObject, NSWindowDelegate,
 
     private func toggle(_ on: Bool) {
         guard let status = selected else {
-            presentAlert(title: "先选一行", body: "在上面的列表里选一个 harness。")
+            presentAlert(title: L("先选一行", "Select a row first"), body: L("在上面的列表里选一个 harness。", "Pick a harness in the list above."))
             return
         }
         if on, status.pointsElsewhere {
             let alert = NSAlert()
-            alert.messageText = "\(status.harness.displayName) 里已经有 brosis，但指向别处"
-            alert.informativeText = "现在指向：\(status.currentCommand ?? "?")\n"
-                                  + "要改成这份 app 里的 \(HarnessCatalog.serverCommand()) 吗？"
-            alert.addButton(withTitle: "改过来")
-            alert.addButton(withTitle: "取消")
+            alert.messageText = L("\(status.harness.displayName) 里已经有 brosis，但指向别处",
+                                  "\(status.harness.displayName) already has brosis, pointing elsewhere")
+            alert.informativeText = L("现在指向：\(status.currentCommand ?? "?")\n"
+                                      + "要改成这份 app 里的 \(HarnessCatalog.serverCommand()) 吗？",
+                                      "Currently points to: \(status.currentCommand ?? "?")\n"
+                                      + "Change it to \(HarnessCatalog.serverCommand()) from this app?")
+            alert.addButton(withTitle: L("改过来", "Point it here"))
+            alert.addButton(withTitle: L("取消", "Cancel"))
             guard alert.runModal() == .alertFirstButtonReturn else { return }
         }
         do {
@@ -177,12 +195,15 @@ final class MCPIntegrationWindowController: NSObject, NSWindowDelegate,
             if let snippet = outcome.manualSnippet {
                 NSPasteboard.general.clearContents()
                 NSPasteboard.general.setString(snippet, forType: .string)
-                lastAction? += "；写不了，片段已复制到剪贴板，请手动加进配置文件"
+                lastAction? += L("；写不了，片段已复制到剪贴板，请手动加进配置文件",
+                                 "; could not write — the snippet was copied to the clipboard, "
+                                 + "please add it to the config file manually")
             }
             recorder?.logEvent(kind: "mcp_integration_changed",
                                detail: "harness=\(status.harness.id) enabled=\(on)")
         } catch {
-            lastAction = "\(status.harness.displayName)：失败 —— \(error)"
+            lastAction = L("\(status.harness.displayName)：失败 —— \(error)",
+                           "\(status.harness.displayName): failed — \(error)")
         }
         reload()
     }
@@ -193,8 +214,9 @@ final class MCPIntegrationWindowController: NSObject, NSWindowDelegate,
         if FileManager.default.fileExists(atPath: path) {
             NSWorkspace.shared.activateFileViewerSelecting([URL(filePath: path)])
         } else {
-            presentAlert(title: "配置文件还不存在",
-                         body: "\(path)\n开启集成时会自动建出来。")
+            presentAlert(title: L("配置文件还不存在", "Config file does not exist yet"),
+                         body: L("\(path)\n开启集成时会自动建出来。",
+                                 "\(path)\nIt is created automatically when you enable the integration."))
         }
     }
 
@@ -204,7 +226,8 @@ final class MCPIntegrationWindowController: NSObject, NSWindowDelegate,
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(MCPIntegration.snippet(for: status.harness, entry: entry),
                                        forType: .string)
-        lastAction = "\(status.harness.displayName) 的配置片段已复制"
+        lastAction = L("\(status.harness.displayName) 的配置片段已复制",
+                       "Copied the config snippet for \(status.harness.displayName)")
         reload()
     }
 
@@ -218,7 +241,9 @@ final class MCPIntegrationWindowController: NSObject, NSWindowDelegate,
         }
         RunLoop.main.add(timer, forMode: .common)
         learnTimer = timer
-        lastAction = "学习模式开始：现在去那个 harness 里发一条需要 brosis 的请求（例如让它调 brosis 的 search）"
+        lastAction = L("学习模式开始：现在去那个 harness 里发一条需要 brosis 的请求（例如让它调 brosis 的 search）",
+                       "Learn mode started: now send a request that needs brosis from that harness "
+                       + "(for example, ask it to call brosis’s search).")
         reload()
     }
 
@@ -227,7 +252,8 @@ final class MCPIntegrationWindowController: NSObject, NSWindowDelegate,
         guard let deadline = learnDeadline, Date() >= deadline else { refreshNote(); return }
         stopLearning()
         if learned.isEmpty {
-            lastAction = "学习模式结束：这 60 秒里没有未授权的客户端来连过。"
+            lastAction = L("学习模式结束：这 60 秒里没有未授权的客户端来连过。",
+                               "Learn mode finished: no ungranted client connected during those 60 seconds.")
         } else {
             askToGrant()
         }
@@ -246,9 +272,12 @@ final class MCPIntegrationWindowController: NSObject, NSWindowDelegate,
     private func askToGrant() {
         for client in learned {
             let alert = NSAlert()
-            alert.messageText = "给 \(client) 发授权？"
-            alert.informativeText = "刚才有个客户端自报 client=\(client) 来连，因为没有 grant 被全拒了。"
-                                  + "发一张 grant（evidence、30 天、全部应用）它就能用。"
+            alert.messageText = L("给 \(client) 发授权？", "Grant access to \(client)?")
+            alert.informativeText = L("刚才有个客户端自报 client=\(client) 来连，因为没有 grant 被全拒了。"
+                                      + "发一张 grant（evidence、30 天、全部应用）它就能用。",
+                                      "A client identifying itself as client=\(client) just connected and "
+                                      + "was refused because it has no grant. Issuing a grant "
+                                      + "(evidence, 30 days, all apps) will let it through.")
             alert.addButton(withTitle: "发")
             alert.addButton(withTitle: "跳过")
             guard alert.runModal() == .alertFirstButtonReturn else { continue }

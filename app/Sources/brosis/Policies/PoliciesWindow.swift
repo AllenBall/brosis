@@ -2,7 +2,7 @@ import AppKit
 import BrosisCore
 import Foundation
 
-/// 3.12「应用采集清单」窗口（设置里那一页"应用"）。
+/// 3.12「应用采集清单」窗口（设置里那一页L("应用", "App")）。
 ///
 /// 判定逻辑一行都不在这里——合并 / 分组 / 排序 / 过滤 / 改档状态机全在
 /// `PolicyList.swift`（纯函数，自检整段跑）。这个文件只做三件事：
@@ -39,6 +39,13 @@ final class PoliciesWindowController: NSObject, NSWindowDelegate,
     // MARK: - 界面元素
 
     private var window: NSWindow?
+
+    /// 界面语言换了就把窗口关掉：contentView 是打开时一次性搭出来的，
+    /// 就地把每个控件的文案换一遍既繁琐又容易漏，重开一次就全对了。
+    func closeForLanguageChange() {
+        window?.close()
+        window = nil
+    }
     private var tableView: NSTableView?
     private var searchField: NSSearchField?
     private var globalDefaultPopUp: NSPopUpButton?
@@ -72,30 +79,30 @@ final class PoliciesWindowController: NSObject, NSWindowDelegate,
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1_140, height: 620),
                               styleMask: [.titled, .closable, .miniaturizable, .resizable],
                               backing: .buffered, defer: false)
-        window.title = "应用采集清单"
+        window.title = L("应用采集清单", "App capture list")
         window.delegate = self
         window.center()
         window.isReleasedWhenClosed = false
         window.minSize = NSSize(width: 820, height: 360)
 
         // ---- 顶部：全局默认档 + 搜索框 + 刷新
-        let defaultLabel = staticLabel("新应用的全局默认档：")
+        let defaultLabel = staticLabel(L("新应用的全局默认档：", "Default mode for new apps:"))
         let popUp = NSPopUpButton(frame: .zero, pullsDown: false)
         for mode in CapturePolicyMode.allCases { popUp.addItem(withTitle: mode.label) }
         popUp.target = self
         popUp.action = #selector(globalDefaultChanged(_:))
-        popUp.toolTip = "只影响以后才第一次出现的应用；已经在清单里的应用不受影响。"
+        popUp.toolTip = L("只影响以后才第一次出现的应用；已经在清单里的应用不受影响。", "Applies only to apps seen for the first time from now on; apps already listed are unaffected.")
         globalDefaultPopUp = popUp
 
         let search = NSSearchField()
-        search.placeholderString = "按应用名或 bundle id 过滤"
+        search.placeholderString = L("按应用名或 bundle id 过滤", "Filter by app name or bundle id")
         search.target = self
         search.action = #selector(searchChanged(_:))
         search.sendsSearchStringImmediately = true
         search.sendsWholeSearchString = false
         searchField = search
 
-        let refresh = NSButton(title: "刷新", target: self, action: #selector(refreshClicked(_:)))
+        let refresh = NSButton(title: L("刷新", "Refresh"), target: self, action: #selector(refreshClicked(_:)))
         refresh.bezelStyle = .rounded
 
         // 中间那个空 NSView 是弹簧：把搜索框和刷新按钮推到右边。
@@ -173,14 +180,14 @@ final class PoliciesWindowController: NSObject, NSWindowDelegate,
     }
 
     private static let columns: [ColumnSpec] = [
-        ColumnSpec(id: "name", title: "应用", width: 180),
+        ColumnSpec(id: "name", title: L("应用", "App"), width: 180),
         ColumnSpec(id: "bundle", title: "bundle id", width: 230),
-        ColumnSpec(id: "group", title: "分组", width: 110),
-        ColumnSpec(id: "mode", title: "采集模式", width: 132),
-        ColumnSpec(id: "observations", title: "最近 7 天观察", width: 96),
-        ColumnSpec(id: "completeness", title: "完整性分布", width: 360),
-        ColumnSpec(id: "lastSeen", title: "最近出现", width: 96),
-        ColumnSpec(id: "status", title: "状态", width: 170),
+        ColumnSpec(id: "group", title: L("分组", "Group"), width: 110),
+        ColumnSpec(id: "mode", title: L("采集模式", "Capture mode"), width: 132),
+        ColumnSpec(id: "observations", title: L("最近 7 天观察", "Last 7 days"), width: 96),
+        ColumnSpec(id: "completeness", title: L("完整性分布", "Completeness"), width: 360),
+        ColumnSpec(id: "lastSeen", title: L("最近出现", "Last seen"), width: 96),
+        ColumnSpec(id: "status", title: L("状态", "Status"), width: 170),
     ]
 
     private func staticLabel(_ text: String) -> NSTextField {
@@ -249,14 +256,21 @@ final class PoliciesWindowController: NSObject, NSWindowDelegate,
 
         bannerLabel?.stringValue = isStoreOpen
             ? ""
-            : "数据库未打开（锁定 / 解锁中）：读不到 app_policies，下面只有当前运行的应用，"
-              + "并且不能改档。先在菜单栏点「解锁数据库…」。"
+            : L("数据库未打开（锁定 / 解锁中）：读不到 app_policies，下面只有当前运行的应用，"
+                + "并且不能改档。先在菜单栏点「解锁数据库…」。",
+                "Database not open (locked or unlocking): app_policies is unreadable, so only "
+                + "currently running apps are listed and modes cannot be changed. "
+                + "Choose “Unlock database…” from the menu bar first.")
         bannerLabel?.isHidden = isStoreOpen
 
         let total = rows.count
-        var footer = "共 \(total) 个应用；观察数与完整性分布统计的是最近 "
-            + "\(PolicyList.statsWindowDays) 天、未删除的本机观察。"
-            + "改为更低档时会问是否删除该应用已有数据（默认不删）。"
+        var footer = L("共 \(total) 个应用；观察数与完整性分布统计的是最近 "
+                       + "\(PolicyList.statsWindowDays) 天、未删除的本机观察。"
+                       + "改为更低档时会问是否删除该应用已有数据（默认不删）。",
+                       "\(total) apps. Counts and completeness cover the last "
+                       + "\(PolicyList.statsWindowDays) days of undeleted local observations. "
+                       + "Lowering an app’s mode asks whether to delete its existing data "
+                       + "(kept by default).")
         if let lastActionNote { footer += "\n" + lastActionNote }
         footerLabel?.stringValue = footer
 
@@ -287,8 +301,10 @@ final class PoliciesWindowController: NSObject, NSWindowDelegate,
         guard index >= 0 && index < CapturePolicyMode.allCases.count else { return }
         let mode = CapturePolicyMode.allCases[index]
         policyStore.setGlobalDefault(mode)
-        lastActionNote = "全局默认档已设为「\(mode.label)」；"
-            + "它只影响以后才第一次出现的应用，已经在清单里的应用不受影响。"
+        lastActionNote = L("全局默认档已设为「\(mode.label)」；"
+                           + "它只影响以后才第一次出现的应用，已经在清单里的应用不受影响。",
+                           "Default mode for new apps is now “\(mode.label)”. It applies only to apps "
+                           + "seen for the first time from now on; apps already listed are unaffected.")
         reload()
     }
 
@@ -308,21 +324,32 @@ final class PoliciesWindowController: NSObject, NSWindowDelegate,
         case .unchanged:
             return
         case .blockedLocked:
-            lastActionNote = "数据库未打开，改档没有生效（app_policies 写不进去）。"
-            presentAlert(title: "数据库未打开",
-                         body: "「\(bundleID)」的档位没有改动。\n\n"
-                             + "3.12 的三档存在库里的 app_policies 表，锁定期间写不进去。"
-                             + "先在菜单栏点「解锁数据库…」再来改。\n\n"
-                             + "（想立刻停掉当前应用的采集，可以用菜单栏的"
-                             + "「暂停采集当前应用 → 今天」，它不需要开库。）")
+            lastActionNote = L("数据库未打开，改档没有生效（app_policies 写不进去）。",
+                               "Database not open — the mode change did not take effect "
+                               + "(app_policies cannot be written).")
+            presentAlert(title: L("数据库未打开", "Database not open"),
+                         body: L("「\(bundleID)」的档位没有改动。\n\n"
+                                 + "三档存在库里的 app_policies 表，锁定期间写不进去。"
+                                 + "先在菜单栏点「解锁数据库…」再来改。\n\n"
+                                 + "（想立刻停掉当前应用的采集，可以用菜单栏的"
+                                 + "「暂停采集当前应用 → 今天」，它不需要开库。）",
+                                 "The mode for “\(bundleID)” was not changed.\n\n"
+                                 + "Capture modes live in the app_policies table inside the encrypted "
+                                 + "database, which cannot be written while locked. Choose "
+                                 + "“Unlock database…” from the menu bar, then try again.\n\n"
+                                 + "(To stop capturing the current app right now, use "
+                                 + "“Pause capture for the current app → Today” in the menu bar — "
+                                 + "that does not need the database.)"))
             reload()
             return
         case .apply:
             applyMode(next, bundleID: bundleID)
-            lastActionNote = "「\(bundleID)」已设为「\(next.label)」。"
+            lastActionNote = L("「\(bundleID)」已设为「\(next.label)」。",
+                               "“\(bundleID)” set to “\(next.label)”.")
         case .applyThenAskDelete(let count):
             applyMode(next, bundleID: bundleID)
-            lastActionNote = "「\(bundleID)」已从「\(current.label)」改为「\(next.label)」。"
+            lastActionNote = L("「\(bundleID)」已从「\(current.label)」改为「\(next.label)」。",
+                               "“\(bundleID)” changed from “\(current.label)” to “\(next.label)”.")
             askDeleteExistingData(bundleID: bundleID, from: current, to: next, existing: count)
         }
         reload()
@@ -341,7 +368,8 @@ final class PoliciesWindowController: NSObject, NSWindowDelegate,
                                        to: CapturePolicyMode, existing: Int) {
         let alert = NSAlert()
         alert.alertStyle = .warning
-        alert.messageText = "要一并删除「\(bundleID)」已有的数据吗？"
+        alert.messageText = L("要一并删除「\(bundleID)」已有的数据吗？",
+                              "Also delete the existing data for “\(bundleID)”?")
         alert.informativeText = """
             档位已经从「\(from.label)」改成「\(to.label)」，从现在起按新档采集。
 
@@ -351,11 +379,12 @@ final class PoliciesWindowController: NSObject, NSWindowDelegate,
 
             默认不删：以前记下来的东西留着，只是以后不再按旧档采集。
             """
-        alert.addButton(withTitle: "保留数据")          // 默认按钮（回车）
-        alert.addButton(withTitle: "删除这 \(existing) 条")
+        alert.addButton(withTitle: L("保留数据", "Keep data"))          // 默认按钮（回车）
+        alert.addButton(withTitle: L("删除这 \(existing) 条", "Delete \(existing) records"))
         NSApp.activate(ignoringOtherApps: true)
         guard alert.runModal() == .alertSecondButtonReturn else {
-            lastActionNote = (lastActionNote ?? "") + "已有的 \(existing) 条数据保留。"
+            lastActionNote = (lastActionNote ?? "") + L("已有的 \(existing) 条数据保留。",
+                                                        "Kept the \(existing) existing records.")
             recorder?.logEvent(kind: "app_policy_downgrade_kept_data",
                                detail: "bundle=\(bundleID) from=\(from.rawValue) "
                                      + "to=\(to.rawValue) observations=\(existing)")
@@ -365,9 +394,11 @@ final class PoliciesWindowController: NSObject, NSWindowDelegate,
         guard let summary = recorder?.withStore({ store -> DeletionSummary in
             try store.deleteByApp(bundleID: bundleID, reason: .policy)
         }) else {
-            lastActionNote = "删除失败：数据库在这一步不可用，数据没有变化。"
-            presentAlert(title: "删除失败",
-                         body: "「\(bundleID)」的数据没有变化。数据库在执行删除时不可用。")
+            lastActionNote = L("删除失败：数据库在这一步不可用，数据没有变化。", "Delete failed: the database was unavailable at this step; nothing changed.")
+            presentAlert(title: L("删除失败", "Delete failed"),
+                         body: L("「\(bundleID)」的数据没有变化。数据库在执行删除时不可用。",
+                                 "Nothing changed for “\(bundleID)”. The database was unavailable "
+                                 + "while performing the delete."))
             return
         }
         recorder?.logEvent(
@@ -388,7 +419,7 @@ final class PoliciesWindowController: NSObject, NSWindowDelegate,
         alert.alertStyle = .informational
         alert.messageText = title
         alert.informativeText = body
-        alert.addButton(withTitle: "好")
+        alert.addButton(withTitle: L("好", "OK"))
         NSApp.activate(ignoringOtherApps: true)
         alert.runModal()
     }

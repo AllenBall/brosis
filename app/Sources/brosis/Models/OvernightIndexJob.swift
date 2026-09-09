@@ -105,17 +105,21 @@ struct OvernightProgress: Sendable, Codable, Equatable {
 
     /// 一行人话，面板与事件都用它。
     var text: String {
-        var out = "已嵌入 \(embedded) / \(total) 块（\(String(format: "%.1f", percent))%），剩 \(remaining) 块"
-        if let rate = chunksPerSecond { out += String(format: "，%.2f 块/s", rate) }
-        if let eta = etaSeconds { out += "，预计还要 " + Self.duration(eta) }
+        var out = L("已嵌入 \(embedded) / \(total) 块（\(String(format: "%.1f", percent))%），剩 \(remaining) 块",
+                    "embedded \(embedded) / \(total) chunks (\(String(format: "%.1f", percent))%), "
+                    + "\(remaining) to go")
+        if let rate = chunksPerSecond {
+            out += L(String(format: "，%.2f 块/s", rate), String(format: ", %.2f chunks/s", rate))
+        }
+        if let eta = etaSeconds { out += L("，预计还要 ", ", about ") + Self.duration(eta) }
         return out
     }
 
     static func duration(_ seconds: Double) -> String {
         let s = Int(seconds.rounded())
-        if s < 60 { return "\(s) 秒" }
-        if s < 3600 { return "\(s / 60) 分 \(s % 60) 秒" }
-        return "\(s / 3600) 小时 \((s % 3600) / 60) 分"
+        if s < 60 { return L("\(s) 秒", "\(s)s") }
+        if s < 3600 { return L("\(s / 60) 分 \(s % 60) 秒", "\(s / 60)m \(s % 60)s") }
+        return L("\(s / 3600) 小时 \((s % 3600) / 60) 分", "\(s / 3600)h \((s % 3600) / 60)m")
     }
 }
 
@@ -178,29 +182,34 @@ final class OvernightIndexJob: @unchecked Sendable {
     /// 面板上那一行。
     var statusText: String {
         if isRunning {
-            let base = progress?.text ?? "正在准备…"
+            let base = progress?.text ?? L("正在准备…", "Preparing…")
             if let reason = pauseReason {
-                return "整晚建索引：已暂停（\(Self.reasonText(reason))）· " + base
+                return L("整晚建索引：已暂停（\(Self.reasonText(reason))）· ",
+                         "Overnight indexing: paused (\(Self.reasonText(reason))) · ") + base
             }
-            return "整晚建索引：进行中 · " + base
+            return L("整晚建索引：进行中 · ", "Overnight indexing: running · ") + base
         }
-        return lastSummary.map { "整晚建索引：" + $0 } ?? "整晚建索引：未开始"
+        return lastSummary.map { L("整晚建索引：", "Overnight indexing: ") + $0 }
+            ?? L("整晚建索引：未开始", "Overnight indexing: not started")
     }
 
     /// 停 / 暂停原因翻成人话。与 `OvernightIndexPolicy.decide` 的字符串一一对应。
     /// （不复用 `ModelsWindowController.gateText`：那个类是 `@MainActor`，这里在后台线程读。）
     static func reasonText(_ reason: String) -> String {
         switch reason {
-        case "cancelled": "你按了取消"
-        case "complete": "全部块都嵌完了"
-        case "model_not_installed": "嵌入模型未安装"
-        case "paused": "采集已暂停（锁屏 / 用户暂停）"
-        case "on_battery": "在用电池，插上电源就继续"
-        case "load_failed": "模型加载失败"
-        case "store_unavailable": "库不可用（已关库）"
+        case "cancelled": L("你按了取消", "you pressed Cancel")
+        case "complete": L("全部块都嵌完了", "every chunk is embedded")
+        case "model_not_installed": L("嵌入模型未安装", "no embedding model installed")
+        case "paused": L("采集已暂停（锁屏 / 用户暂停）", "capture is paused (screen locked or paused by you)")
+        case "on_battery": L("在用电池，插上电源就继续", "on battery — plug in to continue")
+        case "load_failed": L("模型加载失败", "model failed to load")
+        case "store_unavailable": L("库不可用（已关库）", "database unavailable (closed)")
         default:
-            if reason.hasPrefix("thermal_") { "机器偏热（\(reason.dropFirst(8))）" }
-            else if reason.hasPrefix("locked_") { "数据库未解锁（\(reason.dropFirst(7))）" }
+            if reason.hasPrefix("thermal_") {
+                L("机器偏热（\(reason.dropFirst(8))）", "running hot (\(reason.dropFirst(8)))")
+            } else if reason.hasPrefix("locked_") {
+                L("数据库未解锁（\(reason.dropFirst(7))）", "database is locked (\(reason.dropFirst(7)))")
+            }
             else { reason }
         }
     }
@@ -238,7 +247,7 @@ final class OvernightIndexJob: @unchecked Sendable {
                                           detail: "{\"error\":\"没有可用的嵌入模型\"}")
             }
             lock.lock()
-            _lastSummary = "没跑：没有可用的嵌入模型（3.11：向量检索显示未启用）"
+            _lastSummary = L("没跑：没有可用的嵌入模型（3.11：向量检索显示未启用）", "did not run: no usable embedding model (vector search shows as off)")
             _lastPauseReason = nil
             running = false
             lock.unlock()

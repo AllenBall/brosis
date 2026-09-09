@@ -47,9 +47,9 @@ final class ExportController {
 
         var title: String {
             switch self {
-            case .everything: return "全部（整个库）"
-            case .last30Days: return "最近 30 天"
-            case .last90Days: return "最近 90 天"
+            case .everything: return L("全部（整个库）", "Everything (whole database)")
+            case .last30Days: return L("最近 30 天", "Last 30 days")
+            case .last90Days: return L("最近 90 天", "Last 90 days")
             }
         }
     }
@@ -102,23 +102,25 @@ final class ExportController {
     @discardableResult
     func expireWithNotice() -> String {
         guard let outcome = recorder?.withStore({ try $0.expireAfterNotice() }) else {
-            return "库没打开，跳过配额过期"
+            return L("库没打开，跳过配额过期", "database closed — skipped quota expiry")
         }
         switch outcome {
         case .notNeeded(let action):
             quota = action
             onChange?()
-            return "配额未到线（\(Int(action.ratio * 100))%）"
+            return L("配额未到线（\(Int(action.ratio * 100))%）", "under quota (\(Int(action.ratio * 100))%)")
         case .blocked(let action):
             quota = action
             onChange?()
             presentWindow()
-            return "配额已满但通知还没确认，暂不删除；已弹出加密导出窗口"
+            return L("配额已满但通知还没确认，暂不删除；已弹出加密导出窗口", "quota reached but the notice is unacknowledged — nothing deleted; the export window was opened")
         case .expired(let action, let report):
             quota = action
             refreshQuota()
-            return "配额过期已执行：删 \(report.summary?.observationsAffected ?? 0) 条，"
-                 + "释放 \(report.beforeBytes - report.afterBytes) 字节"
+            return L("配额过期已执行：删 \(report.summary?.observationsAffected ?? 0) 条，"
+                     + "释放 \(report.beforeBytes - report.afterBytes) 字节",
+                     "quota expiry ran: deleted \(report.summary?.observationsAffected ?? 0) records, "
+                     + "freed \(report.beforeBytes - report.afterBytes) bytes")
         }
     }
 
@@ -139,14 +141,15 @@ final class ExportController {
     func startExport(directory: URL, request: ExportRequest, passphrase: String) {
         guard !isRunning else { return }
         guard let store = recorder?.withStore({ $0 }) else {
-            phase = .failed("库没打开（锁定中），先解锁再导出")
+            phase = .failed(L("库没打开（锁定中），先解锁再导出", "Database not open (locked) — unlock before exporting"))
             onChange?()
             return
         }
         // 强度门槛在这里先判一次，省得等到写文件才报（core 里也会再判一次）。
         let strength = ExportKeyring.strength(of: passphrase)
         guard strength.ok else {
-            phase = .failed("口令不合要求：\(strength.reason ?? "")")
+            phase = .failed(L("口令不合要求：\(strength.reason ?? "")",
+                                  "Passphrase does not meet the requirements: \(strength.reason ?? "")"))
             onChange?()
             return
         }
@@ -227,7 +230,7 @@ final class ExportWindowController: NSObject, NSWindowDelegate {
     private var window: NSWindow?
 
     private let directoryField = NSTextField(string: "")
-    private let chooseButton = NSButton(title: "选择位置…", target: nil, action: nil)
+    private let chooseButton = NSButton(title: L("选择位置…", "Choose location…"), target: nil, action: nil)
     private let rangePopUp = NSPopUpButton(frame: .zero, pullsDown: false)
     private let appsField = NSTextField(string: "")
     private let passphraseField = NSSecureTextField(string: "")
@@ -236,8 +239,8 @@ final class ExportWindowController: NSObject, NSWindowDelegate {
     private let quotaLabel = NSTextField(labelWithString: "")
     private let statusLabel = NSTextField(labelWithString: "")
     private let progressBar = NSProgressIndicator()
-    private let exportButton = NSButton(title: "开始加密导出", target: nil, action: nil)
-    private let acknowledgeButton = NSButton(title: "我已了解，允许按最旧先删", target: nil, action: nil)
+    private let exportButton = NSButton(title: L("开始加密导出", "Start encrypted export"), target: nil, action: nil)
+    private let acknowledgeButton = NSButton(title: L("我已了解，允许按最旧先删", "I understand — allow deleting oldest first"), target: nil, action: nil)
 
     private var chosenDirectory: URL?
 
@@ -260,7 +263,7 @@ final class ExportWindowController: NSObject, NSWindowDelegate {
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 640, height: 560),
                               styleMask: [.titled, .closable, .miniaturizable],
                               backing: .buffered, defer: false)
-        window.title = "加密导出"
+        window.title = L("加密导出", "Encrypted export")
         window.delegate = self
         window.center()
         self.window = window
@@ -274,9 +277,9 @@ final class ExportWindowController: NSObject, NSWindowDelegate {
         directoryField.isEditable = false
         directoryField.isSelectable = true
         directoryField.lineBreakMode = .byTruncatingMiddle
-        appsField.placeholderString = "留空 = 全部应用；多个 bundle id 用逗号分隔"
-        passphraseField.placeholderString = "导出口令"
-        confirmField.placeholderString = "再输一次"
+        appsField.placeholderString = L("留空 = 全部应用；多个 bundle id 用逗号分隔", "Empty = all apps; separate multiple bundle ids with commas")
+        passphraseField.placeholderString = L("导出口令", "Export passphrase")
+        confirmField.placeholderString = L("再输一次", "Enter it again")
         passphraseField.target = self
         passphraseField.action = #selector(passphraseChanged(_:))
         confirmField.target = self
@@ -302,7 +305,8 @@ final class ExportWindowController: NSObject, NSWindowDelegate {
         explain.maximumNumberOfLines = 0
         explain.textColor = .secondaryLabelColor
 
-        let requirement = NSTextField(labelWithString: "口令要求：" + ExportKeyring.requirementText)
+        let requirement = NSTextField(labelWithString: L("口令要求：", "Passphrase requirements: ")
+                                     + ExportKeyring.requirementText)
         requirement.lineBreakMode = .byWordWrapping
         requirement.maximumNumberOfLines = 0
         requirement.textColor = .secondaryLabelColor
@@ -313,11 +317,11 @@ final class ExportWindowController: NSObject, NSWindowDelegate {
             quotaLabel,
             acknowledgeButton,
             ExportBox.separator(),
-            labeled("导出到", directoryField, trailing: chooseButton),
-            labeled("范围", rangePopUp, trailing: nil),
-            labeled("应用", appsField, trailing: nil),
-            labeled("口令", passphraseField, trailing: nil),
-            labeled("确认", confirmField, trailing: nil),
+            labeled(L("导出到", "Export to"), directoryField, trailing: chooseButton),
+            labeled(L("范围", "Range"), rangePopUp, trailing: nil),
+            labeled(L("应用", "Apps"), appsField, trailing: nil),
+            labeled(L("口令", "Passphrase"), passphraseField, trailing: nil),
+            labeled(L("确认", "Confirm"), confirmField, trailing: nil),
             strengthLabel,
             requirement,
             ExportBox.separator(),
@@ -352,13 +356,23 @@ final class ExportWindowController: NSObject, NSWindowDelegate {
 
     /// 窗口顶部那段如实提示（3.8 的两条要求都在这里）。
     static let explainText =
-        "把库里的记录导成一份**加密归档**（AES-256-GCM，分块，每块与整份清单都有校验）。\n"
+        L("把库里的记录导成一份**加密归档**（AES-256-GCM，分块，每块与整份清单都有校验）。\n"
         + "① 口令是**独立**的：与登录密码、数据库密钥、跨设备同步的配对口令都无关，"
         + "也不会存在任何地方——丢了就再也打不开这份归档，没有找回通道。\n"
         + "② 归档写一次就不再改动：**以后在 app 里删掉这些记录，不会影响已经导出的副本**。"
         + "要让归档也消失，只能你自己去把归档目录删掉。\n"
         + "③ 导出的正文就是库里那一份——入库前已经脱敏，归档不做二次脱敏、也不还原。\n"
-        + "④ 不含 MCP 访问审计、采集质量遥测与同步密钥（理由见 core/README）。"
+        + "④ 不含 MCP 访问审计、采集质量遥测与同步密钥。",
+          "Exports the records into an encrypted archive (AES-256-GCM, chunked, with a checksum for "
+        + "every chunk and for the manifest).\n"
+        + "1. The passphrase is independent: unrelated to your login password, the database key and "
+        + "the cross-device pairing passphrase. It is not stored anywhere — lose it and the archive "
+        + "can never be opened again. There is no recovery path.\n"
+        + "2. An archive is written once and never modified: deleting these records in the app later "
+        + "does not affect the exported copy. To make the archive go away you must delete it yourself.\n"
+        + "3. The exported text is exactly what is in the database — already redacted before storage. "
+        + "The archive neither re-redacts nor restores anything.\n"
+        + "4. It excludes MCP access audits, capture-quality telemetry and sync keys.")
 
     private func labeled(_ title: String, _ field: NSView, trailing: NSView?) -> NSStackView {
         let label = NSTextField(labelWithString: title)
@@ -377,8 +391,8 @@ final class ExportWindowController: NSObject, NSWindowDelegate {
     @objc private func chooseDirectory(_ sender: Any?) {
         guard let controller else { return }
         let panel = NSSavePanel()
-        panel.title = "选择归档保存位置"
-        panel.prompt = "导出"
+        panel.title = L("选择归档保存位置", "Choose where to save the archive")
+        panel.prompt = L("导出", "Export")
         panel.nameFieldStringValue = ExportController.suggestedName()
         panel.directoryURL = controller.lastDirectory
         panel.canCreateDirectories = true

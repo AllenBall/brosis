@@ -25,13 +25,13 @@ final class SyncWindowController: NSObject, NSWindowDelegate {
     private weak var controller: SyncController?
     private var window: NSWindow?
 
-    private let toggle = NSButton(checkboxWithTitle: "打开跨设备同步（D17）", target: nil, action: nil)
+    private let toggle = NSButton(checkboxWithTitle: L("打开跨设备同步（D17）", "Enable cross-device sync"), target: nil, action: nil)
     private let directoryField = NSTextField(string: "")
-    private let chooseButton = NSButton(title: "选择目录…", target: nil, action: nil)
+    private let chooseButton = NSButton(title: L("选择目录…", "Choose folder…"), target: nil, action: nil)
     private let passphraseField = NSSecureTextField(string: "")
     private let statusText = NSTextField(labelWithString: "")
     private let peersText = NSTextField(labelWithString: "")
-    private let syncNowButton = NSButton(title: "立即同步", target: nil, action: nil)
+    private let syncNowButton = NSButton(title: L("立即同步", "Sync now"), target: nil, action: nil)
 
     func configure(controller: SyncController) {
         self.controller = controller
@@ -51,7 +51,7 @@ final class SyncWindowController: NSObject, NSWindowDelegate {
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 620, height: 460),
                               styleMask: [.titled, .closable, .miniaturizable],
                               backing: .buffered, defer: false)
-        window.title = "跨设备同步"
+        window.title = L("跨设备同步", "Cross-device sync")
         window.delegate = self
         window.center()
         self.window = window
@@ -65,7 +65,7 @@ final class SyncWindowController: NSObject, NSWindowDelegate {
         directoryField.isEditable = false
         directoryField.isSelectable = true
         directoryField.lineBreakMode = .byTruncatingMiddle
-        passphraseField.placeholderString = "加入已有同步目录时，输入另一台机器显示过的配对口令"
+        passphraseField.placeholderString = L("加入已有同步目录时，输入另一台机器显示过的配对口令", "To join an existing sync folder, enter the pairing passphrase shown on the other Mac")
         statusText.lineBreakMode = .byWordWrapping
         statusText.maximumNumberOfLines = 0
         peersText.lineBreakMode = .byWordWrapping
@@ -73,8 +73,11 @@ final class SyncWindowController: NSObject, NSWindowDelegate {
         peersText.font = NSFont.monospacedSystemFont(ofSize: 11, weight: .regular)
 
         let explain = NSTextField(labelWithString:
-            "只上传加密的追加日志段文件到你自己的 iCloud，数据库本体不会离开这台机器（D16 / 3.9）。"
-          + "每台机器只写自己的文件，不需要跨机器加锁。")
+            L("只上传加密的追加日志段文件到你自己的 iCloud，数据库本体不会离开这台机器。"
+            + "每台机器只写自己的文件，不需要跨机器加锁。",
+            "Only encrypted append-only segment files go to your own iCloud; the database itself never "
+            + "leaves this Mac. Each machine writes only its own files, so no cross-machine locking "
+            + "is needed."))
         explain.lineBreakMode = .byWordWrapping
         explain.maximumNumberOfLines = 0
         explain.textColor = .secondaryLabelColor
@@ -82,8 +85,8 @@ final class SyncWindowController: NSObject, NSWindowDelegate {
         let stack = NSStackView(views: [
             toggle,
             explain,
-            labeled("同步目录", directoryField, trailing: chooseButton),
-            labeled("配对口令", passphraseField, trailing: nil),
+            labeled(L("同步目录", "Sync folder"), directoryField, trailing: chooseButton),
+            labeled(L("配对口令", "Pairing passphrase"), passphraseField, trailing: nil),
             NSBox.separator(),
             statusText,
             peersText,
@@ -131,24 +134,31 @@ final class SyncWindowController: NSObject, NSWindowDelegate {
 
         var lines: [String] = [status.summary]
         if status.enabled {
-            lines.append("本机设备 \(status.deviceID)（密钥指纹 \(status.keyID)）")
-            lines.append("待出站：\(status.pendingExportObservations) 条观察、"
-                       + "\(status.pendingExportTombstones) 条删除；"
-                       + "本机段文件 \(status.ownSegments) 个、目录里共 "
-                       + "\(status.segmentBytes / 1024) KiB")
+            lines.append(L("本机设备 \(status.deviceID)（密钥指纹 \(status.keyID)）",
+                           "This device \(status.deviceID) (key fingerprint \(status.keyID))"))
+            lines.append(L("待出站：\(status.pendingExportObservations) 条观察、"
+                       + "\(status.pendingExportTombstones) 条删除；",
+                       "Pending outbound: \(status.pendingExportObservations) observations, "
+                       + "\(status.pendingExportTombstones) deletions; ")
+                       + L("本机段文件 \(status.ownSegments) 个、目录里共 "
+                           + "\(status.segmentBytes / 1024) KiB",
+                           "\(status.ownSegments) local segment files, "
+                           + "\(status.segmentBytes / 1024) KiB in the folder"))
         }
         statusText.stringValue = lines.joined(separator: "\n")
 
         if status.peers.isEmpty {
             peersText.stringValue = status.enabled
-                ? "还没有其他设备加入。在另一台机器上打开同一个目录并输入配对口令即可。" : ""
+                ? L("还没有其他设备加入。在另一台机器上打开同一个目录并输入配对口令即可。", "No other device has joined yet. Open the same folder on another Mac and enter the pairing passphrase.") : ""
         } else {
             peersText.stringValue = status.peers.map { peer in
                 let seen = peer.lastSeen.map { SyncController.Status.timeFormatter.string(from: $0) }
                     ?? "—"
-                let error = peer.lastError.map { "，错误：\($0)" } ?? ""
-                return "\(peer.name ?? peer.deviceID)：已导入到第 \(peer.importedSeq) 段，"
-                     + "待导入 \(peer.pendingSegments) 段，最后出现 \(seen)\(error)"
+                let error = peer.lastError.map { L("，错误：\($0)", ", error: \($0)") } ?? ""
+                return L("\(peer.name ?? peer.deviceID)：已导入到第 \(peer.importedSeq) 段，"
+                         + "待导入 \(peer.pendingSegments) 段，最后出现 \(seen)\(error)",
+                         "\(peer.name ?? peer.deviceID): imported through segment \(peer.importedSeq), "
+                         + "\(peer.pendingSegments) pending, last seen \(seen)\(error)")
             }.joined(separator: "\n")
         }
     }
@@ -170,7 +180,7 @@ final class SyncWindowController: NSObject, NSWindowDelegate {
             if let generated { presentPairingPassphrase(generated) }
         } catch {
             sender.state = .off
-            present(alert: "打不开同步", body: "\(error)")
+            present(alert: L("打不开同步", "Could not enable sync"), body: "\(error)")
         }
         reload()
     }
@@ -179,11 +189,14 @@ final class SyncWindowController: NSObject, NSWindowDelegate {
     /// 口令根本没存过，想再看只能重新配对。
     private func presentPairingPassphrase(_ passphrase: String) {
         let alert = NSAlert()
-        alert.messageText = "配对口令（只显示这一次）"
-        alert.informativeText = "在另一台机器上打开同一个同步目录时输入它：\n\n\(passphrase)\n\n"
-            + "它不会被保存在任何地方。忘了就只能删掉同步目录重新配对。"
-        alert.addButton(withTitle: "拷贝并关闭")
-        alert.addButton(withTitle: "关闭")
+        alert.messageText = L("配对口令（只显示这一次）", "Pairing passphrase (shown only once)")
+        alert.informativeText = L("在另一台机器上打开同一个同步目录时输入它：\n\n\(passphrase)\n\n"
+            + "它不会被保存在任何地方。忘了就只能删掉同步目录重新配对。",
+            "Enter it on the other Mac when opening the same sync folder:\n\n\(passphrase)\n\n"
+            + "It is not stored anywhere. If you lose it, the only way forward is to delete the sync "
+            + "folder and pair again.")
+        alert.addButton(withTitle: L("拷贝并关闭", "Copy and close"))
+        alert.addButton(withTitle: L("关闭", "Close"))
         if alert.runModal() == .alertFirstButtonReturn {
             NSPasteboard.general.clearContents()
             NSPasteboard.general.setString(passphrase, forType: .string)
@@ -195,7 +208,7 @@ final class SyncWindowController: NSObject, NSWindowDelegate {
         panel.canChooseDirectories = true
         panel.canChooseFiles = false
         panel.canCreateDirectories = true
-        panel.prompt = "选择同步目录"
+        panel.prompt = L("选择同步目录", "Choose sync folder")
         panel.directoryURL = URL(fileURLWithPath: directoryField.stringValue, isDirectory: true)
         guard panel.runModal() == .OK, let url = panel.url else { return }
         directoryField.stringValue = url.path
@@ -210,7 +223,7 @@ final class SyncWindowController: NSObject, NSWindowDelegate {
         let alert = NSAlert()
         alert.messageText = title
         alert.informativeText = body
-        alert.addButton(withTitle: "好")
+        alert.addButton(withTitle: L("好", "OK"))
         alert.runModal()
     }
 

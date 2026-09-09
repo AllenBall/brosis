@@ -602,6 +602,37 @@ enum SelfCheck {
                     && AX.textRoles.contains("AXHeading"),
                   "AXTitle 兜底可用，AXHeading 已计入文本角色")
 
+            // —— 界面语言 ——
+            // 只测**解析**这条纯函数：文案本身由编译器保证两种语言都在（`L(zh, en)` 两个参数
+            // 都是必填），不存在"某个 key 漏翻"这种只在运行时暴露的错误。
+            struct LangCase { var pref: UILanguage; var system: [String]; var want: UILanguage }
+            let langCases: [LangCase] = [
+                LangCase(pref: .system, system: ["zh-Hans-CN", "en-US"], want: .chinese),
+                LangCase(pref: .system, system: ["zh-Hant-TW"], want: .chinese),
+                LangCase(pref: .system, system: ["ZH-hans"], want: .chinese),
+                LangCase(pref: .system, system: ["en-US", "zh-Hans"], want: .english),
+                LangCase(pref: .system, system: ["ja-JP"], want: .english),
+                LangCase(pref: .system, system: [], want: .english),
+                LangCase(pref: .chinese, system: ["en-US"], want: .chinese),
+                LangCase(pref: .english, system: ["zh-Hans-CN"], want: .english),
+            ]
+            var langBad: [String] = []
+            for item in langCases {
+                let got = L10n.resolve(preference: item.pref, preferredLanguages: item.system)
+                if got != item.want {
+                    langBad.append("\(item.pref.rawValue)+\(item.system.first ?? "空")→\(got.rawValue)")
+                }
+            }
+            check("界面语言解析 \(langCases.count) 条（跟随系统 / 显式选择）",
+                  langBad.isEmpty,
+                  langBad.isEmpty ? "zh* 开头判中文，其余英文；显式选择压过系统"
+                                  : langBad.joined(separator: " "))
+            check("三个语言选项各用自己的语言写（看不懂当前界面也能认出自己的语言）",
+                  UILanguage.chinese.displayName == "简体中文"
+                    && UILanguage.english.displayName == "English"
+                    && UILanguage.allCases.count == 3,
+                  UILanguage.allCases.map(\.displayName).joined(separator: " / "))
+
             let plan = try uiStore.appObservationStatsPlan().joined(separator: " | ")
             check("清单统计走 idx_obs_live 部分索引", plan.contains("idx_obs_live"), plan)
 

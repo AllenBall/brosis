@@ -18,7 +18,7 @@ final class PermissionGuide: NSObject, NSWindowDelegate {
     private let axStatus = NSTextField(labelWithString: "")
     private let screenStatus = NSTextField(labelWithString: "")
     private let hint = NSTextField(wrappingLabelWithString: "")
-    private let relaunchButton = NSButton(title: "退出并重新打开 brosis", target: nil, action: nil)
+    private let relaunchButton = NSButton(title: L("退出并重新打开 brosis", "Quit and reopen brosis"), target: nil, action: nil)
 
     private let onAllGranted: () -> Void
     private let onRerequest: () -> Void
@@ -80,22 +80,27 @@ final class PermissionGuide: NSObject, NSWindowDelegate {
         apply(granted: snapshot.accessibility, to: axStatus)
         apply(granted: snapshot.screenRecording, to: screenStatus)
         if !snapshot.screenRecording {
-            hint.stringValue = "在系统设置「录屏与系统录音」里把 brosis 打开；macOS 通常要求重新打开 app 才生效，"
+            hint.stringValue = L("在系统设置「录屏与系统录音」里把 brosis 打开；macOS 通常要求重新打开 app 才生效，"
                 + "打开开关后这里仍显示「未授权」就点「退出并重新打开 brosis」。"
-                + "如果列表里没有 brosis，先点「重新请求授权」；仍没有就在该页点「+」手动添加 /Applications/brosis.app。"
+                + "如果列表里没有 brosis，先点「重新请求授权」；仍没有就在该页点「+」手动添加 /Applications/brosis.app。",
+                "Turn brosis on in System Settings → Screen & System Audio Recording. macOS usually "
+                + "requires reopening the app before it takes effect: if this still says “Not granted” "
+                + "after flipping the switch, click “Quit and reopen brosis”. If brosis is not in the "
+                + "list, click “Request again”; if it still is not there, use “+” on that page to add "
+                + "/Applications/brosis.app manually.")
             relaunchButton.isHidden = false
         } else if !snapshot.accessibility {
-            hint.stringValue = "在系统设置的「辅助功能」列表里把 brosis 打开即可，不需要重新启动。"
+            hint.stringValue = L("在系统设置的「辅助功能」列表里把 brosis 打开即可，不需要重新启动。", "Turn brosis on in System Settings → Accessibility. No restart needed.")
             relaunchButton.isHidden = true
         } else {
-            hint.stringValue = "两项权限都已就绪。"
+            hint.stringValue = L("两项权限都已就绪。", "Both permissions are granted.")
             relaunchButton.isHidden = true
         }
         return snapshot
     }
 
     private func apply(granted: Bool, to field: NSTextField) {
-        field.stringValue = granted ? "✓ 已授权" : "✗ 未授权"
+        field.stringValue = granted ? L("✓ 已授权", "✓ Granted") : L("✗ 未授权", "✗ Not granted")
         field.textColor = granted ? .systemGreen : .systemRed
     }
 
@@ -147,30 +152,33 @@ final class PermissionGuide: NSObject, NSWindowDelegate {
     // MARK: - 界面
 
     private func makeWindow() -> NSWindow {
-        let title = NSTextField(labelWithString: "brosis 需要两项权限才能开始记录")
+        let title = NSTextField(labelWithString: L("brosis 需要两项权限才能开始记录", "brosis needs two permissions before it can record"))
         title.font = .boldSystemFont(ofSize: 15)
 
         let intro = NSTextField(wrappingLabelWithString:
-            "刚才弹出的系统授权框只负责把你带到设置页；请在「隐私与安全性」里把下面两项打开。"
-            + "这个窗口会自动检测，两项都打开后会自动开始采集。")
+            L("刚才弹出的系统授权框只负责把你带到设置页；请在「隐私与安全性」里把下面两项打开。"
+            + "这个窗口会自动检测，两项都打开后会自动开始采集。",
+            "The system prompt only takes you to the settings page. Turn on both items below under "
+            + "Privacy & Security. This window checks automatically and capture starts as soon as "
+            + "both are on."))
         intro.textColor = .secondaryLabelColor
 
-        let axRow = makeRow(name: "辅助功能",
-                            description: "读取焦点窗口的标题、网址和可见正文，是文字记录的主要来源。",
+        let axRow = makeRow(name: L("辅助功能", "Accessibility"),
+                            description: L("读取焦点窗口的标题、网址和可见正文，是文字记录的主要来源。", "Reads the focused window’s title, URL and visible text — the main source of the record."),
                             status: axStatus,
                             action: #selector(openAccessibility))
-        let screenRow = makeRow(name: "屏幕录制",
-                                description: "按 1 秒间隔读取屏幕变化区域与窗口标题。画面不保存，只留文字与统计。",
+        let screenRow = makeRow(name: L("屏幕录制", "Screen Recording"),
+                                description: L("按 1 秒间隔读取屏幕变化区域与窗口标题。画面不保存，只留文字与统计。", "Reads changed screen regions and window titles about once a second. Images are never saved — only text and statistics."),
                                 status: screenStatus,
                                 action: #selector(openScreenRecording))
 
         hint.textColor = .secondaryLabelColor
         hint.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
 
-        let rerequestButton = NSButton(title: "重新请求授权", target: self, action: #selector(rerequest))
+        let rerequestButton = NSButton(title: L("重新请求授权", "Request again"), target: self, action: #selector(rerequest))
         relaunchButton.target = self
         relaunchButton.action = #selector(relaunch)
-        let laterButton = NSButton(title: "稍后再说", target: self, action: #selector(later))
+        let laterButton = NSButton(title: L("稍后再说", "Later"), target: self, action: #selector(later))
         let buttons = NSStackView(views: [laterButton, NSView(), rerequestButton, relaunchButton])
         buttons.orientation = .horizontal
         buttons.distribution = .fill
@@ -198,7 +206,7 @@ final class PermissionGuide: NSObject, NSWindowDelegate {
         let window = NSWindow(contentRect: .zero,
                               styleMask: [.titled, .closable],
                               backing: .buffered, defer: false)
-        window.title = "brosis 权限设置"
+        window.title = L("brosis 权限设置", "brosis Permissions")
         window.contentView = content
         window.isReleasedWhenClosed = false
         window.level = .floating
@@ -212,7 +220,7 @@ final class PermissionGuide: NSObject, NSWindowDelegate {
         let nameLabel = NSTextField(labelWithString: name)
         nameLabel.font = .boldSystemFont(ofSize: 13)
         status.font = .systemFont(ofSize: 13)
-        let button = NSButton(title: "打开系统设置…", target: self, action: action)
+        let button = NSButton(title: L("打开系统设置…", "Open System Settings…"), target: self, action: action)
         let top = NSStackView(views: [nameLabel, status, NSView(), button])
         top.orientation = .horizontal
         top.spacing = 10

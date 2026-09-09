@@ -50,38 +50,44 @@ enum UpdaterConfig {
     /// - Parameter info: 一般传 `Bundle.main.infoDictionary`；测试可以传自造的字典。
     static func issues(in info: [String: Any]?) -> [String] {
         guard let info else {
-            return ["读不到 Info.plist（多半是从裸二进制而不是 brosis.app 里跑的）"]
+            return [L("读不到 Info.plist（多半是从裸二进制而不是 brosis.app 里跑的）",
+                      "Info.plist unreadable (most likely running the bare binary, not brosis.app)")]
         }
         var problems: [String] = []
 
         // ---- SUFeedURL：必须有、必须 https（Sparkle 对 http 源会拒绝，这里先说清楚）
         let feed = (info["SUFeedURL"] as? String) ?? ""
         if feed.isEmpty {
-            problems.append("Info.plist 缺 SUFeedURL")
+            problems.append(L("Info.plist 缺 SUFeedURL", "Info.plist is missing SUFeedURL"))
         } else if let url = URL(string: feed) {
             if url.scheme?.lowercased() != "https" {
-                problems.append("SUFeedURL 不是 https：\(feed)")
+                problems.append(L("SUFeedURL 不是 https：\(feed)", "SUFeedURL is not https: \(feed)"))
             }
         } else {
-            problems.append("SUFeedURL 不是合法 URL：\(feed)")
+            problems.append(L("SUFeedURL 不是合法 URL：\(feed)", "SUFeedURL is not a valid URL: \(feed)"))
         }
 
         // ---- SUPublicEDKey：必须有、不能是占位符、必须是 32 字节的 base64
         let key = (info["SUPublicEDKey"] as? String) ?? ""
         if key.isEmpty {
-            problems.append("Info.plist 缺 SUPublicEDKey")
+            problems.append(L("Info.plist 缺 SUPublicEDKey", "Info.plist is missing SUPublicEDKey"))
         } else if key == publicKeyPlaceholder {
             problems.append(
-                "SUPublicEDKey 还是占位符 \(publicKeyPlaceholder)："
+                L("SUPublicEDKey 还是占位符 \(publicKeyPlaceholder)："
                 + "这份构建没有更新公钥，任何「更新」都会被拒。"
                 + "先用 Sparkle 的 generate_keys 生成密钥对，把公钥放进 "
-                + "~/Library/Application Support/brosis-dev/sparkle_public_ed_key.txt 再重新构建。")
+                + "~/Library/Application Support/brosis-dev/sparkle_public_ed_key.txt 再重新构建。",
+                "SUPublicEDKey is still the placeholder \(publicKeyPlaceholder): this build has no update "
+                + "public key, so every update is refused. Generate a key pair with Sparkle’s "
+                + "generate_keys, put the public key in "
+                + "~/Library/Application Support/brosis-dev/sparkle_public_ed_key.txt and rebuild."))
         } else if let raw = Data(base64Encoded: key) {
             if raw.count != publicKeyByteCount {
-                problems.append("SUPublicEDKey 解出来是 \(raw.count) 字节，应为 \(publicKeyByteCount)")
+                problems.append(L("SUPublicEDKey 解出来是 \(raw.count) 字节，应为 \(publicKeyByteCount)",
+                              "SUPublicEDKey decodes to \(raw.count) bytes, expected \(publicKeyByteCount)"))
             }
         } else {
-            problems.append("SUPublicEDKey 不是合法 base64")
+            problems.append(L("SUPublicEDKey 不是合法 base64", "SUPublicEDKey is not valid base64"))
         }
 
         // ---- SUEnableAutomaticChecks：必须显式为 false（"默认不联网"这条不许被悄悄改掉）
@@ -89,9 +95,13 @@ enum UpdaterConfig {
         case let flag as Bool where flag == false:
             break
         case nil:
-            problems.append("Info.plist 缺 SUEnableAutomaticChecks（必须显式 false：默认不自动联网）")
+            problems.append(L("Info.plist 缺 SUEnableAutomaticChecks（必须显式 false：默认不自动联网）",
+                              "Info.plist is missing SUEnableAutomaticChecks (must be explicitly false: "
+                              + "no automatic network access by default)"))
         default:
-            problems.append("SUEnableAutomaticChecks 不是 false：默认不自动联网这条被改了")
+            problems.append(L("SUEnableAutomaticChecks 不是 false：默认不自动联网这条被改了",
+                              "SUEnableAutomaticChecks is not false — the “never go online on its own” "
+                              + "rule has been changed"))
         }
 
         return problems
@@ -102,9 +112,9 @@ enum UpdaterConfig {
         let problems = issues(in: info)
         if problems.isEmpty {
             let feed = (info?["SUFeedURL"] as? String) ?? "?"
-            return "更新源已配置：\(feed)"
+            return L("更新源已配置：\(feed)", "Update feed configured: \(feed)")
         }
-        return "更新未启用：\(problems[0])"
+        return L("更新未启用：\(problems[0])", "Updates disabled: \(problems[0])")
     }
 }
 
@@ -127,7 +137,7 @@ final class UpdaterController: NSObject {
     /// 而不是灰掉让人不知道为什么。只有 Sparkle 已经在跑一次更新会话时才灰掉，
     /// 判定在下面的 `validateMenuItem`。
     func makeMenuItem() -> NSMenuItem {
-        let item = NSMenuItem(title: "检查更新…",
+        let item = NSMenuItem(title: L("检查更新…", "Check for Updates…"),
                               action: #selector(checkForUpdates(_:)),
                               keyEquivalent: "")
         item.target = self
@@ -143,7 +153,7 @@ final class UpdaterController: NSObject {
         // 第一道：配置不对就不联网，直接说清楚。
         let problems = UpdaterConfig.issues(in: Bundle.main.infoDictionary)
         guard problems.isEmpty else {
-            presentAlert(title: "更新功能未启用",
+            presentAlert(title: L("更新功能未启用", "Updates are not enabled"),
                          body: problems.joined(separator: "\n\n"))
             return
         }
@@ -159,9 +169,10 @@ final class UpdaterController: NSObject {
                 try created.updater.start()
                 controller = created
             } catch {
-                presentAlert(title: "更新器启动失败",
+                presentAlert(title: L("更新器启动失败", "Could not start the updater"),
                              body: "\(error.localizedDescription)\n\n"
-                                 + "（brosis 不会因此自动重试，也不会在后台再联网。）")
+                                 + L("（brosis 不会因此自动重试，也不会在后台再联网。）",
+                                     " (brosis will not retry automatically and will not go online in the background.)"))
                 return
             }
         }
@@ -174,7 +185,7 @@ final class UpdaterController: NSObject {
         alert.alertStyle = .warning
         alert.messageText = title
         alert.informativeText = body
-        alert.addButton(withTitle: "好")
+        alert.addButton(withTitle: L("好", "OK"))
         NSApp.activate(ignoringOtherApps: true)
         alert.runModal()
     }
