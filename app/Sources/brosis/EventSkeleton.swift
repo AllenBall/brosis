@@ -569,7 +569,9 @@ final class EventSkeleton {
                 captureMethod: captureMethod,
                 at: Date().timeIntervalSince1970))
         } else {
-            coordinator.clearContext()
+            // 只清这个应用自己的那份：失活事件比新应用的激活事件晚到，
+            // 不带 id 地清会把新应用刚排好的 OCR 请求抹掉（见 clearContext 的注释）。
+            coordinator.clearContext(bundleID: app.bundleIdentifier)
         }
 
         onFocusChanged(displayID)

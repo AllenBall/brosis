@@ -1458,6 +1458,39 @@ enum SelfCheck {
                     + "阳性对照（同一张图换回原应用）跑 \(ranSameApp) 个区域 / 命中 "
                     + "\(sameAppHits) 条")
 
+            // ①b **失活事件不能清掉别人的上下文**（2026-09-09 的真实故障，这里是它的复现）。
+            // 应用切换时系统事件的到达顺序是「新应用 activated」先、「旧应用 deactivated」后
+            // （实测差 6 ms），而失活那一支不扫描、走 clearContext。以前它不带 id 见谁清谁，
+            // 于是新应用刚排好的 OCR 请求被上一个应用的谢幕事件抹掉。
+            // AX 树活的应用随后每秒都会再扫一次、上下文立刻重建，所以看不出问题；
+            // AX 树是死的那些（飞书会议、微信）只有激活那一次扫描，抹掉就再也没有了。
+            coordinator.trigger.reset()
+            let meetingContext = CaptureCoordinator.Context(
+                bundleID: "com.brosis.selfcheck.meeting", appName: "自检会议",
+                ruleID: AdapterRegistry.feishuMeeting.id, displayID: 1, windowFrame: bounds,
+                windowTitle: "自检会议", observationID: nil, axText: "",
+                regionTexts: [:],
+                ocrRequests: [OCRRequest(regionName: "window", kind: .body,
+                                         rect: bounds, reason: .ruleDeclared)],
+                chatLayout: nil, completeness: .unavailable, captureMethod: .ocr,
+                at: Date().timeIntervalSince1970)
+            coordinator.noteScan(meetingContext)
+            coordinator.clearContext(bundleID: "com.brosis.selfcheck.previous")   // 上一个应用谢幕
+            let ranAfterSwitch = coordinator.handleFrame(screen, displayID: 1, recorder: ocrRecorder,
+                                                         gated: true, trigger: "self_check",
+                                                         bundleID: "com.brosis.selfcheck.meeting",
+                                                         displayBoundsOverride: bounds)
+            coordinator.clearContext(bundleID: "com.brosis.selfcheck.meeting")    // 自己谢幕
+            let ranAfterOwn = coordinator.handleFrame(screen, displayID: 1, recorder: ocrRecorder,
+                                                      gated: true, trigger: "self_check",
+                                                      bundleID: "com.brosis.selfcheck.meeting",
+                                                      displayBoundsOverride: bounds)
+            check("失活只清自己那份上下文：清别人的清不动，清自己的清得掉",
+                  ranAfterSwitch == 1 && ranAfterOwn == 0,
+                  "别人谢幕后仍跑了 \(ranAfterSwitch) 个区域，自己谢幕后 \(ranAfterOwn) 个")
+            // 这一段把上下文清空了，后面那条用例还要用微信那份——原样放回去。
+            coordinator.noteScan(wechatContext)
+
             // ①'' **OCR 侧的新鲜度判定**：同一区域再认一次同一张图，文本逐字节没变 →
             // OCR 照跑（拦不住，得认了才知道变没变），但**不写第二条观察**。
             let beforeRepeat = try ocrStore.count(table: "observations")

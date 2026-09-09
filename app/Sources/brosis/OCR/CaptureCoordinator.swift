@@ -178,8 +178,24 @@ final class CaptureCoordinator: @unchecked Sendable {
     ///
     /// `auditDue` **不清**：轮到的那次采样审计只是被推迟到下一次真正扫描之后，不作废
     /// （没有上下文时 `handleFrame` 本来就直接返回）。
-    func clearContext() {
-        lock.withLock { context = nil }
+    ///
+    /// **只清属于 `bundleID` 的那一份**（2026-09-09 修）。以前不带参数、见谁清谁，
+    /// 而应用切换时系统事件的到达顺序是「新应用 activated」**先**、
+    /// 「旧应用 deactivated」**后**（实测相差 6 ms）：
+    ///
+    ///     18:24:04.115 扫描：飞书会议 OCR请求=1  触发=app_activated
+    ///     18:24:04.121 扫描：Claude   OCR请求=-1 触发=app_deactivated  ← 把上一行的上下文清了
+    ///
+    /// 失活那一支 `collectText=false` ⇒ 不扫描 ⇒ 走这里，于是**新应用刚排好的 OCR 请求
+    /// 被上一个应用的谢幕事件顺手抹掉**。AX 树活的应用（Claude、飞书主窗口）看不出问题：
+    /// 它们随后每秒都有 title_changed / value_changed 再扫一次，上下文立刻重建。
+    /// AX 树是死的那些（飞书会议、微信）**只有激活那一次扫描**，抹掉就再也没有了——
+    /// 这就是「规则命中了、OCR 请求也排了，却一个字都记不到」的真正原因。
+    func clearContext(bundleID: String?) {
+        lock.withLock {
+            guard context?.bundleID == bundleID else { return }
+            context = nil
+        }
     }
 
     // MARK: - 截图侧（utility 队列）
