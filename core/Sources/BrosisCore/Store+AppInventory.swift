@@ -26,11 +26,20 @@ public struct AppObservationStats: Sendable, Equatable, Codable {
     public var partial: Int
     public var unavailable: Int
     public var excluded: Int
+    /// `unavailable` 里 `source_state = 'ok'` 的那部分：**读了，但一个字都没拿到**。
+    /// 这才是真正的覆盖缺口（Electron 应用 AX 空树、OCR 没跑成）。
+    public var unavailableNoText: Int
+    /// `unavailable` 里 `source_state = 'timeout'` 的那部分：AX 读窗口超时。
+    public var unavailableTimeout: Int
+    /// 其余的 `unavailable`：没有辅助功能权限、安全输入、锁屏、权限丢失。
+    /// 这些是**环境挡住了**，不是应用读不出来。
+    public var unavailableBlocked: Int { max(0, unavailable - unavailableNoText - unavailableTimeout) }
     /// 窗口内最近一条观察的时间戳（Unix 毫秒）。窗口里那列「最近出现」用它。
     public var lastSeenMS: Int64
 
     public init(bundleID: String, name: String, observations: Int,
                 complete: Int, partial: Int, unavailable: Int, excluded: Int,
+                unavailableNoText: Int = 0, unavailableTimeout: Int = 0,
                 lastSeenMS: Int64) {
         self.bundleID = bundleID
         self.name = name
@@ -39,6 +48,8 @@ public struct AppObservationStats: Sendable, Equatable, Codable {
         self.partial = partial
         self.unavailable = unavailable
         self.excluded = excluded
+        self.unavailableNoText = unavailableNoText
+        self.unavailableTimeout = unavailableTimeout
         self.lastSeenMS = lastSeenMS
     }
 }
@@ -84,7 +95,9 @@ extension Store {
                     partial: Int(st.int(4) ?? 0),
                     unavailable: Int(st.int(5) ?? 0),
                     excluded: Int(st.int(6) ?? 0),
-                    lastSeenMS: st.int(7) ?? 0))
+                    unavailableNoText: Int(st.int(7) ?? 0),
+                    unavailableTimeout: Int(st.int(8) ?? 0),
+                    lastSeenMS: st.int(9) ?? 0))
             }
             return out
         }
@@ -116,6 +129,12 @@ extension Store {
                SUM(o.completeness = 'partial'),
                SUM(o.completeness = 'unavailable'),
                SUM(o.completeness = 'excluded'),
+               -- 「不可用」拆成三份，因为它们要人做的事完全不同：
+               --   读空   → 应用本身给不出文本（Electron AX 空树），要靠适配器 / OCR；
+               --   超时   → AX 读窗口超时，是性能问题；
+               --   其余   → 权限 / 安全输入 / 锁屏挡住的，与应用无关。
+               SUM(o.completeness = 'unavailable' AND o.source_state = 'ok'),
+               SUM(o.completeness = 'unavailable' AND o.source_state = 'timeout'),
                MAX(o.ts)
           FROM observations o
           JOIN apps a ON a.id = o.app_id

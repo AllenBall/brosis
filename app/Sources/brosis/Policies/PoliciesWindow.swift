@@ -178,7 +178,7 @@ final class PoliciesWindowController: NSObject, NSWindowDelegate,
         ColumnSpec(id: "group", title: "分组", width: 110),
         ColumnSpec(id: "mode", title: "采集模式", width: 132),
         ColumnSpec(id: "observations", title: "最近 7 天观察", width: 96),
-        ColumnSpec(id: "completeness", title: "完整性分布", width: 236),
+        ColumnSpec(id: "completeness", title: "完整性分布", width: 360),
         ColumnSpec(id: "lastSeen", title: "最近出现", width: 96),
         ColumnSpec(id: "status", title: "状态", width: 170),
     ]

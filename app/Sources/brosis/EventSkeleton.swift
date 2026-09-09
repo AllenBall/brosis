@@ -318,6 +318,39 @@ final class EventSkeleton {
         record(app: app, trigger: trigger, collectText: true)
     }
 
+    /// 没走到适配器遍历时，这条观察的完整性记什么。**纯函数，自检逐条盯着它**。
+    ///
+    /// 分成 `excluded`（策略上就没读）与 `unavailable`（想读却读不成）两类，
+    /// 这个区分不是措辞问题：3.12 的「应用采集清单」用完整性分布让人判断
+    /// "这个应用值不值得留"，把"从来没尝试"混进"读不到"会让整列失去意义。
+    ///
+    /// - Parameters:
+    ///   - triedToRead: 本来要读正文（`shouldReadText`），但焦点窗口拿不到（AX 超时 / 无窗口）。
+    ///   - collectText: 这个触发原因要不要读正文。**只有应用失活是 false**。
+    ///   - privateBrowsing: 私密浏览命中。
+    ///   - readsContent: 3.12 档位允许读正文吗（「只记事件」为 false）。
+    nonisolated static func completenessWithoutScan(triedToRead: Bool, collectText: Bool,
+                                                    privateBrowsing: Bool,
+                                                    readsContent: Bool) -> Completeness {
+        // 试过了才轮得到"读不到"。
+        if triedToRead { return .unavailable }
+        // 私密浏览：事件照记（不然台账凭空少一段），正文、标题、URL、文件路径一个都不存。
+        if privateBrowsing { return .excluded }
+        // 3.12「只记事件」：不读正文是策略排除。
+        if !readsContent { return .excluded }
+        // **应用失活**（唯一一处 `collectText: false`）：这条观察只是"你从这个应用切走了"，
+        // 采集端压根没打算读正文——和「只记事件」同理，是策略排除不是读取失败。
+        //
+        // 2026-09-09 之前它落在下面那个 unavailable 上，后果是「不可用」这一栏混进了大量
+        // "从来没尝试过"的行：原生 AX 读得很好的 Safari 也有 17% 不可用，只被切来切去、
+        // 从没停留过的应用（Telegram / LM Studio）更是 100%。
+        // **已有的历史行不会被改写**，这个口径只对之后的观察生效。
+        if !collectText { return .excluded }
+        // 剩下的是真想读却读不成：没有辅助功能权限，或 source_state 落在
+        // timeout / secure_input / locked / permission_lost。
+        return .unavailable
+    }
+
     // MARK: - 写观察记录
 
     private func record(app: NSRunningApplication, trigger: ObservationTrigger, collectText: Bool) {
@@ -392,17 +425,10 @@ final class EventSkeleton {
             if scan.truncated || scan.regions.contains(where: { $0.truncated }) {
                 noteAdapterLimitHit(bundleID: app.bundleIdentifier, scan: scan)
             }
-        } else if shouldReadText {
-            // 读不到焦点窗口（AX 超时 / 应用没有窗口）：不是"策略排除"，是"读不到"。
-            completeness = .unavailable
-        } else if privateBrowsing {
-            // 私密浏览：事件照记（不然台账凭空少一段），正文、标题、URL、文件路径一个都不存。
-            completeness = .excluded
-        } else if !gate.readsContent {
-            // 3.12「只记事件」：不读正文是**策略排除**，不是"读不到"，所以是 excluded 不是 unavailable。
-            completeness = .excluded
         } else {
-            completeness = .unavailable
+            completeness = Self.completenessWithoutScan(
+                triedToRead: shouldReadText, collectText: collectText,
+                privateBrowsing: privateBrowsing, readsContent: gate.readsContent)
         }
 
         // —— 元数据同样过入库前脱敏 ——

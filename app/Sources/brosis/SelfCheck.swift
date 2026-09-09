@@ -477,14 +477,22 @@ enum SelfCheck {
             defer { uiStore.close() }
             let nowMS = Recorder.milliseconds()
             let dayMS: Int64 = 86_400_000
-            let states: [Completeness] = [.complete, .complete, .partial, .unavailable, .excluded]
-            for (index, completeness) in states.enumerated() {
+            // 三条 unavailable 各带一个不同的 source_state：清单要把它们拆成
+            // 读空（应用给不出文本）/ 超时（AX 读窗口超时）/ 受阻（权限、安全输入、锁屏）。
+            let states: [(Completeness, SourceState)] = [
+                (.complete, .ok), (.complete, .ok), (.partial, .ok),
+                (.unavailable, .ok),            // 读空
+                (.unavailable, .timeout),       // 超时
+                (.unavailable, .secureInput),   // 受阻
+                (.excluded, .ok),
+            ]
+            for (index, pair) in states.enumerated() {
                 try uiStore.record(ObservationInput(
                     ts: nowMS - Int64(index) * dayMS, displayID: 1,
                     app: AppRef(bundleID: "com.brosis.policy-ui", name: "清单自检"),
                     windowTitle: "窗口 \(index)",
                     trigger: ObservationTrigger.selfCheck.coreTrigger,
-                    captureMethod: .ax, completeness: completeness, sourceState: .ok,
+                    captureMethod: .ax, completeness: pair.0, sourceState: pair.1,
                     texts: [TextFragment(text: "第 \(index) 条", region: "AXStaticText")]))
             }
             // 窗口外那一条（30 天前）不该被最近 7 天的统计数进来。
@@ -501,13 +509,57 @@ enum SelfCheck {
             let stat = try uiStore.appObservationStats(since: since)
                 .first { $0.bundleID == "com.brosis.policy-ui" }
             check("最近 \(PolicyList.statsWindowDays) 天的观察数与完整性分布（一条聚合 SQL，不扫全表）",
-                  stat?.observations == 5 && stat?.complete == 2 && stat?.partial == 1
-                    && stat?.unavailable == 1 && stat?.excluded == 1
+                  stat?.observations == 7 && stat?.complete == 2 && stat?.partial == 1
+                    && stat?.unavailable == 3 && stat?.excluded == 1
                     && stat?.lastSeenMS == nowMS,
                   "窗口内 \(stat?.observations ?? -1) 条 = 完整 \(stat?.complete ?? -1) / "
                   + "部分 \(stat?.partial ?? -1) / 不可用 \(stat?.unavailable ?? -1) / "
                   + "排除 \(stat?.excluded ?? -1)；30 天前那条没被数进来"
                   + "（全库 \(try uiStore.appObservationCount(bundleID: "com.brosis.policy-ui")) 条）")
+            // 「不可用」必须拆得开，否则这一列只能告诉你"有问题"，不能告诉你该做什么。
+            let noText: Int = stat?.unavailableNoText ?? -1
+            let timedOut: Int = stat?.unavailableTimeout ?? -1
+            let blocked: Int = stat?.unavailableBlocked ?? -1
+            check("不可用按 source_state 三分（读空 / 超时 / 受阻），三项之和 == 不可用",
+                  noText == 1 && timedOut == 1 && blocked == 1,
+                  "读空 \(noText) / 超时 \(timedOut) / 受阻 \(blocked)")
+            let splitStats: [AppObservationStats] = stat.map { [$0] } ?? []
+            let splitRows: [PolicyListRow] = PolicyList.merge(
+                policies: [], stats: splitStats, names: [:], running: [],
+                temporaryPauses: [:],
+                globalDefault: CapturePolicyMode.eventsAndContent,
+                isDenylisted: { _ in false },
+                adapterID: { (_: String) -> String? in nil })
+            let splitRow: PolicyListRow? = splitRows.first { $0.bundleID == "com.brosis.policy-ui" }
+            check("清单那一列把三分写出来了",
+                  splitRow?.completenessLabel
+                    == "完整 2 · 部分 1 · 不可用 3（读空 1 超时 1 受阻 1） · 排除 1",
+                  splitRow?.completenessLabel ?? "（没这一行）")
+
+            // —— 完整性判定：策略上没读 vs 想读却读不成 ——
+            // 应用失活以前被记成 unavailable，「不可用」那一栏因此混进了大量"从没尝试过"的行。
+            typealias CB = (tried: Bool, collect: Bool, priv: Bool, reads: Bool)
+            let completenessCases: [(String, CB, Completeness)] = [
+                ("应用失活（唯一 collectText=false）⇒ 排除，不是不可用",
+                 (false, false, false, true), .excluded),
+                ("只记事件档 ⇒ 排除", (false, true, false, false), .excluded),
+                ("私密浏览 ⇒ 排除", (false, true, true, true), .excluded),
+                ("失活且只记事件 ⇒ 排除", (false, false, false, false), .excluded),
+                ("想读但拿不到焦点窗口 ⇒ 不可用", (true, true, false, true), .unavailable),
+                ("想读、档位允许，却被权限/安全输入挡住 ⇒ 不可用",
+                 (false, true, false, true), .unavailable),
+            ]
+            var completenessBad: [String] = []
+            for (label, input, want) in completenessCases {
+                let got = EventSkeleton.completenessWithoutScan(
+                    triedToRead: input.tried, collectText: input.collect,
+                    privateBrowsing: input.priv, readsContent: input.reads)
+                if got != want { completenessBad.append("\(label)→\(got.rawValue)") }
+            }
+            check("没读正文时的完整性判定 \(completenessCases.count) 条（排除 = 没打算读、不可用 = 读不成）",
+                  completenessBad.isEmpty,
+                  completenessBad.isEmpty ? "失活记 excluded，历史行不改写"
+                                          : completenessBad.joined(separator: " "))
             let plan = try uiStore.appObservationStatsPlan().joined(separator: " | ")
             check("清单统计走 idx_obs_live 部分索引", plan.contains("idx_obs_live"), plan)
 
@@ -520,8 +572,10 @@ enum SelfCheck {
                 .first { $0.bundleID == "com.brosis.policy-ui" }
             let policyRow = try uiStore.appPolicy(bundleID: "com.brosis.policy-ui")
             check("降档删数据端到端（deleteByApp reason=policy → 统计归零、策略行还在）",
-                  decided == .applyThenAskDelete(existing: 6)
-                    && summary.observationsAffected == 6 && summary.reason == .policy
+                  // 比的是"计划里的条数 == 库里真有的条数 == 实际删掉的条数"，
+                  // 不是写死的 6——上一版写死之后，样本一加行这条就假失败。
+                  decided == .applyThenAskDelete(existing: existing)
+                    && summary.observationsAffected == existing && summary.reason == .policy
                     && afterStats == nil && policyRow?.mode == .eventsAndContent,
                   "全库 \(existing) 条 → 删 \(summary.observationsAffected) 条观察 / "
                   + "\(summary.textVersionsDeleted) 个文本版本 / \(summary.ftsRowsDeleted) 行索引，"

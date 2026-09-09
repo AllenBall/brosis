@@ -54,6 +54,10 @@ struct PolicyListRow: Sendable, Equatable {
     var partial: Int = 0
     var unavailable: Int = 0
     var excluded: Int = 0
+    /// `unavailable` 的三分：读空（应用给不出文本）/ 超时 / 被环境挡住。
+    var unavailableNoText: Int = 0
+    var unavailableTimeout: Int = 0
+    var unavailableBlocked: Int { max(0, unavailable - unavailableNoText - unavailableTimeout) }
     /// 最近一条观察的时间戳（Unix 毫秒）；0 表示窗口内没有观察。
     var lastSeenMS: Int64 = 0
     /// 现在是不是在运行（`NSWorkspace`）。
@@ -69,9 +73,21 @@ struct PolicyListRow: Sendable, Equatable {
 
     /// 完整性分布那一列。**四态都写出来，包括 0**——3.12 说这一列是给人判断"值不值得留"的，
     /// 少一态就看不出是"没发生"还是"没统计"。
+    ///
+    /// 「不可用」后面再括一层三分（2026-09-09 加）：光看一个总数没法判断该做什么——
+    /// 读空要配适配器 / OCR，超时是性能问题，被挡住则与这个应用无关。
+    /// 只在有不可用时才括，否则每一行都拖一串 0。
     var completenessLabel: String {
         guard observations > 0 else { return "—" }
-        return "完整 \(complete) · 部分 \(partial) · 不可用 \(unavailable) · 排除 \(excluded)"
+        var text = "完整 \(complete) · 部分 \(partial) · 不可用 \(unavailable)"
+        if unavailable > 0 {
+            var parts: [String] = []
+            if unavailableNoText > 0 { parts.append("读空 \(unavailableNoText)") }
+            if unavailableTimeout > 0 { parts.append("超时 \(unavailableTimeout)") }
+            if unavailableBlocked > 0 { parts.append("受阻 \(unavailableBlocked)") }
+            if !parts.isEmpty { text += "（" + parts.joined(separator: " ") + "）" }
+        }
+        return text + " · 排除 \(excluded)"
     }
 
     /// 「最近出现」那一列。相对时间，避免把精确到秒的时间点摊在界面上。
@@ -186,6 +202,8 @@ enum PolicyList {
                 partial: stat?.partial ?? 0,
                 unavailable: stat?.unavailable ?? 0,
                 excluded: stat?.excluded ?? 0,
+                unavailableNoText: stat?.unavailableNoText ?? 0,
+                unavailableTimeout: stat?.unavailableTimeout ?? 0,
                 lastSeenMS: stat?.lastSeenMS ?? 0,
                 running: runningByID[id] != nil,
                 temporaryUntil: temporaryPauses[id])
