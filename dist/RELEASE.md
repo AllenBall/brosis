@@ -165,7 +165,11 @@ DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer \
 
 判据：
 
-- [ ] `item 数 N，edSignature 数 N`（两个数必须相等；缺签名的 item 装不上）
+- [ ] `item 数 1，enclosure 数 1，edSignature 数 1`（三个数都必须是 1）。
+      本项目**只发全量包，不发增量包（delta）**：`make_appcast.sh` 里 `MAX_DELTAS=0`。
+      增量包省流量，但每个都是一条必须跟着一起上传的资产，漏传一个，停在那个版本的
+      机器就去下一个 404；全量包是唯一一条"少传就当场看得见"的路。脚本会断言
+      appcast 里一条 delta 都没有。
 - [ ] 打印出来的每个 `url=` 都指向**它自己那个 tag**
       （`…/releases/download/v<该 item 的版本>/brosis-<该版本>.dmg`）。
       `generate_appcast` 只给**新**条目套 `--download-url-prefix`，老条目原样保留；

@@ -29,8 +29,14 @@ DOWNLOAD_PREFIX=""
 # 而一次 GitHub Release 只传得了这一版的 DMG——留着老条目就等于在 appcast 里挂
 # 4 个 404 链接（2026-09-09 实测：0.4.0 / 0.3.1 / 0.3.0 / 0.2.9 的 url 全变成了 v0.4.1）。
 # Sparkle 判断"有没有新版"只看最新那条；老条目除了下载失败没有别的用处。
-# 增量包（delta）挂在最新那条 item 下面，不受影响，照常生成、照常要一起上传。
 MAX_VERSIONS="${MAX_VERSIONS:-1}"
+# **不发增量包**（2026-09-09 定的口径）。`generate_appcast` 默认会拿归档里每个旧 DMG
+# 和最新版做二进制差分，生成最多 5 个 .delta 挂在 item 下面。它确实省流量
+# （0.4.7→0.4.8 只要 1.2 MB，完整包 27 MB），但每个 delta 都是一条必须**跟着一起上传**
+# 的资产：漏传一个，停在那个版本的机器就去下一个 404。发版清单因此从 2 个资产变成 7 个，
+# 而这条路径一年也走不了几次、每次都要人肉核对。全量包是唯一一条"少传就当场看得见"的路。
+# 想恢复增量，把这个数改回 5，并且把 RELEASE.md 第 5 步的资产清单一起改。
+MAX_DELTAS=0
 
 step() { printf '\n==> %s\n' "$1"; }
 fail() { printf 'ERROR: %s\n' "$1" >&2; exit 1; }
@@ -122,10 +128,21 @@ echo "下载地址前缀：$DOWNLOAD_PREFIX"
         --download-url-prefix "$DOWNLOAD_PREFIX" \
         --link "$REPO_URL" \
         --maximum-versions "$MAX_VERSIONS" \
+        --maximum-deltas "$MAX_DELTAS" \
         -o "$ARCHIVE/appcast.xml" \
         "$ARCHIVE"
 
 [ -f "$ARCHIVE/appcast.xml" ] || fail "generate_appcast 没有产出 $ARCHIVE/appcast.xml"
+
+# 上一轮留下的 .delta 还躺在归档里。--maximum-deltas 0 只是不再**引用**它们，不会删文件，
+# 留着迟早被谁按 `gh release upload …/*` 一把捞上去。既然不发增量，就地清掉。
+if [ "$MAX_DELTAS" = 0 ]; then
+  STALE="$(find "$ARCHIVE" -maxdepth 1 -name '*.delta' | wc -l | tr -d ' ')"
+  if [ "$STALE" != 0 ]; then
+    find "$ARCHIVE" -maxdepth 1 -name '*.delta' -delete
+    echo "清掉 $STALE 个历史 .delta（本项目只发全量包）"
+  fi
+fi
 
 step "5. 自检"
 # 每个 item 都必须有 edSignature，否则装不上（Sparkle 会拒）。
@@ -163,6 +180,11 @@ ITEM_VERSION="$(grep -oE '<sparkle:shortVersionString>[^<]+' "$ARCHIVE/appcast.x
   || fail "appcast 里的条目是 $ITEM_VERSION，而这次要发的是 $VERSION。
       多半是 build_dmg.sh 没跑完（DMG 没进归档目录 $ARCHIVE）。
       先确认 $ARCHIVE/brosis-$VERSION.dmg 在不在，再重跑这个脚本。"
+# **不能再出现增量包。** 只发全量的前提是 appcast 里一条 delta 都不挂——挂了就等于
+# 引用一个不会被上传的资产，停在旧版的机器会去下 404。
+if grep -q 'sparkle:deltas\|\.delta"' "$ARCHIVE/appcast.xml"; then
+  fail "appcast 里还有增量包条目，但本项目只发全量包（MAX_DELTAS=0）。"
+fi
 grep -o 'url="[^"]*"' "$ARCHIVE/appcast.xml" | sed 's/^/  /'
 
 printf '\n完成：%s\n' "$ARCHIVE/appcast.xml"
