@@ -538,6 +538,16 @@ final class EventSkeleton {
                                        axChars: axChars)
         }
 
+        // 期望走 OCR 的规则（飞书 / 微信 / 飞书会议）却没把请求交出去时记一行。
+        // 这是 2026-09-09 排查「飞书会议记不到内容」补的最后一环：协调者那边只能看到
+        // "有没有收到请求"，看不到**请求是在这里就没生成**还是**生成了没送到**。
+        if rule.regions.contains(where: { $0.read.declaresOCR || $0.ocrFallback }) {
+            BrosisLog.capture.notice(
+                """
+                扫描：\(app.bundleIdentifier ?? "?", privacy: .public) 规则 \(rule.id, privacy: .public)，                读正文=\(shouldReadText, privacy: .public) 拿到窗口=\(windowElement != nil, privacy: .public)                 AX字符=\(axChars, privacy: .public) OCR请求=\(adapterScan?.ocrRequests.count ?? -1, privacy: .public)                 触发=\(trigger.rawValue, privacy: .public)
+                """)
+        }
+
         // —— 把这次扫描的结果交给协调者：下一帧的视口 OCR 与采样审计要用 ——
         // **没有扫描的三支（AX 超时 / 读不到焦点窗口、私密浏览、「只记事件」档）必须把上下文清掉**：
         // 截图那条通路不知道这一轮没读正文，照样会调 `handleFrame`，留着上下文就等于
