@@ -144,12 +144,16 @@ def main():
                         help="覆盖 RetrievalOptions.vectorMaxDistance（阈值扫描用）")
     parser.add_argument("--vector-weight", default=None,
                         help="覆盖 RetrievalOptions.vectorWeight")
+    parser.add_argument("--vector-min-separation", default=None,
+                        help="覆盖 RetrievalOptions.vectorMinSeparation（间隔判据扫描用）")
     args = parser.parse_args()
     extra = []
     if args.vector_max_distance is not None:
         extra += ["--vector-max-distance", str(args.vector_max_distance)]
     if args.vector_weight is not None:
         extra += ["--vector-weight", str(args.vector_weight)]
+    if args.vector_min_separation is not None:
+        extra += ["--vector-min-separation", str(args.vector_min_separation)]
 
     queryset = json.load(open(os.path.expanduser(args.queryset), encoding="utf-8"))
     queries = queryset["queries"]

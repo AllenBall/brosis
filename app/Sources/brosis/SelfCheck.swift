@@ -672,6 +672,14 @@ enum SelfCheck {
                     && UILanguage.allCases.count == 3,
                   UILanguage.allCases.map(\.displayName).joined(separator: " / "))
 
+            // 间隔判据默认关：0 时行为必须与"只有绝对阈值"逐位相同。
+            // 2026-09-09 实测这个判据不成立（召回掉一半才少 1 条误报），旋钮留着当量具，
+            // 这条自检钉住"留着不等于生效"。
+            check("向量间隔判据默认关（留作量具，不改默认行为）",
+                  RetrievalOptions().vectorMinSeparation == 0,
+                  "vectorMinSeparation=\(RetrievalOptions().vectorMinSeparation)"
+                  + "；打开前必须重跑 tools/eval/d8_separation_sweep.py")
+
             // 门控原因表只有一份：整晚任务与自动建索引读到的必须逐字相同，
             // 否则同一件事在两个界面上说法不一样（改成共用之前就是这样）。
             let sharedReasons = ["paused", "on_battery", "model_not_installed",

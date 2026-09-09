@@ -227,6 +227,9 @@ func openStore(_ args: Args, createIfMissing: Bool = true) throws -> Store {
     if let d = args.flags["vector-max-distance"].flatMap(Double.init) {
         store.retrieval.vectorMaxDistance = d
     }
+    if let g = args.flags["vector-min-separation"].flatMap(Double.init) {
+        store.retrieval.vectorMinSeparation = g
+    }
     if let w = args.flags["vector-weight"].flatMap(Double.init) { store.retrieval.vectorWeight = w }
     if let k = args.flags["rrf-k"].flatMap(Double.init) { store.retrieval.rrfK = k }
     if let v = args.flags["max-dwell-s"].flatMap(Double.init) { store.sessionConfig.maxDwellSeconds = v }
@@ -433,6 +436,8 @@ brosis-store —— core/ 加密存储核心的命令行工具（M1 / T2）
   vec-search        纯向量 kNN（--vector-file <JSON 数字数组> | --text <文本> [--k 20]）
   search / search-batch 的向量选项：
     --vectors                打开向量通道（不给就是关，与 v3 行为逐位相同）
+    --vector-min-separation <数> 间隔判据：候选距离的中位数要比最好的那条大出这么多，
+                             向量通道才算数（0 = 关，与只有绝对阈值时逐位相同）
     --vector-file <文件>     search：这一题的查询向量（JSON 数字数组）
     --query-vectors <文件>   search-batch：{"<题 id>": [数字, …]} 的查询向量表
     --hash-query             用确定性伪嵌入现算查询向量（**没有语义**，只给测试 / 自检用）

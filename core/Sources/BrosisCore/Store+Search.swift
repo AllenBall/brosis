@@ -151,6 +151,8 @@ extension Store {
             // 「开关关闭时无向量调用」这条由它保证。
             var vector = VectorChannelResult()
             var vectorReason: String? = nil
+            /// 只用于上报：间隔判据把这次的向量通道挡下来了。**不参与 `fused` 判定**。
+            var separationReason: String? = nil
             if !options.vectorsEnabled {
                 vectorReason = "disabled"
             } else if request.queryVector == nil {
@@ -164,6 +166,11 @@ extension Store {
                 vector = try vectorChannel(queryVector: queryVector, request: request,
                                            appID: appID, limit: limit, k: vectorK,
                                            options: options, conn: conn)
+                // 间隔判据说"这次没话说"：如实报给调用方，但**不改融合方式**。
+                // `vectorReason` 参与 `fused` 的判定（非 nil 就退回并集），而向量沉默
+                // 与"向量参与了但一条都没过阈值"应当是同一种排序——后者 vectorReason 是 nil。
+                // 所以另存一个只用于上报的字段。
+                separationReason = vector.unavailableReason
                 add(vector.ids, .vector)
             }
 
@@ -182,7 +189,7 @@ extension Store {
                                 scanFromTS: scanFrom, scanToTS: scanTo,
                                 elapsedMS: Date().timeIntervalSince(t0) * 1000,
                                 vectorsUnavailable: !fused,
-                                vectorUnavailableReason: vectorReason,
+                                vectorUnavailableReason: vectorReason ?? separationReason,
                                 vectorCandidates: vector.candidates,
                                 vectorObservations: vector.ids.count,
                                 vectorBestDistance: vector.bestDistance,
@@ -199,6 +206,8 @@ extension Store {
         var bestDistance: Double?
         /// 每条观察命中的**最好**余弦距离，写进 `SearchHit.vectorDistance` 交给调用方。
         var distances: [Int64: Double] = [:]
+        /// 通道自己判定"这次没话说"的原因（目前只有间隔判据会填）。
+        var unavailableReason: String?
     }
 
     /// 查询向量 → `vec_chunks` kNN → 块 → 文本版本 → 展开到观察。
@@ -214,6 +223,17 @@ extension Store {
         out.candidates = hits.count
         out.bestDistance = hits.first?.distance
         guard !hits.isEmpty else { return out }
+
+        // 间隔判据：真答案会从候选大盘里凸出来；"库里没有"时候选彼此差不多。
+        // 不满足就整条通道不出声——挑一批"矮子里的高个"正是负例误报的来源。
+        if options.vectorMinSeparation > 0, let best = hits.first?.distance {
+            let sorted = hits.map(\.distance).sorted()
+            let median = sorted[sorted.count / 2]
+            if median - best < options.vectorMinSeparation {
+                out.unavailableReason = "no_separation"
+                return out
+            }
+        }
 
         // 距离阈值 + 按文本版本去重（同一个版本可能有好几块命中，取最好的那块的名次）。
         var rankOf: [Int64: Int] = [:]
