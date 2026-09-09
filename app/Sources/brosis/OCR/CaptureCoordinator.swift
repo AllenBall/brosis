@@ -105,6 +105,9 @@ final class CaptureCoordinator: @unchecked Sendable {
         var ocrStaleContext = 0
         /// 区域认出来了但正文与上一次逐字节相同，没有写第二条观察的次数。
         var ocrUnchanged = 0
+        /// 画面没变、该区域已 OCR 过，因此**没跑** Vision 的次数。
+        /// 它和 `ocrUnchanged` 的区别就是省没省下算力：后者是跑完才发现文本没变。
+        var ocrGatedUnchanged = 0
         var audits = 0
         var auditCoverageSum: Double = 0
         var observationsWritten = 0
@@ -113,7 +116,8 @@ final class CaptureCoordinator: @unchecked Sendable {
             let averageMS = ocrRuns > 0 ? ocrTotalMS / Double(ocrRuns) : 0
             let averageCoverage = audits > 0 ? auditCoverageSum / Double(audits) : 0
             return "OCR \(ocrRuns) 次（限流 \(ocrRateLimited)，空 \(ocrEmpty)，失败 \(ocrFailures)，"
-                 + "上下文过期 \(ocrStaleContext)，未变化 \(ocrUnchanged)）"
+                 + "上下文过期 \(ocrStaleContext)，未变化 \(ocrUnchanged)，"
+                 + "画面没变已跳过 \(ocrGatedUnchanged)）"
                  + "，平均 \(Int(averageMS)) ms，共 \(ocrChars) 字符；"
                  + "观察 \(observationsWritten) 条；采样审计 \(audits) 次"
                  + "，平均覆盖率 \(String(format: "%.3f", averageCoverage))"
@@ -277,6 +281,17 @@ final class CaptureCoordinator: @unchecked Sendable {
             // 变化后的内容，却会被这一行跳过，而上下文被下一次 `noteScan` 替换后请求就没了。
             if request.reason == .frameChangedAXStable && gated { continue }
             let key = "\(pending.bundleID)|\(request.regionName)"
+            // 画面没变、而且这个区域**之前已经 OCR 过**：这一帧不可能产出新文本。
+            //
+            // 为什么要专门加这一条（2026-09-09）：`.ruleDeclared`（规则声明了 OCR 回退 + AX 读空）
+            // 此前完全不吃帧门控，所以一个**静止不动**的窗口仍然每 5 秒烧一次整窗
+            // `.accurate` OCR ≈ 720 次/小时。而"文本没变就不入库"那道检查在 Vision **跑完之后**
+            // （见下面的 `lastOCRTexts` 比较），省下的只是一次写库，不是算力。
+            // 首次必须放行——没有 `lastOCRTexts` 就说明这个区域还一个字都没读到过。
+            if gated, lastOCRTexts[key] != nil {
+                lock.withLock { stats.ocrGatedUnchanged += 1 }
+                continue
+            }
             switch trigger.allow(key: key, reason: request.reason, now: now) {
             case .rateLimited:
                 lock.withLock { stats.ocrRateLimited += 1 }

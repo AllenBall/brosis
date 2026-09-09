@@ -60,7 +60,7 @@ enum AXProbe {
         }
         let pid = app.processIdentifier
         let detection = AX.chromiumDetection(bundleID: bundleID, bundleURL: app.bundleURL).detection
-        let rule = AdapterRegistry.rule(for: bundleID, chromium: detection != .notChromium)
+        let rule = AdapterRegistry.rule(for: bundleID, bundleURL: app.bundleURL)
         print("\n## \(app.localizedName ?? bundleID)（\(bundleID)）pid \(pid)")
         print("- Chromium 系判定：\(detection.rawValue)"
               + "；适配规则：\(rule.id)")
@@ -271,8 +271,8 @@ enum AXProbe {
         let started = Date()
         let read = AX.focusedWindowInfo(pid: pid, bundleID: bundleID)
         guard let window = read.element else { return Sample(noWindow: true) }
-        // 与采集端逐字一致：`AdapterRegistry.rule(for:)` 对没有专门规则的应用给的是
-        // 通用规则，所以这里不分叉——量的就是生产会拿到的那个数。
+        // 与采集端逐字一致：兜底规则由 `AdapterRegistry.rule(for:bundleURL:)` 自己按
+        // Chromium 判定选（generic / generic_chromium），量的就是生产会拿到的那个数。
         let scan = AdapterEngine.scan(rule: rule, window: LiveAXNode(window),
                                       windowFrame: read.info.frame)
         var out = Sample()

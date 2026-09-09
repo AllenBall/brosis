@@ -218,7 +218,7 @@ final class PoliciesWindowController: NSObject, NSWindowDelegate,
             isDenylisted: { BuiltinDenylist.shared.contains($0) },
             adapterID: { bundleID in
                 let rule = AdapterRegistry.rule(for: bundleID)
-                return rule.id == AdapterRegistry.generic.id ? nil : rule.id
+                return rule.bundleIDs.isEmpty ? nil : rule.id
             })
     }
 

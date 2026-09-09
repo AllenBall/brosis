@@ -376,21 +376,26 @@ final class EventSkeleton {
     ///
     /// 重扫**会写一条新的观察**，这是有意的：它是一次真正的新采样，
     /// 前面那条空的仍然如实记成 unavailable，不做追改。
+    /// - Returns: 是不是排了一次重扫。**排了就说明这次的空树可能只是"读早了"**，
+    ///   调用方据此把这一帧的 OCR 请求撤掉——OCR 回退的前提是"AX 给不出内容"，
+    ///   而不是"AX 还没建好"。等 1.5 s 后重扫；真读不到时那次自然还会排 OCR。
+    ///   不这么做的话，Claude 这种高频流式应用每次冷读都要白烧一次整窗 Vision。
+    @discardableResult
     private func noteAXOutcome(app: NSRunningApplication, pid: pid_t,
-                               trigger: ObservationTrigger, chars: Int) {
+                               trigger: ObservationTrigger, chars: Int) -> Bool {
         guard chars == 0 else {
             // 读到了 → 这个进程的树已经热了，撤掉所有重扫状态。
             axWarmedPIDs.insert(pid)
             pendingAXRetryPIDs.remove(pid)
             axRetryCounts[pid] = nil
-            return
+            return false
         }
-        guard !axWarmedPIDs.contains(pid), !pendingAXRetryPIDs.contains(pid) else { return }
+        guard !axWarmedPIDs.contains(pid), !pendingAXRetryPIDs.contains(pid) else { return false }
         let detection = AX.chromiumDetection(bundleID: app.bundleIdentifier,
                                              bundleURL: app.bundleURL).detection
-        guard detection != .notChromium else { return }
+        guard detection.isChromium else { return false }
         let attempt = axRetryCounts[pid] ?? 0
-        guard attempt < Self.maxAXRetries else { return }
+        guard attempt < Self.maxAXRetries else { return false }
         axRetryCounts[pid] = attempt + 1
         pendingAXRetryPIDs.insert(pid)
         let delay = Self.axRetryDelays[attempt]
@@ -405,6 +410,7 @@ final class EventSkeleton {
                   NSWorkspace.shared.frontmostApplication?.processIdentifier == pid else { return }
             self.record(app: app, trigger: trigger, collectText: true)
         }
+        return true
     }
 
     // MARK: - 写观察记录
@@ -453,10 +459,9 @@ final class EventSkeleton {
         var captureMethod: CaptureMethod = .ax
         var visibleRange: String?
         var adapterScan: AdapterScan?
-        // Chromium 系的兜底规则带 OCR 回退（判定结果按 bundle id 缓存，这里不摸文件系统）。
-        let isChromium = AX.chromiumDetection(bundleID: app.bundleIdentifier,
-                                              bundleURL: app.bundleURL).detection != .notChromium
-        let rule = AdapterRegistry.rule(for: app.bundleIdentifier, chromium: isChromium)
+        // 传 bundleURL：采集端是**唯一**手头有它的调用方，所以由它把判定算出来并填进缓存，
+        // 之后策略列表、OCR 协调器只查缓存就能拿到同一个答案。
+        let rule = AdapterRegistry.rule(for: app.bundleIdentifier, bundleURL: app.bundleURL)
         if shouldReadText, let windowElement {
             // 任何一次真正的遍历都重置节流时钟。
             lastElementScanAt = Date().timeIntervalSince1970
@@ -481,7 +486,10 @@ final class EventSkeleton {
             completeness = scan.completeness
             captureMethod = scan.captureMethod
             visibleRange = scan.visibleRange
-            noteAXOutcome(app: app, pid: pid, trigger: trigger, chars: scan.totalChars)
+            // 排了重扫就把这一帧的 OCR 请求扔掉：现在还分不清"读不到"和"读早了"。
+            if noteAXOutcome(app: app, pid: pid, trigger: trigger, chars: scan.totalChars) {
+                adapterScan?.ocrRequests = []
+            }
             if scan.truncated || scan.regions.contains(where: { $0.truncated }) {
                 noteAdapterLimitHit(bundleID: app.bundleIdentifier, scan: scan)
             }

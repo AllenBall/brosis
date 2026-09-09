@@ -113,7 +113,8 @@ fi
 # ---------------------------------------------------------------- 4. 生成
 step "4. 生成 appcast.xml"
 # 下载地址前缀：GitHub Release 的资产 URL 是按 tag 走的，所以新条目用**本次 tag**的前缀。
-# 已经在 appcast 里的老条目 generate_appcast 会原样保留（它复用现有文件），
+# 注意：`--download-url-prefix` 只对**本次新写**的条目生效，而 MAX_VERSIONS=1 之后
+# 每次都只有一条，所以不会再出现老条目被改成新 tag 的情况（下面的 url 自检兜住）。
 # 生成完请按 RELEASE.md 的清单核一眼每个 item 的 enclosure url。
 [ -n "$DOWNLOAD_PREFIX" ] || DOWNLOAD_PREFIX="$REPO_URL/releases/download/v$VERSION/"
 echo "下载地址前缀：$DOWNLOAD_PREFIX"
@@ -137,6 +138,20 @@ SIGS="$(grep -c 'sparkle:edSignature' "$ARCHIVE/appcast.xml" || true)"
 echo "item 数 $ITEMS，enclosure 数 $ENCLOSURES，edSignature 数 $SIGS"
 [ "$ENCLOSURES" = "$SIGS" ] \
   || fail "有 $((ENCLOSURES - SIGS)) 条 enclosure 没有 edSignature（缺签名的下载装不上）"
+
+# **每个 url 都要指向本次的前缀，且文件真的在归档目录里。**
+# 这是 2026-09-09 那次真出过的事：`--download-url-prefix` 把老条目的 url 也改成了新 tag，
+# appcast 里挂了 4 个 404，而当时的自检只数签名、发现不了。这条在生成时就能拦住。
+BAD_URL=0
+for url in $(grep -oE 'url="[^"]*"' "$ARCHIVE/appcast.xml" | sed 's/url="//; s/"$//'); do
+  case "$url" in
+    "$DOWNLOAD_PREFIX"*) ;;
+    *) printf 'ERROR: url 不指向本次前缀：%s\n' "$url" >&2; BAD_URL=1; continue ;;
+  esac
+  name="${url##*/}"
+  [ -f "$ARCHIVE/$name" ] || { printf 'ERROR: 归档里没有这个文件：%s\n' "$name" >&2; BAD_URL=1; }
+done
+[ "$BAD_URL" = 0 ] || fail "appcast 里有指不到的下载链接（见上），发出去就是 404。"
 grep -o 'url="[^"]*"' "$ARCHIVE/appcast.xml" | sed 's/^/  /'
 
 printf '\n完成：%s\n' "$ARCHIVE/appcast.xml"

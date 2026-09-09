@@ -381,7 +381,10 @@ enum PolicyListVectors {
     /// 适配规则的替身：直接问真的 `AdapterRegistry`（它是纯数据，不碰系统）。
     static func adapterID(_ bundleID: String) -> String? {
         let rule = AdapterRegistry.rule(for: bundleID)
-        return rule.id == AdapterRegistry.generic.id ? nil : rule.id
+        // 判"有没有专属规则"用 `bundleIDs.isEmpty`（AdapterRule 自己就是这么定义兜底的），
+        // 不比 id：兜底规则现在有两条（generic / generic_chromium），比 id 会把所有
+        // Chromium 应用显示成"有适配器"。
+        return rule.bundleIDs.isEmpty ? nil : rule.id
     }
 
     /// 全套跑一遍，给自检用。

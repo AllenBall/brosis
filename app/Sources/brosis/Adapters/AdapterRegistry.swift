@@ -207,14 +207,15 @@ enum AdapterRegistry {
         var rule = generic
         rule.id = "generic_chromium"
         rule.name = "通用（Chromium 系，OCR 回退）"
-        rule.electron = true
         rule.regions = generic.regions.map { region in
             var copy = region
             copy.ocrFallback = true
             return copy
         }
         rule.notes = "与通用规则同一条 BFS，区别只在 AX 读不到时会排一次视口 OCR。"
-                   + "OCR 要不要真跑还要过 OCRTriggerGate 与帧门控（接电 / 温度 / 预算）。"
+                   + "真正拦在 Vision 前面的只有三道：有没有截到帧、OCRTriggerGate 的"
+                   + "每区域 5 秒限流、以及'画面没变且该区域已 OCR 过就跳过'。"
+                   + "**没有** per-OCR 的接电 / 温度 / 预算判定——别再照抄这句话。"
         return rule
     }()
 
@@ -222,9 +223,21 @@ enum AdapterRegistry {
     static let all: [AdapterRule] = [safari, claudeDesktop, feishu, wechat]
 
     /// bundle id → 规则；查不到就是兜底规则。
-    /// - Parameter chromium: 这个应用是不是 Chromium 系（`AX.chromiumDetection`）。
-    ///   没有专属规则时它决定兜底走哪一条：Chromium 系用带 OCR 回退的那条。
-    static func rule(for bundleID: String?, chromium: Bool = false) -> AdapterRule {
+    /// 没有专属规则时兜底走哪一条，由**这里**决定，不再让每个调用点自己 derive——
+    /// 加了 `chromium:` 参数的第一版有 6 个调用点没传，于是同一个 bundle id 在采集端解析成
+    /// `generic_chromium`、在 OCR 协调器和策略列表里解析成 `generic`：
+    /// "这个应用用哪条规则"变成了取决于谁在问。
+    ///
+    /// - Parameter bundleURL: 有就做完整判定（会摸一次文件系统并缓存），
+    ///   没有就只查缓存——采集端在应用激活时已经算过了。
+    static func rule(for bundleID: String?, bundleURL: URL? = nil) -> AdapterRule {
+        let chromium: Bool
+        if bundleURL != nil {
+            chromium = AX.chromiumDetection(bundleID: bundleID, bundleURL: bundleURL)
+                .detection.isChromium
+        } else {
+            chromium = AX.cachedChromiumDetection(bundleID: bundleID)?.isChromium ?? false
+        }
         let base = chromium ? genericChromium : generic
         guard let bundleID, !bundleID.isEmpty else { return base }
         let lowered = bundleID.lowercased()

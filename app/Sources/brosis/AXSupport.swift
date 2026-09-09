@@ -41,7 +41,7 @@ enum AX {
     /// 清单只是第一路。M0 实测（`tools/bench/results/m0_closeout_2026-09-07.md` 2.2）：
     /// Claude 桌面版 `com.anthropic.claudefordesktop`（探针里停留时间第一）74 条观察、
     /// AX 正文字符合计 **0**，原因就是它不在这份清单里，没设过 `AXManualAccessibility`。
-    /// 人工维护的清单追不上新装的应用，所以另加第二路通用判定（`bundleContainsElectronFramework`）。
+    /// 人工维护的清单追不上新装的应用，所以另加第二路通用判定（`bundleLooksChromium`）。
     static let chromiumFamilyBundleIDs: Set<String> = [
         "com.google.Chrome", "com.google.Chrome.beta", "com.google.Chrome.canary",
         "com.microsoft.edgemac", "com.brave.Browser", "com.vivaldi.Vivaldi",
@@ -61,9 +61,26 @@ enum AX {
     /// （飞书叫 `Lark Framework`，ChatGPT / Codex 叫 `Codex Framework`），只能靠人工清单兜底，
     /// 而人工清单追不上新装的应用——Codex 就没在里面，判定结果是"不是 Chromium"。
     ///
-    /// 实测这个信号：Claude / 飞书 / Codex / LM Studio / ZCode / 极空间 六个全中；
-    /// Terminal / 访达 / Xcode / 信息 / Telegram / 微信 / Safari 七个原生应用零假阳性。
+    /// **光有 `Helpers` 目录不够，里面得真的装着 Chromium 的子进程。**
+    /// 第一版只判目录在不在，全量扫 `/Applications` 后发现 6 个假阳性：
+    /// Word / Excel / PowerPoint（`ai.framework/Helpers`）、iMovie（`Flexo.framework/Helpers`）
+    /// ——这两个的 Helpers 是**空目录**——以及 BlueStacks 两个（`QtWebEngineCore.framework`）。
+    /// 把 Office 判成 Chromium 的后果是给它们设 AXManualAccessibility、空树重扫、还开 OCR 回退。
+    ///
+    /// 收紧后的判据是 Chromium 的子进程命名：crashpad 处理器，或名字里带
+    /// Helper / (Renderer) / (GPU) 的 `.app`。实测 13 个真 Chromium 一个不少
+    /// （Chrome / Claude / ChatGPT / Lark / LM Studio / ZCode / Kimi / Figma / Eagle /
+    /// 极空间 / Multica / OpenCode / WorkBuddy），6 个假阳性全部剔除。
     static let chromiumHelpersDirectory = "Helpers"
+
+    static func helpersLooksChromium(_ entries: [String]) -> Bool {
+        entries.contains { entry in
+            entry.contains("crashpad_handler")
+                || (entry.hasSuffix(".app")
+                    && (entry.contains("Helper") || entry.contains("(Renderer)")
+                        || entry.contains("(GPU)")))
+        }
+    }
 
     /// 判定依据，原样写进 `runtime_events.detail` 的 `detection=` 字段。
     enum ChromiumDetection: String, Sendable {
@@ -73,6 +90,9 @@ enum AX {
         case framework = "framework"
         /// 两路都没命中，按原生应用处理（不设 AXManualAccessibility）。
         case notChromium = "none"
+
+        /// "是不是 Chromium 系"只在这里定义一次——此前 `!= .notChromium` 抄在五个地方。
+        var isChromium: Bool { self != .notChromium }
     }
 
     /// 判定结果按 bundle id 缓存：通用检测要摸文件系统，每次切应用都摸一遍没必要；
@@ -81,6 +101,13 @@ enum AX {
     private final class DetectionCache: @unchecked Sendable {
         private let lock = NSLock()
         private var values: [String: ChromiumDetection] = [:]
+
+        /// 只读，不算也不存。
+        func peek(_ key: String) -> ChromiumDetection? {
+            lock.lock()
+            defer { lock.unlock() }
+            return values[key]
+        }
 
         /// 命中缓存就直接返回；没有就在**锁外**算一次再存进去。
         /// `firstSeen` = 这次是不是本进程第一次判定这个 bundle id。
@@ -107,30 +134,34 @@ enum AX {
     ///
     /// **只读文件系统**：不发任何 AX 消息、不需要辅助功能权限、不启动被检测的应用，
     /// 所以 `--self-check` 可以直接调用它做验证。
-    static func bundleContainsElectronFramework(at bundleURL: URL?) -> Bool {
+    /// 名字改了（原来叫 `bundleLooksChromium`）：它找的早就不是某个 Electron 框架，
+    /// 而是"任意框架底下有没有 Chromium 的子进程"。
+    ///
+    /// 只看 `<F>.framework/Helpers` 这一层就够：带版本目录的框架（飞书、Codex）按 macOS 惯例
+    /// 都有顶层符号链接指向 `Versions/Current/Helpers`，`contentsOfDirectory` 会跟着走。
+    /// 第一版还多写了一圈遍历 `Versions/<版本号>` 的循环——全量扫 `/Applications` 的 19 个
+    /// 带 Helpers 的框架，**没有一个需要它**，唯一走到那条分支的是自检里手工造的假 bundle。
+    static func bundleLooksChromium(at bundleURL: URL?) -> Bool {
         guard let bundleURL else { return false }
         let fm = FileManager.default
         let frameworks = bundleURL.appendingPathComponent("Contents/Frameworks", isDirectory: true)
         guard let entries = try? fm.contentsOfDirectory(atPath: frameworks.path) else { return false }
         for entry in entries where entry.hasSuffix(".framework") {
-            let framework = frameworks.appendingPathComponent(entry, isDirectory: true)
-            // 两种布局都要认：Electron 的 `<F>.framework/Helpers`，
-            // 以及带版本目录的 `<F>.framework/Versions/<x.y.z.w>/Helpers`（飞书、Codex）。
-            if containsHelpers(framework, fm: fm) { return true }
-            let versions = framework.appendingPathComponent("Versions", isDirectory: true)
-            guard let stamps = try? fm.contentsOfDirectory(atPath: versions.path) else { continue }
-            for stamp in stamps
-            where containsHelpers(versions.appendingPathComponent(stamp, isDirectory: true), fm: fm) {
-                return true
-            }
+            let helpers = frameworks.appendingPathComponent(entry, isDirectory: true)
+                .appendingPathComponent(chromiumHelpersDirectory, isDirectory: true)
+            guard let children = try? fm.contentsOfDirectory(atPath: helpers.path) else { continue }
+            if helpersLooksChromium(children) { return true }
         }
         return false
     }
 
-    private static func containsHelpers(_ directory: URL, fm: FileManager) -> Bool {
-        var isDirectory: ObjCBool = false
-        let path = directory.appendingPathComponent(chromiumHelpersDirectory, isDirectory: true).path
-        return fm.fileExists(atPath: path, isDirectory: &isDirectory) && isDirectory.boolValue
+    /// 只查缓存、**不摸文件系统也不写缓存**。给那些手头没有 bundleURL 的调用方用
+    /// （策略列表、OCR 协调器）：采集端在应用激活时已经用带 URL 的那条算过并缓存了，
+    /// 这里直接取答案；真没算过就返回 nil，调用方按"不是 Chromium"处理——
+    /// 与其拿 nil 的 URL 去算出一个错的 `.notChromium` **并把它缓存起来**，不如不答。
+    static func cachedChromiumDetection(bundleID: String?) -> ChromiumDetection? {
+        guard let bundleID, !bundleID.isEmpty else { return nil }
+        return detectionCache.peek(bundleID)
     }
 
     /// 两路合一的判定：显式清单优先，其次通用框架检测；结果按 bundle id 缓存。
@@ -139,11 +170,11 @@ enum AX {
         -> (detection: ChromiumDetection, firstSeen: Bool) {
         guard let bundleID, !bundleID.isEmpty else {
             // 没有 bundle id 就没法缓存（不同应用会撞同一个 key），也不写 runtime_events。
-            return (bundleContainsElectronFramework(at: bundleURL) ? .framework : .notChromium, false)
+            return (bundleLooksChromium(at: bundleURL) ? .framework : .notChromium, false)
         }
         return detectionCache.resolve(bundleID) {
             if chromiumFamilyBundleIDs.contains(bundleID) { return .list }
-            return bundleContainsElectronFramework(at: bundleURL) ? .framework : .notChromium
+            return bundleLooksChromium(at: bundleURL) ? .framework : .notChromium
         }
     }
 

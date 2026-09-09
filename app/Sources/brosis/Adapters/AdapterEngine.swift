@@ -217,7 +217,8 @@ enum AdapterEngine {
         scan.hitFrameProbeLimit = budget.hitFrameProbeLimit
         scan.completeness = completeness(rule: rule, scan: scan)
         scan.captureMethod = scan.fragments.isEmpty ? .ax : .adapter
-        if rule.id == AdapterRegistry.generic.id { scan.captureMethod = .ax }
+        // 兜底规则（bundleIDs 为空）走的就是"全窗口 BFS"，口径记 .ax 而不是 .adapter。
+        if rule.bundleIDs.isEmpty { scan.captureMethod = .ax }
         scan.visibleRange = visibleRangeJSON(windowFrame: windowFrame, scan: scan)
         return scan
     }

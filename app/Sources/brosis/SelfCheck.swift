@@ -778,17 +778,22 @@ enum SelfCheck {
 
         // ---------------------------------------------------------------- 7. Electron / CEF
         let electron = electronProbe()
-        check("Electron 检测（伪造带框架的 .app）", electron.positivePassed, electron.positiveDetail)
-        check("Electron 检测（伪造不带框架的 .app）", electron.negativePassed, electron.negativeDetail)
-        check("Chromium 判定认结构不认框架名（带版本目录的布局也算）",
-              electron.renamedPassed, electron.renamedDetail)
+        for item in electron.cases {
+            check("Chromium 结构判定 · \(item.title)", item.passed, item.detail)
+        }
 
         // 兜底规则分两条：Chromium 系开 OCR 回退，原生不开。
         // 这条区分是 2026-09-09 探测 Codex 时定的——通用规则不触发 OCR，
         // 于是「没有专属规则 + AX 读不到」的应用一个字都记不下来。
-        let nativeFallback = AdapterRegistry.rule(for: "com.example.native", chromium: false)
-        let chromiumFallback = AdapterRegistry.rule(for: "com.openai.codex", chromium: true)
-        let bespoke = AdapterRegistry.rule(for: "com.anthropic.claudefordesktop", chromium: true)
+        // 判定由 rule(for:) 内部查缓存得出，所以这里直接拿真实 app 的 URL 喂进去——
+        // 没装的机器上 chromiumFallback 会退成 generic，下面的断言用 installed 兜住。
+        let codexURL = URL(fileURLWithPath: "/Applications/ChatGPT.app")
+        let codexInstalled = FileManager.default.fileExists(atPath: codexURL.path)
+        let nativeFallback = AdapterRegistry.rule(for: "com.example.native")
+        let chromiumFallback = codexInstalled
+            ? AdapterRegistry.rule(for: "com.openai.codex", bundleURL: codexURL)
+            : AdapterRegistry.genericChromium
+        let bespoke = AdapterRegistry.rule(for: "com.anthropic.claudefordesktop")
         check("兜底规则：Chromium 系开 OCR 回退，原生不开；有专属规则的不受影响",
               nativeFallback.regions.allSatisfy { !$0.ocrFallback }
                 && chromiumFallback.regions.allSatisfy { $0.ocrFallback }
@@ -797,7 +802,7 @@ enum SelfCheck {
               "原生 \(nativeFallback.id) ocr=\(nativeFallback.regions.allSatisfy { $0.ocrFallback })"
               + "、Chromium \(chromiumFallback.id) ocr=\(chromiumFallback.regions.allSatisfy { $0.ocrFallback })"
               + "、Claude 仍走 \(bespoke.id)")
-        for note in electron.installedNotes { print("       \(note)") }
+        for note in electron.notes { print("       \(note)") }
 
         // ---------------------------------------------------------------- 8. 截图触发口径
         // R2 修正：finish() 重排队时以前会追加 "queued"，纯定时截图于是变成
@@ -1013,7 +1018,7 @@ enum SelfCheck {
         }
         let fallbackRule = AdapterRegistry.rule(for: "com.apple.finder")
         check("适配规则路由：\(AdapterRegistry.all.count) 条首批规则 + 兜底",
-              routingOK && fallbackRule.id == AdapterRegistry.generic.id
+              routingOK && fallbackRule.bundleIDs.isEmpty
                 && fallbackRule.limits.maxNodes == AX.bfsLimits(bundleID: "com.apple.finder").maxNodes,
               AdapterRegistry.all.map(\.id).joined(separator: " / ")
                 + "；未知应用 → \(fallbackRule.id)（\(fallbackRule.limits.label)）")
@@ -1390,7 +1395,7 @@ enum SelfCheck {
             // 先把限流时钟清掉：要考的是"身份对不上"，不能让 5 s 限流替它挡住。
             coordinator.trigger.reset()
             let ranStale = coordinator.handleFrame(otherScreen, displayID: 1, recorder: ocrRecorder,
-                                                   gated: true, trigger: "self_check",
+                                                   gated: false, trigger: "self_check",
                                                    bundleID: "com.brosis.selfcheck.private",
                                                    displayBoundsOverride: bounds)
             let leakedHits = try ocrStore.search(q: "采集守护进程", limit: 5).hits.count
@@ -1400,7 +1405,7 @@ enum SelfCheck {
             coordinator.trigger.reset()
             let ranSameApp = coordinator.handleFrame(otherScreen, displayID: 1,
                                                      recorder: ocrRecorder,
-                                                     gated: true, trigger: "self_check",
+                                                     gated: false, trigger: "self_check",
                                                      bundleID: "com.brosis.selfcheck.wechat",
                                                      displayBoundsOverride: bounds)
             let sameAppHits = try ocrStore.search(q: "采集守护进程", limit: 5).hits.count
@@ -1419,7 +1424,7 @@ enum SelfCheck {
             coordinator.trigger.reset()
             let ranRepeat = coordinator.handleFrame(otherScreen, displayID: 1,
                                                     recorder: ocrRecorder,
-                                                    gated: true, trigger: "self_check",
+                                                    gated: false, trigger: "self_check",
                                                     bundleID: "com.brosis.selfcheck.wechat",
                                                     displayBoundsOverride: bounds)
             let afterRepeat = try ocrStore.count(table: "observations")
@@ -1428,6 +1433,19 @@ enum SelfCheck {
                     && coordinator.currentStats.ocrUnchanged == 1,
                   "重复识别 \(ranRepeat) 个区域、观察 \(beforeRepeat) → \(afterRepeat) 条"
                     + "（未变化计数 \(coordinator.currentStats.ocrUnchanged)）")
+
+            // 新加的那层，拦在上面那条**之前**：画面没变 + 该区域已 OCR 过 ⇒ 连 Vision 都不跑。
+            // 上一条省的是写库，这一条省的是算力——静止的 Chromium 窗口此前每 5 秒
+            // 烧一次整窗 accurate OCR，跑完才发现文本没变。
+            coordinator.noteScan(wechatContext)
+            let gatedRun = coordinator.handleFrame(otherScreen, displayID: 1,
+                                                   recorder: ocrRecorder,
+                                                   gated: true, trigger: "self_check",
+                                                   bundleID: "com.brosis.selfcheck.wechat",
+                                                   displayBoundsOverride: bounds)
+            check("画面没变且该区域已 OCR 过 ⇒ 不跑 Vision（省算力，不只是省写库）",
+                  gatedRun == 0 && coordinator.currentStats.ocrGatedUnchanged >= 1,
+                  "静止帧跑了=\(gatedRun)、跳过计数 \(coordinator.currentStats.ocrGatedUnchanged)")
 
             let ocrStats = coordinator.currentStats
 
@@ -1555,84 +1573,77 @@ enum SelfCheck {
     /// Electron / CEF 通用检测的验证。
     ///
     /// 正反两例都在临时目录里**伪造 .app 目录结构**（只 mkdir，不放任何可执行文件），
-    /// 验证 `AX.bundleContainsElectronFramework` 返回 true / false；跑完删掉。
-    /// 再对 `/Applications` 下真实装着的 Claude / 飞书各探一次并打印依据——
-    /// 全程只读目录、只读 Info.plist，**不启动它们、不发 AX 消息、不请求任何权限**。
+    /// 造几个假 `.app`，逐条验 `AX.bundleLooksChromium` 的判据；跑完删掉。
+    ///
+    /// 用表而不是三对 `(passed, detail)`：加一种布局只该多一行数据，
+    /// 而不是改函数签名 + 两处 return + 三处调用（改判据那次就是这么疼的）。
     private static func electronProbe()
-        -> (positivePassed: Bool, positiveDetail: String,
-            negativePassed: Bool, negativeDetail: String,
-            renamedPassed: Bool, renamedDetail: String,
-            installedNotes: [String]) {
+        -> (cases: [(title: String, passed: Bool, detail: String)], notes: [String]) {
         let fm = FileManager.default
         let root = fm.temporaryDirectory.appendingPathComponent(
             "brosis-selfcheck-electron-\(ProcessInfo.processInfo.processIdentifier)",
             isDirectory: true)
         defer { try? fm.removeItem(at: root) }
 
-        let withFramework = root.appendingPathComponent("WithElectron.app", isDirectory: true)
-        let withoutFramework = root.appendingPathComponent("NativeApp.app", isDirectory: true)
-
-        var positivePassed = false
-        var negativePassed = false
-        var positiveDetail = ""
-        var negativeDetail = ""
-        // 判据是结构不是名字，所以正例用一个**随便起名**的框架——这正是改判据的原因：
-        // 飞书叫 Lark Framework、Codex 叫 Codex Framework，按名字匹配全漏。
-        let renamed = root.appendingPathComponent("Renamed.app", isDirectory: true)
-        var renamedPassed = false
-        var renamedDetail = ""
-        do {
-            try fm.createDirectory(
-                at: withFramework.appendingPathComponent(
-                    "Contents/Frameworks/Whatever Framework.framework/Helpers", isDirectory: true),
-                withIntermediateDirectories: true)
-            // 带版本目录的那种布局（飞书 / Codex 就是这样）。
-            try fm.createDirectory(
-                at: renamed.appendingPathComponent(
-                    "Contents/Frameworks/Codex Framework.framework/Versions/152.0.7977.83/Helpers",
-                    isDirectory: true),
-                withIntermediateDirectories: true)
-            // 反例：有 framework 但没有 Helpers——原生 app 就长这样。
-            try fm.createDirectory(
-                at: withoutFramework.appendingPathComponent(
-                    "Contents/Frameworks/Native.framework/Resources", isDirectory: true),
-                withIntermediateDirectories: true)
-            let positive = AX.bundleContainsElectronFramework(at: withFramework)
-            let negative = AX.bundleContainsElectronFramework(at: withoutFramework)
-            let renamedHit = AX.bundleContainsElectronFramework(at: renamed)
-            positivePassed = positive == true
-            negativePassed = negative == false
-            renamedPassed = renamedHit == true
-            positiveDetail = "改过名的框架 + Helpers → \(positive)（期望 true）"
-            negativeDetail = "有 framework 但没有 Helpers → \(negative)（期望 false）"
-            renamedDetail = "带版本目录的 Codex 布局 → \(renamedHit)（期望 true）"
-        } catch {
-            positiveDetail = "创建伪造 bundle 失败：\(error)"
-            negativeDetail = positiveDetail
-            renamedDetail = positiveDetail
+        // (名字, 要创建的目录, Helpers 里放什么, 期望)
+        // 关键的两条是最后两个：**光有 Helpers 目录不算**——Word 与 iMovie 的 Helpers 是空的，
+        // 第一版判据把它们判成了 Chromium，等于给 Office 开 OCR。
+        let layouts: [(title: String, app: String, framework: String, children: [String], want: Bool)] = [
+            ("改过名的框架 + crashpad", "Renamed.app", "Whatever Framework.framework",
+             ["chrome_crashpad_handler"], true),
+            ("渲染进程助手 app", "Renderer.app", "Codex Framework.framework",
+             ["Codex (Renderer).app", "Codex (GPU).app"], true),
+            ("有 framework 但没有 Helpers", "Native.app", "Native.framework", [], false),
+            ("Helpers 是空目录（Word / iMovie 就这样）", "EmptyHelpers.app", "ai.framework",
+             ["__empty__"], false),
+            ("Helpers 里全是无关文件", "Unrelated.app", "Flexo.framework",
+             ["Resources", "config.plist"], false),
+        ]
+        var cases: [(title: String, passed: Bool, detail: String)] = []
+        for layout in layouts {
+            let bundle = root.appendingPathComponent(layout.app, isDirectory: true)
+            let framework = bundle.appendingPathComponent(
+                "Contents/Frameworks/\(layout.framework)", isDirectory: true)
+            do {
+                if layout.children.isEmpty {
+                    try fm.createDirectory(at: framework, withIntermediateDirectories: true)
+                } else {
+                    let helpers = framework.appendingPathComponent("Helpers", isDirectory: true)
+                    try fm.createDirectory(at: helpers, withIntermediateDirectories: true)
+                    for child in layout.children where child != "__empty__" {
+                        try fm.createDirectory(
+                            at: helpers.appendingPathComponent(child, isDirectory: true),
+                            withIntermediateDirectories: true)
+                    }
+                }
+                let got = AX.bundleLooksChromium(at: bundle)
+                cases.append((layout.title, got == layout.want,
+                              "\(got)（期望 \(layout.want)）"))
+            } catch {
+                cases.append((layout.title, false, "造假 bundle 失败：\(error)"))
+            }
         }
+
         // 真实应用探测：装了才探，没装就跳过（不同机器结果不同，所以只打印、不参与通过判定）。
         var notes: [String] = []
         let candidates = [
             ("Claude 桌面版", "/Applications/Claude.app"),
             ("飞书 Lark", "/Applications/Lark.app"),
-            ("飞书 Feishu", "/Applications/Feishu.app"),
             ("ChatGPT / Codex", "/Applications/ChatGPT.app"),
-            ("LM Studio", "/Applications/LM Studio.app")
+            ("LM Studio", "/Applications/LM Studio.app"),
+            ("Microsoft Word（必须判为**不是**）", "/Applications/Microsoft Word.app"),
+            ("iMovie（必须判为**不是**）", "/Applications/iMovie.app")
         ]
         for (label, path) in candidates where fm.fileExists(atPath: path) {
             let url = URL(fileURLWithPath: path)
             let bundleID = Bundle(url: url)?.bundleIdentifier
-            let framework = AX.bundleContainsElectronFramework(at: url)
+            let structural = AX.bundleLooksChromium(at: url)
             let detection = AX.chromiumDetection(bundleID: bundleID, bundleURL: url).detection
             notes.append("\(label)：bundle=\(bundleID ?? "?") 依据=\(detection.rawValue)"
-                         + " 框架检测=\(framework)（未启动，仅读目录）")
+                         + " 结构信号=\(structural)（未启动，仅读目录）")
         }
-        if notes.isEmpty {
-            notes = ["/Applications 下没有 Claude / 飞书，跳过真实应用探测"]
-        }
-        return (positivePassed, positiveDetail, negativePassed, negativeDetail,
-                renamedPassed, renamedDetail, notes)
+        if notes.isEmpty { notes = ["/Applications 下没有可探的应用，跳过"] }
+        return (cases, notes)
     }
 
     /// 合成一张 640×400 的测试图：seed 0 是浅底深条，seed 1 是深底浅条（近似反色）。
@@ -1738,7 +1749,7 @@ enum VectorDump {
               + "代码内 \(BuiltinDenylist.shared.fromCode) 条，取并集后 \(BuiltinDenylist.shared.count) 条。")
 
         print("\n## 8. 适配规则（3.3；首批 \(AdapterRegistry.all.count) 条 + 兜底）")
-        for rule in AdapterRegistry.all + [AdapterRegistry.generic] {
+        for rule in AdapterRegistry.all + [AdapterRegistry.generic, AdapterRegistry.genericChromium] {
             print("\n### \(rule.name)（id `\(rule.id)`）")
             print("- bundle id：\(rule.bundleIDs.isEmpty ? "（兜底，匹配不到别的规则时用）" : rule.bundleIDs.joined(separator: "、"))")
             print("- Electron：\(rule.electron ? "是（读树前先设 AXManualAccessibility）" : "否")"
