@@ -48,7 +48,10 @@ struct Harness: Sendable, Identifiable {
     /// 之前用 `harness.id == "claude-code"` 判，两个调用点的条件还不一样。
     var entryIncludesStdioType = false
 
-    func expandedConfigPath(environment: [String: String] = ProcessInfo.processInfo.environment,
+    /// 默认参数用**缓存过的**那份环境：`ProcessInfo.processInfo.environment` 每次求值都
+    /// 复制一整份字典，而这个方法每轮探测每个 harness 都调、窗口每重画一行也调。
+    /// （`MCPIntegration.processEnvironment` 当初就是为了消掉这种复制才加的，只是没顺手用到这里。）
+    func expandedConfigPath(environment: [String: String] = MCPIntegration.processEnvironment,
                             home: String = NSHomeDirectory()) -> String {
         if let homeEnvKey, let root = environment[homeEnvKey], !root.isEmpty {
             return (root as NSString).appendingPathComponent((configPath as NSString).lastPathComponent)

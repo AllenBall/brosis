@@ -27,7 +27,11 @@ enum MCPIntegrationCLI {
             }
             return set(action == "enable", harnessID: harnessID)
         case "auto":
-            return auto(value(of: "--set", in: arguments))
+            guard let setting = value(of: "--set", in: arguments) else {
+                printAutoStatus()
+                return 0
+            }
+            return auto(setting)
         default:
             FileHandle.standardError.write(Data(
                 "用法：--mcp list|enable|disable|auto [--harness <id>] [--set on|off]\n".utf8))
@@ -46,34 +50,43 @@ enum MCPIntegrationCLI {
     /// 这个进程和常驻的 app 是**同一个 bundle**，所以写的是同一个 UserDefaults 域；
     /// 常驻进程的定时器每次 tick 都重读 `isEnabled`，所以这里改完下一轮就生效，
     /// 不需要（也没法）去戳它的定时器。
-    private static func auto(_ setting: String?) -> Int32 {
-        if let setting {
-            guard let on = ["on": true, "off": false][setting] else {
-                FileHandle.standardError.write(Data("--set 只认 on / off\n".utf8))
-                return 2
-            }
-            MCPAutoIntegration.isEnabled = on
+    private static func auto(_ setting: String) -> Int32 {
+        let on: Bool
+        switch setting {
+        case "on":  on = true
+        case "off": on = false
+        default:
+            FileHandle.standardError.write(Data("--set 只认 on / off\n".utf8))
+            return 2
         }
-        let optedOut = MCPAutoIntegration.optedOut.sorted()
+        MCPAutoIntegration.isEnabled = on
+        printAutoStatus()
+        return 0
+    }
+
+    /// `list` 与 `auto` 共用的那两行。**间隔从调度器里取**，改了那个常量这里跟着变——
+    /// 写死一个「30 分钟」迟早会变成对用户说假话。
+    private static func printAutoStatus() {
+        let optedOut = MCPIntegration.optedOut.sorted()
         print("自动集成：\(MCPAutoIntegration.isEnabled ? "开" : "关")"
               + " · 手动关过的：\(optedOut.isEmpty ? "无" : optedOut.joined(separator: " "))")
-        print("说明：开着时每 30 分钟扫一遍，装了但没接的自动写配置 + 发 grant；"
+        print("说明：开着时每 \(Int(MCPAutoIntegration.intervalSeconds / 60)) 分钟扫一遍，"
+              + "装了但没接的自动写配置 + 发 grant；"
               + "手动关过的永远跳过；关掉它不会撤销已经接好的集成。")
-        return 0
     }
 
     private static func list() -> Int32 {
         let grants = grantedClients()
         print("服务器路径：\(HarnessCatalog.serverCommand())")
-        _ = auto(nil)
+        printAutoStatus()
         // 状态判定只有一份：`MCPIntegration.status` + `Status.stateText`（窗口用的也是它），
         // 以前 CLI 自己又推了一遍，措辞已经和窗口不一致。
-        for harness in HarnessCatalog.all {
-            // CLI 进程开不了库（钥匙串 + 库被跑着的 app 占着），grant 只能隔着
-            // `brosis-mcp admin grant list` 问，所以 store 传 nil 之后要把答案补回去——
-            // 否则 stateText 会一口咬定"没有授权"，和后面 grant= 那列自相矛盾。
-            var status = MCPIntegration.status(of: harness, store: nil)
-            status.hasGrant = grants.contains(harness.id)
+        // CLI 进程开不了库（钥匙串 + 库被跑着的 app 占着），grant 只能隔着
+        // `brosis-mcp admin grant list` 问，所以 store 传 nil 之后要把答案补回去——
+        // 否则 stateText 会一口咬定"没有授权"，和后面 grant= 那列自相矛盾。
+        for var status in MCPIntegration.allStatuses(store: nil) {
+            status.hasGrant = grants.contains(status.harness.id)
+            let harness = status.harness
             // 中日文在终端里是双宽，`%-N@` 按字符数补空格永远对不齐，所以用分隔符不用列宽。
             print(String(format: "%-12@ %@ · grant=%@ · cli=%@ · %@",
                          harness.id as NSString, status.stateText as NSString,
@@ -92,6 +105,7 @@ enum MCPIntegrationCLI {
         do {
             // store 传 nil：grant 不在这里发，交给 brosis-mcp（它经 IPC 连正在跑的 app）。
             let outcome = try MCPIntegration.setEnabled(enabled, harness: harness, store: nil,
+                                                        manualToggle: true,
                                                         grantHandledExternally: true)
             print("配置：\(outcome.summary)")
             if let snippet = outcome.manualSnippet {

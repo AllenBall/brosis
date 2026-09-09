@@ -144,7 +144,7 @@ final class MCPIntegrationWindowController: NSObject, NSWindowDelegate,
     /// 学习模式每 2 秒的心跳**不该**走这里，见 `refreshNote()`。
     private func reload() {
         let store = self.store
-        rows = HarnessCatalog.all.map { MCPIntegration.status(of: $0, store: store) }
+        rows = MCPIntegration.allStatuses(store: store)
         tableView?.reloadData()
         autoCheckbox?.state = MCPAutoIntegration.isEnabled ? .on : .off
         var lines: [String] = []
@@ -231,7 +231,8 @@ final class MCPIntegrationWindowController: NSObject, NSWindowDelegate,
             guard alert.runModal() == .alertFirstButtonReturn else { return }
         }
         do {
-            let outcome = try MCPIntegration.setEnabled(on, harness: status.harness, store: store)
+            let outcome = try MCPIntegration.setEnabled(on, harness: status.harness,
+                                                        store: store, manualToggle: true)
             lastAction = "\(status.harness.displayName)：\(outcome.summary)"
             if let snippet = outcome.manualSnippet {
                 NSPasteboard.general.clearContents()
@@ -359,10 +360,7 @@ final class MCPIntegrationWindowController: NSObject, NSWindowDelegate,
         let text: String
         switch column {
         case "harness": text = status.harness.displayName
-        case "state":   text = MCPAutoIntegration.optedOut.contains(status.harness.id)
-                            ? status.stateText + L("（已手动关闭，不会自动开）",
-                                                   " (turned off by hand; will not be auto-enabled)")
-                            : status.stateText
+        case "state":   text = status.stateText
         case "grant":   text = status.hasGrant ? L("已授权", "Granted") : L("无", "None")
         case "config":  text = (status.harness.expandedConfigPath() as NSString)
                                    .abbreviatingWithTildeInPath

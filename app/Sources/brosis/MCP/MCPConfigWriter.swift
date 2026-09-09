@@ -65,29 +65,23 @@ enum MCPConfigWriter {
         }
     }
 
-    /// 现在这份配置里 brosis 指向哪个可执行文件。nil = 没有这一项。
-    static func currentCommand(format: HarnessFormat, text: String, name: String) throws -> String? {
-        switch format {
-        case .mcpServersJSON:  try jsonValue(text: text, path: ["mcpServers"], name: name, env: nil)
-        case .zcodeNestedJSON: try jsonValue(text: text, path: ["mcp", "servers"], name: name, env: nil)
-        case .mcpServersTOML:  tomlValue(text: text, section: "mcp_servers.\(name)", key: "command")
-        }
+    /// 现有的 brosis 条目里我们关心的两件事，**一次解析读齐**。
+    ///
+    /// 曾经是 `currentCommand` 与 `currentClientID` 两个函数，各自一个 `switch` 三个分支、
+    /// 各自把同一段文本再解析一遍。除了白跑一趟，真正的代价是"加一种配置格式要改两个
+    /// switch 且必须同步"——而这两个 switch 的分支表本来就一模一样。
+    struct Existing: Sendable, Equatable {
+        /// brosis 指向哪个可执行文件。nil = 配置里没有这一项。
+        var command: String?
+        /// 条目里钉的 `BROSIS_CLIENT_ID`。nil = 没这一项、或者它没带这个 env。
+        var clientID: String?
     }
 
-    /// 现在这份配置里 brosis 那条钉的 `BROSIS_CLIENT_ID`。nil = 没这条、或者它没带这个 env。
-    ///
-    /// **比的是这一个键，不是整段文本。** 曾经想用"`apply` 返回 nil 就算最新"来判断，
-    /// 但那等价于逐字节比：TOML 是"摘掉自己那几节再追加到末尾"，只要 harness 自己重排过
-    /// 文件、把我们的节挪回中间，比较就永远为假——于是每 30 分钟重写一次配置、
-    /// 每次留一份带时间戳的备份，一天攒 48 个。判据要正好落在我们在乎的那件事上。
-    static func currentClientID(format: HarnessFormat, text: String, name: String) throws -> String? {
+    static func current(format: HarnessFormat, text: String, name: String) throws -> Existing {
         switch format {
-        case .mcpServersJSON:  try jsonValue(text: text, path: ["mcpServers"], name: name,
-                                             env: clientIDEnvKey)
-        case .zcodeNestedJSON: try jsonValue(text: text, path: ["mcp", "servers"], name: name,
-                                             env: clientIDEnvKey)
-        case .mcpServersTOML:  tomlValue(text: text, section: "mcp_servers.\(name).env",
-                                         key: clientIDEnvKey)
+        case .mcpServersJSON:  try jsonCurrent(text: text, path: ["mcpServers"], name: name)
+        case .zcodeNestedJSON: try jsonCurrent(text: text, path: ["mcp", "servers"], name: name)
+        case .mcpServersTOML:  tomlCurrent(text: text, name: name)
         }
     }
 
@@ -152,13 +146,10 @@ enum MCPConfigWriter {
         }
     }
 
-    /// `env == nil` 取 command；否则取 env 子表里那个键。
-    private static func jsonValue(text: String, path: [String], name: String,
-                                  env: String?) throws -> String? {
-        let root = try parse(text)
-        let node = read(root, path: path)[name] as? [String: Any]
-        guard let env else { return node?["command"] as? String }
-        return (node?["env"] as? [String: Any])?[env] as? String
+    private static func jsonCurrent(text: String, path: [String], name: String) throws -> Existing {
+        let node = read(try parse(text), path: path)[name] as? [String: Any]
+        return Existing(command: node?["command"] as? String,
+                        clientID: (node?["env"] as? [String: Any])?[clientIDEnvKey] as? String)
     }
 
     // MARK: - TOML（逐行手术：原文一个字节都不动，只增删自己那几节）
@@ -222,26 +213,38 @@ enum MCPConfigWriter {
         return result == text ? nil : result
     }
 
-    /// 读 `[<section>]` 这一节里的 `<key> = "…"`。command 与 env 子表用的是同一段扫描——
-    /// 以前只有 command 一个读法，加 env 时照抄一份的话，反转义会立刻漂成两套。
-    private static func tomlValue(text: String, section: String, key: String) -> String? {
-        var inside = false
+    /// 一趟扫完整份 TOML，把 `[mcp_servers.<name>]` 的 command 与
+    /// `[mcp_servers.<name>.env]` 里的 client id 一起带回来。
+    /// 反转义只有这一份，command 与 env 共用——两处各写一份的话它们迟早不一样。
+    private static func tomlCurrent(text: String, name: String) -> Existing {
+        var found = Existing()
+        var section = ""
         for line in text.components(separatedBy: "\n") {
             if isSectionHeader(line) {
-                inside = line.trimmingCharacters(in: .whitespaces) == "[\(section)]"
+                let t = line.trimmingCharacters(in: .whitespaces)
+                section = String(t.dropFirst().dropLast()).trimmingCharacters(in: .whitespaces)
                 continue
             }
-            guard inside else { continue }
-            let parts = line.split(separator: "=", maxSplits: 1, omittingEmptySubsequences: false)
-            guard parts.count == 2,
-                  parts[0].trimmingCharacters(in: .whitespaces) == key else { continue }
-            var value = parts[1].trimmingCharacters(in: .whitespaces)
-            if value.hasPrefix("\""), value.hasSuffix("\""), value.count >= 2 {
-                value = String(value.dropFirst().dropLast())
+            guard let (key, value) = tomlPair(line) else { continue }
+            if section == "mcp_servers.\(name)", key == "command" {
+                found.command = found.command ?? value
+            } else if section == "mcp_servers.\(name).env", key == clientIDEnvKey {
+                found.clientID = found.clientID ?? value
             }
-            return value.replacingOccurrences(of: "\\\"", with: "\"")
-                        .replacingOccurrences(of: "\\\\", with: "\\")
         }
-        return nil
+        return found
+    }
+
+    /// `key = "value"` → (key, 反转义后的 value)。不是这个形状就返回 nil。
+    private static func tomlPair(_ line: String) -> (String, String)? {
+        let parts = line.split(separator: "=", maxSplits: 1, omittingEmptySubsequences: false)
+        guard parts.count == 2 else { return nil }
+        var value = parts[1].trimmingCharacters(in: .whitespaces)
+        if value.hasPrefix("\""), value.hasSuffix("\""), value.count >= 2 {
+            value = String(value.dropFirst().dropLast())
+        }
+        return (parts[0].trimmingCharacters(in: .whitespaces),
+                value.replacingOccurrences(of: "\\\"", with: "\"")
+                     .replacingOccurrences(of: "\\\\", with: "\\"))
     }
 }

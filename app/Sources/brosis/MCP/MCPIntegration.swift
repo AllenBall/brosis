@@ -21,6 +21,26 @@ private final class OutputBuffer: @unchecked Sendable {
 
 enum MCPIntegration {
 
+    /// 这个 harness 的条目**由谁写**。三处曾经各自推一遍（`status` 用 `allowDirectWrite`、
+    /// `decide` 用 `allowDirectWrite || cliPath != nil`、`setEnabled` 用 `locateCLI != nil &&
+    /// cliAdd != nil`），推法互不等价——grok 同时有 `allowDirectWrite` 和 `cliAdd`，于是条目
+    /// 由 `grok mcp add` 写（不带我们的 env），而 `status` 仍按"我们写的"去比 env，永远为假，
+    /// 自动集成每 30 分钟重跑一次 CLI。描述表的规矩（HarnessCatalog：「差异写进表，不写进 if」）
+    /// 在这里的落法就是：**路由只算一次，三处都读它**。
+    enum WriteRoute: Sendable, Equatable {
+        /// 官方 CLI 增删（路径已找到）。条目不是我们拼的，所以不带 `BROSIS_CLIENT_ID`。
+        case cli(String)
+        /// 我们自己写配置文件，条目逐字段由 `MCPConfigWriter.entry` 决定。
+        case directFile
+        /// 两条都走不了，只能给用户一段手动粘的片段——**自动集成对这种一律不碰**。
+        case snippetOnly
+    }
+
+    static func writeRoute(for harness: Harness, cliPath: String?) -> WriteRoute {
+        if let cliPath, harness.cliAdd != nil, harness.cliRemove != nil { return .cli(cliPath) }
+        return harness.allowDirectWrite ? .directFile : .snippetOnly
+    }
+
     struct Status: Sendable {
         var harness: Harness
         /// 有没有这个 harness 的其它痕迹（目录、CLI）。
@@ -29,30 +49,60 @@ enum MCPIntegration {
         var cliPath: String?
         /// 配置里 brosis 现在指向哪。nil = 没配。
         var currentCommand: String?
+        /// 条目里钉的 `BROSIS_CLIENT_ID`。nil = 没钉（老版本写的、或别人写的）。
+        var currentClientID: String?
         /// 配置文件读不出来的原因（有值时开关只能给"复制片段"）。
         var configProblem: String?
         var hasGrant: Bool
-        /// 现有条目里的 `BROSIS_CLIENT_ID` 钉的是这个 harness 的 id 吗。`currentCommand`
-        /// 只比 command，比不出条目缺了这个 env（老版本写的条目就没有）——自动集成据此补写。
-        /// 走官方 CLI 的那家（`allowDirectWrite == false`）恒为 true：条目是 CLI 写的，
-        /// 本来就不带我们的 env，拿它当"过期"会变成每轮都重跑一次 CLI。
-        var configMatchesTarget = true
+        /// 用户在面板 / 命令行里手动关过它。自动集成据此永远绕开。
+        var manuallyDisabled: Bool = false
 
+        var writeRoute: WriteRoute { MCPIntegration.writeRoute(for: harness, cliPath: cliPath) }
         var configured: Bool { currentCommand != nil }
         /// 配了但指向别的可执行文件（旧路径 / 构建目录）。
         var pointsElsewhere: Bool {
             guard let currentCommand else { return false }
             return currentCommand != HarnessCatalog.serverCommand()
         }
+        /// 条目里的 client id 钉对了吗。**只有我们自己写的条目才谈得上**——CLI 写的本来
+        /// 就不带这个 env，拿它当"过期"就会变成每轮重跑一次 CLI。以前这是个默认 true 的
+        /// 存储字段，"比不了"和"比过了、是对的"长得一模一样；现在从路由算出来，说不出口的
+        /// 情况在类型上就不存在。
+        var clientIDPinned: Bool {
+            writeRoute != .directFile || currentClientID == harness.id
+        }
         var stateText: String {
             if let configProblem { return L("配置读不出来：\(configProblem)", "config unreadable: \(configProblem)") }
-            if !configured { return installed ? L("已安装，未配置", "installed, not configured") : L("未检测到", "not detected") }
-            if pointsElsewhere {
-                return L("已配置，但指向 \(currentCommand ?? "?")",
+            var text: String
+            if !configured {
+                text = installed ? L("已安装，未配置", "installed, not configured") : L("未检测到", "not detected")
+            } else if pointsElsewhere {
+                text = L("已配置，但指向 \(currentCommand ?? "?")",
                          "configured, but points to \(currentCommand ?? "?")")
+            } else if !hasGrant {
+                text = L("已配置，但没有授权（会被全拒）", "configured, but no grant (everything is refused)")
+            } else {
+                text = L("已配置并已授权", "configured and granted")
             }
-            return hasGrant ? L("已配置并已授权", "configured and granted") : L("已配置，但没有授权（会被全拒）", "configured, but no grant (everything is refused)")
+            // **这一句在 stateText 里，不在窗口里。** 措辞只有一份，命令行 `--mcp list`
+            // 与面板才不会各说各的——CLI 里那条注释记的就是上一次这么漂掉的教训。
+            if manuallyDisabled {
+                text += L("（已手动关闭，不会自动开）",
+                          " (turned off by hand; will not be auto-enabled)")
+            }
+            return text
         }
+    }
+
+    // MARK: - 「用户手动关过」的记忆
+
+    /// 手动关过的 harness id。**存在这一层而不是 `MCPAutoIntegration`**：`status` 要读它，
+    /// `setEnabled` 要写它，两个都在这里；放在调度器里会让动作层反过来依赖调度器的存储。
+    static let optOutKey = "mcp.autoIntegrate.optOut"
+
+    static var optedOut: Set<String> {
+        get { Set(UserDefaults.standard.stringArray(forKey: optOutKey) ?? []) }
+        set { UserDefaults.standard.set(newValue.sorted(), forKey: optOutKey) }
     }
 
     // MARK: - 探测
@@ -69,21 +119,38 @@ enum MCPIntegration {
     /// 进程环境在本进程内不变，拷一次就够——以前每次探测都全量复制一遍字典。
     static let processEnvironment = ProcessInfo.processInfo.environment
 
+    /// 实际要翻的目录。**和 `processEnvironment` 一样只算一次**：进程内 PATH 不会变，
+    /// 而这个列表以前是每次 `locateCLI` 都重新拆一遍 PATH、重新拼一次数组
+    /// （每轮探测 5 个 harness 就是 5 次）。
+    static let searchDirectories: [String] = extraBinaryDirectories
+        + (processEnvironment["PATH"] ?? "").split(separator: ":").map(String.init)
+
     static func locateCLI(_ name: String?) -> String? {
         guard let name else { return nil }
         let fm = FileManager.default
-        var dirs = extraBinaryDirectories
-        if let path = processEnvironment["PATH"] {
-            dirs.append(contentsOf: path.split(separator: ":").map(String.init))
-        }
-        for dir in dirs {
+        for dir in searchDirectories {
             let candidate = (dir as NSString).appendingPathComponent(name)
             if fm.isExecutableFile(atPath: candidate) { return candidate }
         }
         return nil
     }
 
-    static func status(of harness: Harness, store: Store?) -> Status {
+    /// 整张表的状态。**每次探测只问一次库、只读一次 optOut**。
+    ///
+    /// 以前四个调用点各写一遍 `HarnessCatalog.all.map { status(of: $0, store:) }`，
+    /// 于是每轮 6 次 `store.grant(clientID:)`——每次都要抢一次 `Store` 的全局锁，
+    /// 而那把锁是和一直在写的采集侧共用的。`allGrants()` 一次拿完（表本来就只有几行）。
+    static func allStatuses(store: Store?) -> [Status] {
+        let granted = Set((try? store?.allGrants())??.map(\.clientID) ?? [])
+        let optedOut = self.optedOut
+        return HarnessCatalog.all.map {
+            status(of: $0, hasGrant: granted.contains($0.id), manuallyDisabled: optedOut.contains($0.id))
+        }
+    }
+
+    /// 单个 harness 的状态。grant 与 optOut 由调用方给——`allStatuses` 一次查完再发下来，
+    /// 这里不再各自去问一遍。
+    static func status(of harness: Harness, hasGrant: Bool, manuallyDisabled: Bool) -> Status {
         let fm = FileManager.default
         let configPath = harness.expandedConfigPath()
         let exists = fm.fileExists(atPath: configPath)
@@ -91,29 +158,21 @@ enum MCPIntegration {
         let probed = harness.probePaths.contains {
             fm.fileExists(atPath: (NSHomeDirectory() as NSString).appendingPathComponent($0))
         }
-        var command: String?
+        var existing = MCPConfigWriter.Existing()
         var problem: String?
-        var matches = true
         if exists {
             do {
                 let text = (try? String(contentsOfFile: configPath, encoding: .utf8)) ?? ""
-                command = try MCPConfigWriter.currentCommand(format: harness.format, text: text,
-                                                             name: HarnessCatalog.serverName)
-                // 只对我们自己写的那几家算：CLI 写的条目不带我们的 env，算了也只会永远为假，
-                // 于是每轮都去重跑一次官方 CLI。
-                if command != nil, harness.allowDirectWrite {
-                    matches = try MCPConfigWriter.currentClientID(
-                        format: harness.format, text: text,
-                        name: HarnessCatalog.serverName) == harness.id
-                }
+                existing = try MCPConfigWriter.current(format: harness.format, text: text,
+                                                       name: HarnessCatalog.serverName)
             } catch {
                 problem = "\(error)"
             }
         }
-        let granted = (try? store?.grant(clientID: harness.id)) ?? nil
         return Status(harness: harness, installed: exists || probed || cli != nil,
-                      cliPath: cli, currentCommand: command, configProblem: problem,
-                      hasGrant: granted != nil, configMatchesTarget: matches)
+                      cliPath: cli, currentCommand: existing.command,
+                      currentClientID: existing.clientID, configProblem: problem,
+                      hasGrant: hasGrant, manuallyDisabled: manuallyDisabled)
     }
 
     // MARK: - 开关
@@ -130,11 +189,15 @@ enum MCPIntegration {
     /// 正在跑的 app），所以那边传 `store: nil` 不代表"库没开"，不该提示用户解锁后重来。
     /// `manualToggle`：人点的（面板、命令行）要记进 optOut，自动集成那条路传 false——
     /// **记在这里而不是各个入口**，两个入口才不会各记一套、各漏一处。
+    /// **没有默认值**：默认成 true 的话，将来任何新调用点都会不写一个字就把"人的意思"
+    /// 记进 optOut，而调用点上看不见这件事。
     static func setEnabled(_ enabled: Bool, harness: Harness, store: Store?,
-                           grantHandledExternally: Bool = false,
-                           manualToggle: Bool = true) throws -> Outcome {
+                           manualToggle: Bool,
+                           grantHandledExternally: Bool = false) throws -> Outcome {
         if manualToggle {
-            MCPAutoIntegration.rememberManualToggle(harnessID: harness.id, enabled: enabled)
+            var set = optedOut
+            if enabled { set.remove(harness.id) } else { set.insert(harness.id) }
+            optedOut = set
         }
         let command = HarnessCatalog.serverCommand()
         let entry = MCPConfigWriter.entry(for: harness, command: command)
@@ -142,7 +205,8 @@ enum MCPIntegration {
         var snippet: String?
 
         // 1) 官方 CLI 优先：避开与 harness 自己对写（~/.claude.json 是重灾区）。
-        if let cliPath = locateCLI(harness.cliName),
+        //    走哪条路由由 `writeRoute` 一处说了算，这里不再自己推一遍。
+        if case .cli(let cliPath) = writeRoute(for: harness, cliPath: locateCLI(harness.cliName)),
            let template = enabled ? harness.cliAdd : harness.cliRemove {
             let args = template.map { $0 == "$NAME" ? HarnessCatalog.serverName
                                     : ($0 == "$CMD" ? command : $0) }

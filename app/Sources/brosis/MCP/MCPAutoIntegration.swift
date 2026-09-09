@@ -34,8 +34,6 @@ final class MCPAutoIntegration: @unchecked Sendable {
 
     /// 总开关。**默认开**——这就是用户要的行为。
     static let enabledKey = "mcp.autoIntegrate"
-    /// 用户手动关过的 harness id。自动这条路永远绕开它们。
-    static let optOutKey = "mcp.autoIntegrate.optOut"
 
     static let intervalSeconds: TimeInterval = 30 * 60
     /// 解锁后延迟多久跑第一次：给启动阶段（授权、起流、首帧采集）让开。
@@ -43,6 +41,9 @@ final class MCPAutoIntegration: @unchecked Sendable {
 
     /// 总开关。setter 自己写键并自己起停（与 `AutoIndexScheduler.isEnabled` 同一写法）。
     /// 关掉**不会**撤销已经接好的集成——那是另一件事，要撤在面板里一行一行点。
+    ///
+    /// 「哪几家被手动关过」不在这里：它是每个 harness 的状态，存在
+    /// `MCPIntegration.optedOut`（`status` 要读、`setEnabled` 要写，两个都在那一层）。
     static var isEnabled: Bool {
         get { UserDefaults.standard.object(forKey: enabledKey) as? Bool ?? true }
         set {
@@ -51,58 +52,31 @@ final class MCPAutoIntegration: @unchecked Sendable {
         }
     }
 
-    static var optedOut: Set<String> {
-        get { Set(UserDefaults.standard.stringArray(forKey: optOutKey) ?? []) }
-        set { UserDefaults.standard.set(newValue.sorted(), forKey: optOutKey) }
-    }
-
-    /// 记 / 销"用户手动关过"。**只有 `MCPIntegration.setEnabled` 调**——
-    /// 面板与命令行都走它，两个入口就不会各记一套。
-    static func rememberManualToggle(harnessID: String, enabled: Bool) {
-        var set = optedOut
-        if enabled { set.remove(harnessID) } else { set.insert(harnessID) }
-        optedOut = set
-    }
-
     // MARK: - 判定（纯函数）
 
-    enum Action: String, Sendable {
-        /// 没配过，或者配了但缺 grant / 条目内容过期。
-        case wire
-        /// 配了，但指向一个已经不存在的可执行文件。
-        case repairStalePath
-    }
-
-    struct Candidate: Sendable, Equatable {
-        var harnessID: String
-        var action: Action
-    }
-
-    /// 这一轮该动谁。`commandExists` 注入是为了让自检不依赖本机真实文件。
-    static func decide(statuses: [MCPIntegration.Status], enabled: Bool,
-                       optedOut: Set<String>,
-                       commandExists: (String) -> Bool) -> [Candidate] {
-        guard enabled else { return [] }
-        return statuses.compactMap { status in
-            let harness = status.harness
+    /// 这一轮该动谁。返回的就是 `decide` 手上那几条 `Status`——曾经返回一个只装
+    /// `harnessID` 的 `Candidate`，于是 `tick` 还得回头在数组里把 `Status` 找回来，
+    /// 外带一条永远走不到的 `else { continue }`。同时删掉的还有一个两分支的 `Action` 枚举：
+    /// 两个分支下游做的事一模一样（都是 `setEnabled(true, …)`），它只被拼进日志字符串——
+    /// 一个不分派的枚举会骗人，让下一个加分支的人以为有地方会区别对待。
+    ///
+    /// `commandExists` 注入是为了让自检不依赖本机真实文件。
+    static func decide(statuses: [MCPIntegration.Status],
+                       commandExists: (String) -> Bool) -> [MCPIntegration.Status] {
+        statuses.filter { status in
             guard status.installed,
-                  !optedOut.contains(harness.id),
+                  !status.manuallyDisabled,
                   status.configProblem == nil,
-                  harness.allowDirectWrite || status.cliPath != nil
-            else { return nil }
+                  status.writeRoute != .snippetOnly
+            else { return false }
 
-            guard status.configured else {
-                return Candidate(harnessID: harness.id, action: .wire)
-            }
+            guard status.configured else { return true }
             if status.pointsElsewhere {
                 // 旧路径还在 = 别人故意接的，别动；已经没了 = 纯故障，修。
-                guard let current = status.currentCommand, !commandExists(current) else { return nil }
-                return Candidate(harnessID: harness.id, action: .repairStalePath)
+                guard let current = status.currentCommand else { return false }
+                return !commandExists(current)
             }
-            guard status.hasGrant, status.configMatchesTarget else {
-                return Candidate(harnessID: harness.id, action: .wire)
-            }
-            return nil
+            return !status.hasGrant || !status.clientIDPinned
         }
     }
 
@@ -144,7 +118,9 @@ final class MCPAutoIntegration: @unchecked Sendable {
         lock.unlock()
     }
 
-    /// 手点「刷新」/ 改完开关时立刻跑一次，不用等下一个 30 分钟。
+    /// 把第一次扫描提前到现在。**省下的是 `launchDelaySeconds` 那 30 秒，不是 30 分钟**：
+    /// 打开总开关时 `isEnabled` 的 setter 已经调了 `start()`，首次 tick 本来就排在 30 s 后。
+    /// 留着它只为让复选框点下去当场有反应；`queue` 是串行的，和定时器不会叠着跑。
     func runNow() { queue.async { [weak self] in self?.tick() } }
 
     private func tick() {
@@ -155,29 +131,27 @@ final class MCPAutoIntegration: @unchecked Sendable {
             note("store_closed")
             return
         }
-        let statuses = HarnessCatalog.all.map { MCPIntegration.status(of: $0, store: store) }
         let fm = FileManager.default
-        let candidates = Self.decide(statuses: statuses, enabled: true,
-                                     optedOut: Self.optedOut,
-                                     commandExists: { fm.isExecutableFile(atPath: $0) })
-        guard !candidates.isEmpty else { note("nothing_to_do"); return }
+        let todo = Self.decide(statuses: MCPIntegration.allStatuses(store: store),
+                               commandExists: { fm.isExecutableFile(atPath: $0) })
+        guard !todo.isEmpty else { note("nothing_to_do"); return }
 
         var done: [String] = []
-        for candidate in candidates {
-            guard let status = statuses.first(where: { $0.harness.id == candidate.harnessID })
-            else { continue }
+        for status in todo {
+            let id = status.harness.id
+            // 只是给日志一个词。真要分派时再变成枚举，现在没有第二种做法。
+            let reason = status.pointsElsewhere ? "repair_stale_path" : "wire"
             do {
                 let outcome = try MCPIntegration.setEnabled(true, harness: status.harness,
-                                                           store: store, manualToggle: false)
-                done.append("\(candidate.harnessID)=\(candidate.action.rawValue)")
+                                                            store: store, manualToggle: false)
+                done.append("\(id)=\(reason)")
                 recorder.logEvent(kind: "mcp_auto_integrated",
-                                  detail: "harness=\(candidate.harnessID) "
-                                        + "action=\(candidate.action.rawValue) "
+                                  detail: "harness=\(id) action=\(reason) "
                                         + "summary=\(outcome.summary.prefix(200))")
             } catch {
-                done.append("\(candidate.harnessID)=failed")
+                done.append("\(id)=failed")
                 recorder.logEvent(kind: "mcp_auto_integration_failed",
-                                  detail: "harness=\(candidate.harnessID) error=\(error)")
+                                  detail: "harness=\(id) error=\(error)")
             }
         }
         note(done.joined(separator: " "))
