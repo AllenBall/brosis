@@ -215,7 +215,9 @@ Electron apps need `AXManualAccessibility` set before they expose an accessibili
 
 **`AXEnhancedUserInterface` is off by default and can be turned on.** With it on, Chrome really does build the web accessibility tree, and body text switches to reading the DOM (far more complete than OCR, including content scrolled out of view), falling back to OCR when the read comes back empty.
 
-⚠️ **Know the cost before turning it on.** The attribute puts Chromium into screen-reader mode, where it **buffers keystrokes** and, when the client that set it disconnects, **replays those buffered keystrokes into whatever field the user is focused on** (see [screenpipe #3884](https://github.com/mediar-ai/screenpipe/issues/3884); 1Password and Alfred have hit it too). The damage does not land on brosis — it lands on whatever window you are typing into. That is why it is off by default and why upgrading never turns it on.
+⚠️ **Know the cost before turning it on.** The attribute puts Chromium into accessibility mode where it mirrors input, and when the client that set it **disconnects abruptly** it **replays recently buffered keystrokes into the focused field** — the reproduction is typing `abcd`, quitting the client, and finding `abcdbcdbcd`, i.e. **your recent keystrokes duplicated**, not random garbage (see [screenpipe #3884](https://github.com/mediar-ai/screenpipe/issues/3884); 1Password, Alfred and TextExpander have hit the same one).
+
+The exposure window is **the moment brosis exits** (including when it is updated), and it lands on the focused field of a Chromium app. Simply having it on does not trigger it. That is why it is off by default and why upgrading never turns it on.
 
 ```bash
 defaults write com.brosis.app ax.enhancedUserInterface -bool true   # on; restart the app

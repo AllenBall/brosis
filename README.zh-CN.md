@@ -215,7 +215,9 @@ Electron 应用需要先设 `AXManualAccessibility` 才暴露无障碍树；一�
 
 **`AXEnhancedUserInterface` 默认关闭，可以自行打开。** 打开后 Chrome 会真的建起网页无障碍树，正文改为优先读 DOM 文本（比 OCR 完整得多，含滚动区外的内容），读空再回退 OCR。
 
-⚠️ **打开前请知道代价**：该属性会让 Chromium 进入屏幕阅读器模式并**缓冲按键**，设置它的客户端断开时，把缓冲的按键**重放进用户当时的焦点输入框**（见 [screenpipe #3884](https://github.com/mediar-ai/screenpipe/issues/3884)；1Password、Alfred 也出现过）。伤害落点不在 brosis 自己，而在你正在打字的**别的窗口**。这就是它默认关闭、且升级不会自动打开的原因。
+⚠️ **打开前请知道代价**：该属性会让 Chromium 进入无障碍模式并镜像输入，设置它的客户端**突然断开**时，把最近缓冲的按键**重放进当时的焦点输入框**——复现用例是输入 `abcd`、退出客户端后变成 `abcdbcdbcd`，即**把你刚敲的内容重复一遍**（见 [screenpipe #3884](https://github.com/mediar-ai/screenpipe/issues/3884)；1Password、Alfred、TextExpander 中过同一个）。
+
+风险窗口是 **brosis 退出的那一刻**（包括更新时），落点是 Chromium 系应用里当时的焦点输入框。平时开着不触发。这就是它默认关闭、且升级不会自动打开的原因。
 
 ```bash
 defaults write com.brosis.app ax.enhancedUserInterface -bool true   # 打开，需重启 app
