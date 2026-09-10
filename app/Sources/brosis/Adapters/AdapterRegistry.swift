@@ -397,6 +397,20 @@ enum AdapterRegistry {
         for rule in all where rule.bundleIDs.contains(where: { $0.lowercased() == lowered }) {
             return rule
         }
+        // **没在清单里、但结构上就是个 Chromium 浏览器** ⇒ 照样按浏览器那条规则来。
+        //
+        // 窗口定向截图、地址栏取 URL、无痕排除，这三件事是"浏览器"的性质而不是"Chrome"的
+        // 性质。只认手写清单的话，新装一个 Chromium 浏览器（Edge Beta、Arc、Opera GX……）
+        // 会落到 `genericChromium` 上——那条 `capturesWindow` 是 false，于是"压在上面的
+        // 别的窗口的像素被记成这个应用的网页内容"那个**归错应用**的缺陷会原样回来，
+        // 而且没有任何信号。判据只读 Info.plist，见 `AX.isChromiumBrowser`。
+        //
+        // 只在拿得到 bundleURL 时判：没有 URL 就读不了 plist，而把一个错的 false
+        // 缓存起来比不答更糟（同 `cachedChromiumDetection` 的理由）。
+        if bundleURL != nil, AX.isChromiumBrowser(bundleID: bundleID, bundleURL: bundleURL),
+           let browserRule = all.first(where: { $0.id == chrome.id }) {
+            return browserRule
+        }
         // 访达等已经有 BFS 收紧值的应用：兜底规则 + 它自己的限额（`AX.bfsLimits`）。
         var fallback = base
         fallback.limits = AX.bfsLimits(bundleID: bundleID)

@@ -135,6 +135,73 @@ enum AX {
 
     private static let detectionCache = DetectionCache()
 
+    /// 「这个 bundle 注册了自己是 http/https 的处理器吗」的缓存。判据只读 Info.plist，
+    /// 但一次要解一整个 plist，而 `rule(for:)` 每次扫描都会问，所以按 bundle id 缓存。
+    private static let browserCache = BooleanCache()
+
+    /// 同 `DetectionCache`，只是存 Bool。两个缓存分开而不是合成一个结构体：
+    /// `ChromiumDetection` 有 `rawValue`、被写进 runtime_events 与自检输出，
+    /// 把它改成结构体要动十几个消费点，而这两件事本来就是独立的判据。
+    private final class BooleanCache: @unchecked Sendable {
+        private let lock = NSLock()
+        private var values: [String: Bool] = [:]
+        func resolve(_ key: String, compute: () -> Bool) -> Bool {
+            lock.lock()
+            if let cached = values[key] { lock.unlock(); return cached }
+            lock.unlock()
+            let computed = compute()          // 读 plist 不在锁里做
+            lock.lock()
+            defer { lock.unlock() }
+            if let raced = values[key] { return raced }
+            values[key] = computed
+            return computed
+        }
+    }
+
+    /// 这个 bundle 有没有**把网页链接当成自己的主业**——即：`CFBundleURLTypes` 里存在一条
+    /// **只含 http / https** 的类型。
+    ///
+    /// 判据为什么是"纯"而不是"含"：浏览器把网页 URL 声明成一条专用类型，而只想拦链接的
+    /// 应用是把 http 塞进自己那条里。实测三家的声明形状：
+    ///
+    ///     Chrome ：{ name "Web site URL", schemes [http, https] }        ← 专用，另有一条 google-chrome
+    ///     Safari ：{ name "Web site URL", schemes [http, https] }        ← 同上
+    ///     ChatGPT：{ name "ChatGPT",      schemes [codex, http, https] } ← 混进了自有 scheme
+    ///
+    /// 第一版写的是"含 http 即可"，**自检当场抓出了误报**：ChatGPT（`com.openai.codex`）
+    /// 在人工清单里算 Chromium 系、又声明了 http，于是被判成浏览器——和当初 `Helpers`
+    /// 检测把 Word / iMovie 判成 Chromium 是同一类错误。改成"纯"之后重扫本机
+    /// `/Applications`：声明 http 的 4 个应用里，Chrome / Safari / Zen 判是（三个都真是浏览器），
+    /// ChatGPT 判否。零误报零漏报。
+    ///
+    /// **只读文件系统**：不发 AX 消息、不需要权限、不启动被检测的应用，自检可以直接调。
+    static func bundleHandlesWebLinks(at bundleURL: URL?) -> Bool {
+        guard let bundleURL,
+              let plist = NSDictionary(contentsOf:
+                  bundleURL.appendingPathComponent("Contents/Info.plist")),
+              let types = plist["CFBundleURLTypes"] as? [[String: Any]]
+        else { return false }
+        return types.contains { type in
+            guard let raw = type["CFBundleURLSchemes"] as? [String] else { return false }
+            let schemes = Set(raw.map { $0.lowercased() })
+            return !schemes.isDisjoint(with: ["http", "https"])
+                && schemes.isSubset(of: ["http", "https"])
+        }
+    }
+
+    /// **是不是 Chromium 系的浏览器**（而不只是"用 Chromium 做的应用"）。
+    ///
+    /// 存在的理由：窗口定向截图、从地址栏取 URL、无痕窗口排除，这三件事是"浏览器"的性质，
+    /// 不是"Chrome"的性质。靠一份手写包名清单的话，新装一个 Chromium 浏览器（Edge Beta、
+    /// Arc、Opera GX……）就会落到通用规则上，连带把"别的窗口的像素被记成这个应用的网页内容"
+    /// 那个归错应用的缺陷原样带回来——而这正是 `bundleLooksChromium` 当初取代手写清单的理由。
+    static func isChromiumBrowser(bundleID: String?, bundleURL: URL?) -> Bool {
+        guard chromiumDetection(bundleID: bundleID, bundleURL: bundleURL).detection.isChromium
+        else { return false }
+        guard let bundleID, !bundleID.isEmpty else { return bundleHandlesWebLinks(at: bundleURL) }
+        return browserCache.resolve(bundleID) { bundleHandlesWebLinks(at: bundleURL) }
+    }
+
     /// 通用检测：`<bundle>/Contents/Frameworks/` 下有没有 Electron / CEF 框架目录。
     ///
     /// **只读文件系统**：不发任何 AX 消息、不需要辅助功能权限、不启动被检测的应用，

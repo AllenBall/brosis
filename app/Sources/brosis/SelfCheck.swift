@@ -1750,6 +1750,28 @@ enum SelfCheck {
                 let got = AX.bundleLooksChromium(at: bundle)
                 cases.append((layout.title, got == layout.want,
                               "\(got)（期望 \(layout.want)）"))
+
+                // 顺带在同一个假 bundle 上验"是不是浏览器"的结构判据：写一份带 / 不带
+                // http 的 Info.plist。这一条是 2026-09-10 补的——没有它，新装的
+                // Chromium 浏览器会落到通用规则上，归错应用的缺陷会原样回来。
+                let plist = bundle.appendingPathComponent("Contents/Info.plist")
+                for (title, schemes, want) in [
+                    ("专用的 http/https 类型 ⇒ 是浏览器", ["https", "http"], true),
+                    // 这一条是 2026-09-10 自检抓出来的真误报：ChatGPT 把 http 塞进了自己
+                    // 那条 URL 类型里（[codex, http, https]），"含 http 即可"会把它判成浏览器。
+                    ("http 混在自有 scheme 里 ⇒ 不是浏览器", ["codex", "http", "https"], false),
+                    ("只注册自有 scheme ⇒ 不是浏览器", ["slack", "vscode"], false),
+                    ("没有 CFBundleURLTypes ⇒ 不是浏览器", [], false),
+                ] {
+                    var dict: [String: Any] = ["CFBundleIdentifier": "com.selfcheck.\(layout.app)"]
+                    if !schemes.isEmpty {
+                        dict["CFBundleURLTypes"] = [["CFBundleURLSchemes": schemes]]
+                    }
+                    try (dict as NSDictionary).write(to: plist)
+                    let isBrowser = AX.bundleHandlesWebLinks(at: bundle)
+                    cases.append(("\(layout.app)：\(title)", isBrowser == want,
+                                  "\(isBrowser)（期望 \(want)）"))
+                }
             } catch {
                 cases.append((layout.title, false, "造假 bundle 失败：\(error)"))
             }
