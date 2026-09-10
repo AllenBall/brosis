@@ -142,6 +142,8 @@ public enum MCPTool: String, Codable, Sendable, CaseIterable {
     case getWeekLedger = "get_week_ledger"
     case getPatterns = "get_patterns"
     case recentActivity = "recent_activity"
+    // ---- 时间范围统一（2026-09-10）：按自然日 / 任意区间取内容的入口，可分页 ----
+    case listActivity = "list_activity"
 }
 
 /// grant 管理命令（`brosis-mcp admin grant add|list|remove`）。

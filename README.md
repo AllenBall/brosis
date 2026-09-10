@@ -36,7 +36,7 @@ what you see on screen  →  encrypted local database  →  MCP  →  your AI as
 
 **Search.** Three channels are fused: exact fields (app, URL, path), full-text search (SQLite FTS5, with bigram tokenization for Chinese), and optional vector semantic search. Fusion is weighted RRF.
 
-**Hand it to an AI assistant.** A built-in MCP server exposes 9 read-only tools: `search`, `get_evidence`, `get_context`, `get_timeline`, `get_day_ledger`, `get_week_ledger`, `get_patterns`, `get_item`, `recent_activity`.
+**Hand it to an AI assistant.** A built-in MCP server exposes 10 read-only tools: `search`, `get_evidence`, `get_context`, `get_timeline`, `get_day_ledger`, `get_week_ledger`, `get_patterns`, `get_item`, `recent_activity`, `list_activity`. Every time-bound tool takes the same `period` argument (`today`, `yesterday`, `2026-09-08..2026-09-10`, `2026-W37`, `24h` …), resolved in the server's time zone, and every result echoes the exact window it used plus the server's `serverToday`.
 
 ## Four hard constraints
 

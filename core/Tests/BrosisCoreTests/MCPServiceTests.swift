@@ -93,6 +93,7 @@ final class MCPServiceTests: XCTestCase {
             .getWeekLedger: ["week": .string(dayString(baseTS))],
             .getPatterns: ["start": .int(baseTS), .init("end"): .int(baseTS + 3_600_000)],
             .recentActivity: ["minutes": .int(60)],
+            .listActivity: ["period": .string("today")],
         ]
         for tool in MCPTool.allCases {
             let response = self.tool(tool, args[tool] ?? [:])
@@ -102,7 +103,7 @@ final class MCPServiceTests: XCTestCase {
         }
         let audit = try store.mcpAuditTail(limit: 20)
         XCTAssertEqual(audit.count, MCPTool.allCases.count)
-        XCTAssertEqual(audit.count, 9)
+        XCTAssertEqual(audit.count, 10)
         XCTAssertEqual(Set(audit.map(\.decision)), [.noGrant])
         XCTAssertEqual(Set(audit.map(\.tool)), Set(MCPTool.allCases.map(\.rawValue)))
         XCTAssertEqual(Set(audit.map(\.clientID)), ["claude-code"])
@@ -482,7 +483,7 @@ final class MCPServiceTests: XCTestCase {
         XCTAssertEqual(tool(.getTimeline, ["start": .string("昨天"),
                                            "end": .int(baseTS)]).error?.code, .badRequest)
         XCTAssertEqual(tool(.getDayLedger, ["date": .string("2026-13-99")]).error?.code,
-                       .internalError)   // core 的日期解析报 StoreError
+                       .badRequest)      // 日期现在由 TimeScope 解析，坏日期是坏参数
 
         let audit = try store.mcpAuditTail(limit: 20)
         XCTAssertTrue(audit.contains { $0.decision == .unknownTool })
@@ -651,6 +652,334 @@ final class MCPServiceTests: XCTestCase {
         XCTAssertTrue(migrating.store.appendMCPAudit(
             MCPAuditRow(clientID: "c", op: "tool", tool: "search", params: "-", decision: .ok)))
         XCTAssertEqual(try migrating.store.mcpAuditCount(), 1)
+    }
+
+    // MARK: - 时间范围统一（2026-09-10：「今天」在工具层不存在的修法，见 TimeScope.swift）
+
+    /// period 的每种写法都按**服务端时区**解析。用 Asia/Shanghai 与一个固定的 now 钉住边界，
+    /// 与测试在几点跑、本机什么时区无关：now = 2026-09-10 19:04:40 CST（周四）。
+    func testPeriodGrammarResolvesInServerTimeZone() throws {
+        let tz = TimeZone(identifier: "Asia/Shanghai")!
+        let now: Int64 = 1_789_038_280_000
+        let day: Int64 = 86_400_000
+        let today0: Int64 = 1_788_969_600_000            // 2026-09-10 00:00 CST
+        let monday0 = today0 - 3 * day                    // 2026-09-07 00:00 CST，ISO 2026-W37
+        func scope(_ p: String) throws -> TimeScope { try TimeScope.parsePeriod(p, now: now, timeZone: tz) }
+
+        let today = try scope("today")
+        XCTAssertEqual(today.start, today0)
+        XCTAssertEqual(today.end, today0 + day)
+        XCTAssertEqual(today.label, "2026-09-10")
+        XCTAssertEqual(today.source, .period)
+        XCTAssertEqual(today.period, "today")
+
+        let yesterday = try scope(" Yesterday ")
+        XCTAssertEqual(yesterday.start, today0 - day)
+        XCTAssertEqual(yesterday.end, today0)
+        XCTAssertEqual(yesterday.label, "2026-09-09")
+
+        let date = try scope("2026-09-08")
+        XCTAssertEqual(date.start, today0 - 2 * day)
+        XCTAssertEqual(date.end, today0 - day)
+
+        let range = try scope("2026-09-08..2026-09-10")
+        XCTAssertEqual(range.start, today0 - 2 * day)
+        XCTAssertEqual(range.end, today0 + day, "两端都含：10 号整天也在里面")
+        XCTAssertEqual(range.label, "2026-09-08..2026-09-10")
+
+        let week = try scope("2026-W37")
+        XCTAssertEqual(week.start, monday0)
+        XCTAssertEqual(week.end, monday0 + 7 * day)
+        XCTAssertEqual(week.label, "2026-W37")
+        let thisWeek = try scope("this_week")
+        XCTAssertEqual(thisWeek.start, week.start)
+        XCTAssertEqual(thisWeek.end, week.end)
+        XCTAssertEqual(thisWeek.label, "2026-W37")
+        let lastWeek = try scope("last_week")
+        XCTAssertEqual(lastWeek.start, monday0 - 7 * day)
+        XCTAssertEqual(lastWeek.end, monday0)
+        XCTAssertEqual(lastWeek.label, "2026-W36")
+
+        let hours = try scope("24h")
+        XCTAssertEqual(hours.start, now - day)
+        XCTAssertEqual(hours.end, now, "相对写法的锚点是 now，不是库里最新一条观察")
+        XCTAssertEqual(hours.label, "24h")
+        XCTAssertEqual(try scope("90m").start, now - 90 * 60_000)
+        XCTAssertEqual(try scope("3d").start, now - 3 * day)
+
+        for bad in ["", "下周三", "2026-13-99", "2026-09-10..2026-09-08", "0h", "2026-W99", "24 hours", "h"] {
+            XCTAssertThrowsError(try scope(bad), "应当拒绝：\(bad)")
+        }
+        // 单日 / 整周的判定（日台账、周台账靠它）
+        XCTAssertEqual(today.singleDay(in: tz), "2026-09-10")
+        XCTAssertNil(range.singleDay(in: tz))
+        XCTAssertNil(hours.singleDay(in: tz))
+        XCTAssertEqual(week.singleWeek(in: tz), "2026-W37")
+        XCTAssertNil(today.singleWeek(in: tz))
+    }
+
+    /// 精确边界：裸日期在 end 位置取当天 24:00；不带时区偏移的 ISO 按服务端时区，不当 UTC。
+    func testExplicitBoundsAcceptLocalISOAndBareDateAtEnd() throws {
+        let tz = TimeZone(identifier: "Asia/Shanghai")!
+        let now: Int64 = 1_789_038_280_000
+        let today0: Int64 = 1_788_969_600_000
+        func at(_ v: JSONValue, end: Bool = false) throws -> Int64? {
+            try TimeScope.parseInstant(v, field: "t", isEnd: end, timeZone: tz)
+        }
+        XCTAssertEqual(try at(.string("2026-09-10")), today0)
+        XCTAssertEqual(try at(.string("2026-09-10"), end: true), today0 + 86_400_000)
+        XCTAssertEqual(try at(.string("2026-09-10T00:00:00")), today0, "不带偏移按服务端时区")
+        XCTAssertEqual(try at(.string("2026-09-10T00:00:00+08:00")), today0)
+        XCTAssertEqual(try at(.string("2026-09-09T16:00:00Z")), today0)
+        XCTAssertEqual(try at(.string("2026-09-10 08:30")), today0 + 8 * 3_600_000 + 30 * 60_000)
+        XCTAssertEqual(try at(.int(today0)), today0)
+        XCTAssertEqual(try at(.string("\(today0)")), today0)
+        XCTAssertNil(try at(.null))
+        XCTAssertThrowsError(try at(.string("昨天")))
+
+        // 第 ③ 条规矩：period 与 start / end 不能同时给；只给 start 上不封顶；只给 end 没默认起点就报错
+        XCTAssertThrowsError(try TimeScope.resolve(
+            args: ["period": .string("today"), "start": .string("2026-09-10")],
+            now: now, timeZone: tz, default: nil))
+        let open = try TimeScope.resolve(args: ["start": .string("2026-09-10")],
+                                         now: now, timeZone: tz, default: nil)
+        XCTAssertEqual(open.start, today0)
+        XCTAssertNil(open.end)
+        XCTAssertEqual(open.source, .explicit)
+        XCTAssertThrowsError(try TimeScope.resolve(args: ["end": .string("2026-09-10")],
+                                                   now: now, timeZone: tz, default: nil))
+        XCTAssertThrowsError(try TimeScope.resolve(
+            args: ["start": .string("2026-09-10"), "end": .string("2026-09-09")],
+            now: now, timeZone: tz, default: nil), "start < end")
+        let fallback = TimeScope(start: 1, end: nil, label: "x", source: .default)
+        XCTAssertEqual(try TimeScope.resolve(args: [:], now: now, timeZone: tz, default: fallback), fallback)
+        XCTAssertThrowsError(try TimeScope.resolve(args: [:], now: now, timeZone: tz, default: nil))
+        // grant 时间窗是硬下界
+        let clipped = open.clipped(toGrantStart: today0 + 1)
+        XCTAssertEqual(clipped.start, today0 + 1)
+        XCTAssertTrue(clipped.clippedByGrant)
+        XCTAssertFalse(open.clipped(toGrantStart: today0 - 1).clippedByGrant)
+    }
+
+    /// 同一个 period 在每个工具上解析出**同一对边界**，并且每个结果都回显它真正用的窗口与服务端的钟。
+    func testEveryToolEchoesTheWindowAndServerClock() throws {
+        try grant(.evidence)
+        let day = dayString(baseTS)
+        let cal = DayCalendar(TimeZone(identifier: "UTC")!)
+        let bounds = try cal.dayBounds(day)
+        let calls: [(MCPTool, [String: JSONValue])] = [
+            (.search, ["q": .string("知识图谱"), "period": .string(day)]),
+            (.getContext, ["period": .string(day), "max_tokens": .int(300)]),
+            (.getTimeline, ["period": .string(day), "granularity": .string("hour")]),
+            (.getDayLedger, ["period": .string(day)]),
+            (.getItem, ["app": .string(Self.bundles[0]), "period": .string(day)]),
+            (.getPatterns, ["period": .string(day)]),
+            (.recentActivity, ["period": .string(day), "max_items": .int(3)]),
+            (.listActivity, ["period": .string(day), "max_items": .int(3)]),
+        ]
+        for (tool, args) in calls {
+            let object = try payload(self.tool(tool, args))
+            let window = try XCTUnwrap(object["window"]?.objectValue, tool.rawValue)
+            XCTAssertEqual(window["start"]?.intValue, bounds.start, tool.rawValue)
+            XCTAssertEqual(window["end"]?.intValue, bounds.end, tool.rawValue)
+            XCTAssertEqual(window["label"]?.stringValue, day, tool.rawValue)
+            XCTAssertEqual(window["period"]?.stringValue, day, tool.rawValue)
+            XCTAssertEqual(window["resolvedFrom"]?.stringValue, "period", tool.rawValue)
+            // `TimeZone(identifier: "UTC").identifier` 在这个平台上回 "GMT"，按平台给的名字比
+            XCTAssertEqual(window["timeZone"]?.stringValue, cal.timeZone.identifier, tool.rawValue)
+            XCTAssertEqual(window["clippedByGrant"]?.boolValue, false, tool.rawValue)
+            XCTAssertEqual(window["startLocal"]?.stringValue, cal.stamp(bounds.start), tool.rawValue)
+            let serverNow = try XCTUnwrap(object["serverNow"]?.intValue, tool.rawValue)
+            XCTAssertEqual(object["serverToday"]?.stringValue, cal.dayString(serverNow), tool.rawValue)
+            XCTAssertEqual(object["serverTimeZone"]?.stringValue, cal.timeZone.identifier, tool.rawValue)
+            XCTAssertEqual(object["serverNowLocal"]?.stringValue, cal.stamp(serverNow), tool.rawValue)
+        }
+        // 这一天的内容确实是这一天的：list_activity 每条 ts 都落在窗口里，与日台账数的观察条数对得上
+        let list = try payload(tool(.listActivity, ["period": .string(day), "max_items": .int(200)]))
+        let timestamps = (list["items"]?.arrayValue ?? []).compactMap { $0["ts"]?.intValue }
+        XCTAssertFalse(timestamps.isEmpty)
+        XCTAssertTrue(timestamps.allSatisfy { $0 >= bounds.start && $0 < bounds.end })
+        let ledger = try payload(tool(.getDayLedger, ["period": .string(day)]))
+        XCTAssertEqual(ledger["observations"]?.intValue, list["observations"]?.intValue)
+        // get_context 按整天算时 hours = 24
+        XCTAssertEqual(try payload(tool(.getContext, ["period": .string(day), "max_tokens": .int(100)]))["hours"]?.intValue, 24)
+
+        // get_evidence 没有窗口，但同样报时；周台账给一天 → 回的是整周，标签是 ISO 周
+        let evidence = try payload(tool(.getEvidence, ["ids": .array([.int(1)])]))
+        XCTAssertNil(evidence["window"])
+        XCTAssertNotNil(evidence["serverNow"]?.intValue)
+        let week = try payload(tool(.getWeekLedger, ["period": .string(day)]))
+        let weekWindow = try XCTUnwrap(week["window"]?.objectValue)
+        XCTAssertEqual(weekWindow["start"]?.intValue, cal.bucketStart(baseTS, .week))
+        XCTAssertEqual(weekWindow["end"]?.intValue, cal.bucketEnd(cal.bucketStart(baseTS, .week), .week))
+        XCTAssertEqual(weekWindow["label"]?.stringValue, cal.bucketLabel(cal.bucketStart(baseTS, .week), .week))
+    }
+
+    /// 不给范围时：日历类工具 = 今天（周台账 = 本周），get_context / recent_activity = 从现在往回滚，
+    /// search / get_item = 整个 grant 时间窗且上不封顶。三种情况 `resolvedFrom` 都是 `default`。
+    func testOmittedRangeDefaultsAreExplicitInTheResult() throws {
+        try grant(.evidence, days: 30)
+        let cal = DayCalendar(TimeZone(identifier: "UTC")!)
+        for tool in [MCPTool.getTimeline, .getDayLedger, .getPatterns, .listActivity] {
+            let object = try payload(self.tool(tool, [:]))
+            let window = try XCTUnwrap(object["window"]?.objectValue, tool.rawValue)
+            let serverNow = try XCTUnwrap(object["serverNow"]?.intValue)
+            let today = try cal.dayBounds(cal.dayString(serverNow))
+            XCTAssertEqual(window["resolvedFrom"]?.stringValue, "default", tool.rawValue)
+            XCTAssertEqual(window["period"]?.stringValue, "today", tool.rawValue)
+            XCTAssertEqual(window["start"]?.intValue, today.start, tool.rawValue)
+            XCTAssertEqual(window["end"]?.intValue, today.end, tool.rawValue)
+        }
+        let context = try payload(tool(.getContext, ["max_tokens": .int(300)]))
+        let cw = try XCTUnwrap(context["window"]?.objectValue)
+        XCTAssertEqual(cw["period"]?.stringValue, "24h")
+        XCTAssertEqual(cw["resolvedFrom"]?.stringValue, "default")
+        XCTAssertEqual(cw["end"]?.intValue, context["serverNow"]?.intValue, "锚点是现在")
+        XCTAssertEqual(try XCTUnwrap(cw["end"]?.intValue) - (try XCTUnwrap(cw["start"]?.intValue)), 86_400_000)
+        XCTAssertEqual(context["hours"]?.intValue, 24)
+        let recent = try payload(tool(.recentActivity, [:]))
+        let rw = try XCTUnwrap(recent["window"]?.objectValue)
+        XCTAssertEqual(rw["period"]?.stringValue, "30m")
+        XCTAssertEqual(recent["minutes"]?.intValue, 30)
+        XCTAssertEqual(rw["end"]?.intValue, recent["serverNow"]?.intValue)
+
+        for (tool, args) in [(MCPTool.search, ["q": JSONValue.string("知识图谱")]),
+                             (.getItem, ["app": .string(Self.bundles[0])])] {
+            let object = try payload(self.tool(tool, args))
+            let window = try XCTUnwrap(object["window"]?.objectValue, tool.rawValue)
+            let serverNow = try XCTUnwrap(object["serverNow"]?.intValue)
+            XCTAssertEqual(window["resolvedFrom"]?.stringValue, "default", tool.rawValue)
+            XCTAssertEqual(window["end"], .null, "\(tool.rawValue)：默认窗口上不封顶")
+            XCTAssertEqual(window["start"]?.intValue, serverNow - 30 * 86_400_000, tool.rawValue)
+            XCTAssertEqual(object["appliedStart"]?.intValue, serverNow - 30 * 86_400_000, tool.rawValue)
+            XCTAssertNil(object["appliedEnd"], tool.rawValue)
+        }
+        let week = try payload(tool(.getWeekLedger, [:]))
+        let ww = try XCTUnwrap(week["window"]?.objectValue)
+        XCTAssertEqual(ww["period"]?.stringValue, "this_week")
+        XCTAssertEqual(ww["resolvedFrom"]?.stringValue, "default")
+        XCTAssertEqual(ww["start"]?.intValue, cal.bucketStart(try XCTUnwrap(week["serverNow"]?.intValue), .week))
+    }
+
+    /// 冲突就报错、不猜；老参数（hours / minutes / date / week）还能用且等价于 period。
+    func testPeriodConflictsAndLegacyParameters() throws {
+        try grant(.evidence)
+        let day = dayString(baseTS)
+        XCTAssertEqual(tool(.search, ["q": .string("x"), "period": .string("today"),
+                                      "start": .int(baseTS)]).error?.code, .badRequest)
+        XCTAssertEqual(tool(.getContext, ["hours": .int(2), "period": .string("today")]).error?.code, .badRequest)
+        XCTAssertEqual(tool(.recentActivity, ["minutes": .int(5), "start": .int(baseTS)]).error?.code, .badRequest)
+        XCTAssertEqual(tool(.getDayLedger, ["date": .string(day), "period": .string("today")]).error?.code, .badRequest)
+        XCTAssertEqual(tool(.getWeekLedger, ["week": .string(day), "period": .string("this_week")]).error?.code, .badRequest)
+        XCTAssertEqual(tool(.getDayLedger, ["period": .string("3d")]).error?.code, .badRequest, "日台账只认单日")
+        XCTAssertEqual(tool(.getDayLedger, ["period": .string("2026-09-01..2026-09-03")]).error?.code, .badRequest)
+        XCTAssertEqual(tool(.getWeekLedger, ["period": .string("24h")]).error?.code, .badRequest, "周台账只认整周或周内某天")
+        XCTAssertEqual(tool(.getTimeline, ["start": .int(baseTS)]).error?.code, .badRequest, "时间线要有上界")
+        XCTAssertEqual(tool(.listActivity, ["period": .string("nonsense")]).error?.code, .badRequest)
+        XCTAssertEqual(tool(.listActivity, ["before_id": .int(0)]).error?.code, .badRequest)
+        XCTAssertEqual(tool(.getDayLedger, ["date": .string("2026-13-99")]).error?.code, .badRequest)
+
+        let legacy = try payload(tool(.getContext, ["hours": .int(2), "max_tokens": .int(300)]))
+        let lw = try XCTUnwrap(legacy["window"]?.objectValue)
+        XCTAssertEqual(lw["period"]?.stringValue, "2h")
+        XCTAssertEqual(lw["resolvedFrom"]?.stringValue, "period")
+        XCTAssertEqual(try XCTUnwrap(lw["end"]?.intValue) - (try XCTUnwrap(lw["start"]?.intValue)), 7_200_000)
+        XCTAssertEqual(legacy["hours"]?.intValue, 2)
+        XCTAssertFalse(try XCTUnwrap(legacy["snippets"]?.arrayValue).isEmpty, "一小时前的数据在 2 h 窗口里")
+
+        let legacyDate = try payload(tool(.getDayLedger, ["date": .string(day)]))
+        XCTAssertEqual(legacyDate["date"]?.stringValue, day)
+        XCTAssertEqual(legacyDate["window"]?["label"]?.stringValue, day)
+        let legacyMinutes = try payload(tool(.recentActivity, ["minutes": .int(90), "max_items": .int(2)]))
+        XCTAssertEqual(legacyMinutes["minutes"]?.intValue, 90)
+        XCTAssertEqual(legacyMinutes["window"]?["period"]?.stringValue, "90m")
+        XCTAssertEqual(legacyMinutes["items"]?.arrayValue?.count, 2)
+        // 精确边界：裸日期在 end 位置取当天 24:00，于是 start = end = 同一天就是"这一整天"
+        let bare = try payload(tool(.getTimeline, ["start": .string(day), "end": .string(day)]))
+        let bw = try XCTUnwrap(bare["window"]?.objectValue)
+        XCTAssertEqual(bw["resolvedFrom"]?.stringValue, "explicit")
+        XCTAssertEqual(try XCTUnwrap(bw["end"]?.intValue) - (try XCTUnwrap(bw["start"]?.intValue)), 86_400_000)
+        XCTAssertEqual(bare["buckets"]?.arrayValue?.count, 1)
+    }
+
+    /// list_activity 按 before_id 翻页：页与页不重叠、合起来正好是窗口里的全部观察、跨页仍是时间倒序，
+    /// 应用聚合与 observations 不随页变；游标指到窗口外时退化成 id < before_id。
+    func testListActivityPagesThroughTheWindowWithoutOverlap() throws {
+        try grant(.evidence)
+        // 30 条观察都在 [baseTS, baseTS + 290 s]；窗口用精确边界钉住，不依赖测试在几点跑。
+        let args: [String: JSONValue] = ["start": .int(baseTS), "end": .int(baseTS + 300_000),
+                                         "max_items": .int(12)]
+        var seen: [Int64] = []
+        var timestamps: [Int64] = []
+        var cursor: Int64? = nil
+        var pages = 0
+        repeat {
+            var a = args
+            if let cursor { a["before_id"] = .int(cursor) }
+            let page = try payload(tool(.listActivity, a))
+            let items = try XCTUnwrap(page["items"]?.arrayValue)
+            XCTAssertEqual(page["observations"]?.intValue, 30)
+            XCTAssertEqual(page["window"]?["resolvedFrom"]?.stringValue, "explicit")
+            XCTAssertEqual(page["window"]?["start"]?.intValue, baseTS)
+            XCTAssertEqual(page["apps"]?.arrayValue?.count, 3, "应用聚合是整个窗口的，不随页变")
+            XCTAssertEqual(page["beforeID"]?.intValue, cursor)
+            let ids = items.compactMap { $0["evidenceID"]?.intValue }
+            let ts = items.compactMap { $0["ts"]?.intValue }
+            XCTAssertEqual(ts, ts.sorted(by: >), "最近的在前")
+            for item in items {
+                XCTAssertLessThanOrEqual(item["summaryTokens"]?.intValue ?? 0,
+                                         page["summaryTokenBudget"]?.intValue ?? 0)
+            }
+            seen += ids
+            timestamps += ts
+            cursor = page["nextBeforeID"]?.intValue
+            if cursor != nil {
+                XCTAssertEqual(items.count, 12)
+                XCTAssertEqual(page["truncated"]?.boolValue, true)
+                XCTAssertEqual(cursor, ids.last, "游标就是本页最后一条")
+            } else {
+                XCTAssertEqual(page["nextBeforeID"], .null, "键永远在")
+                XCTAssertEqual(page["truncated"]?.boolValue, false)
+            }
+            pages += 1
+        } while cursor != nil && pages < 10
+        XCTAssertEqual(pages, 3)
+        XCTAssertEqual(seen.count, 30)
+        XCTAssertEqual(Set(seen).count, 30, "页与页不重叠")
+        XCTAssertTrue(timestamps.allSatisfy { $0 >= baseTS && $0 < baseTS + 300_000 })
+        XCTAssertEqual(timestamps, timestamps.sorted(by: >), "跨页也保持时间倒序")
+
+        let fallback = try payload(tool(.listActivity,
+                                        args.merging(["before_id": .int(Int64.max / 2)]) { _, n in n }))
+        XCTAssertEqual(fallback["items"]?.arrayValue?.count, 12)
+        XCTAssertNotNil(fallback["nextBeforeID"]?.intValue)
+        // 白名单下推：只剩一个应用时 observations 与 apps 都按它算
+        try grant(.evidence, apps: [Self.bundles[0]])
+        let scoped = try payload(tool(.listActivity, args))
+        XCTAssertEqual(scoped["observations"]?.intValue, 10)
+        XCTAssertEqual(scoped["apps"]?.arrayValue?.count, 1)
+        XCTAssertEqual(scoped["appFilter"]?.arrayValue?.compactMap(\.stringValue), [Self.bundles[0]])
+        XCTAssertTrue((scoped["items"]?.arrayValue ?? []).allSatisfy { $0["appBundleID"]?.stringValue == Self.bundles[0] })
+    }
+
+    /// get_context 的相对窗口锚在**现在**：库里最新一条观察在一小时前时，「最近 30 分钟」就是空的、
+    /// 窗口右端就是 serverNow。原来锚在最新一条观察上，会把一小时前那段当成"最近"交出去。
+    /// 老入口 `Store.getContext(hours:)` 保持老锚点（离线合成库上它是唯一有意义的锚）。
+    func testContextAnchorsAtNowNotAtTheLatestObservation() throws {
+        try grant(.evidence)
+        let context = try payload(tool(.getContext, ["period": .string("30m"), "max_tokens": .int(500)]))
+        XCTAssertEqual(context["snippets"]?.arrayValue?.count, 0)
+        XCTAssertEqual(context["apps"]?.arrayValue?.count, 0)
+        XCTAssertEqual(context["window"]?["end"]?.intValue, context["serverNow"]?.intValue)
+        XCTAssertEqual(context["end"]?.intValue, context["serverNow"]?.intValue)
+
+        let legacy = try store.getContext(hours: 1, maxTokens: 500)
+        XCTAssertFalse(legacy.snippets.isEmpty)
+        XCTAssertEqual(legacy.end, baseTS + 29 * 10_000 + 1, "老口径：右端 = 最新一条观察（含）")
+        XCTAssertEqual(legacy.hours, 1)
+        let explicit = try store.getContext(start: baseTS, end: baseTS + 300_000, maxTokens: 500)
+        XCTAssertEqual(explicit.snippets.count, legacy.snippets.count)
+        XCTAssertEqual(explicit.hours, 0, "5 分钟四舍五入到 0 h，只是标签，边界看 start / end")
     }
 
     // MARK: - 辅助

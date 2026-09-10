@@ -669,8 +669,11 @@ final class WeekLedgerPatternsTests: XCTestCase {
             "start": .int(0), "end": .int(Self.dayMS),
         ]).error?.code, .deniedByGrant)
 
-        // 坏参数
-        XCTAssertEqual(call(service, .getWeekLedger, [:]).error?.code, .badRequest)
+        // 坏参数（不给 week 不再是坏参数：时间范围统一之后 = 本周，结果里标 resolvedFrom = default）
+        let thisWeek = call(service, .getWeekLedger, [:])
+        XCTAssertTrue(thisWeek.ok, thisWeek.error?.message ?? "")
+        XCTAssertEqual(thisWeek.result?["window"]?["resolvedFrom"]?.stringValue, "default")
+        XCTAssertEqual(thisWeek.result?["window"]?["period"]?.stringValue, "this_week")
         XCTAssertEqual(call(service, .getWeekLedger, ["week": .string("2026-W99")]).error?.code,
                        .badRequest)
         XCTAssertEqual(call(service, .getPatterns, ["start": .int(Self.mondayTS)]).error?.code,

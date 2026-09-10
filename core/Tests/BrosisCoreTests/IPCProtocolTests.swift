@@ -154,7 +154,8 @@ final class IPCProtocolTests: XCTestCase {
 
     func testToolCatalogCoversEveryToolAndIsReadOnly() throws {
         // v1 的六个（3.6）+ M2 的三个（周台账 / get_patterns / recent_activity，T14）
-        XCTAssertEqual(MCPToolCatalog.all.count, 9)
+        // + 时间范围统一的 list_activity（2026-09-10）
+        XCTAssertEqual(MCPToolCatalog.all.count, 10)
         XCTAssertEqual(MCPToolCatalog.all.count, MCPTool.allCases.count)
         // 清单顺序 = 枚举顺序：客户端看到的工具顺序不该随手改（新工具一律追加在后面）
         XCTAssertEqual(MCPToolCatalog.all.map(\.name), MCPTool.allCases.map(\.rawValue))
@@ -173,6 +174,17 @@ final class IPCProtocolTests: XCTestCase {
         XCTAssertEqual(MCPToolCatalog.descriptor(for: "get_week_ledger")?.name, "get_week_ledger")
         XCTAssertEqual(MCPToolCatalog.descriptor(for: "get_patterns")?.name, "get_patterns")
         XCTAssertEqual(MCPToolCatalog.descriptor(for: "recent_activity")?.name, "recent_activity")
+        XCTAssertEqual(MCPToolCatalog.descriptor(for: "list_activity")?.name, "list_activity")
+        // 时间范围统一：带时间的工具都收 period / start / end，且描述里说明了不给范围时取什么
+        for name in ["search", "get_context", "get_timeline", "get_item", "get_patterns",
+                     "recent_activity", "list_activity"] {
+            let props = MCPToolCatalog.descriptor(for: name)?.inputSchema["properties"]?.objectValue ?? [:]
+            for key in ["period", "start", "end"] { XCTAssertNotNil(props[key], "\(name) 缺 \(key)") }
+            XCTAssertTrue(props["period"]?["description"]?.stringValue?.contains("不给范围时") == true, name)
+        }
+        XCTAssertNotNil(MCPToolCatalog.descriptor(for: "get_day_ledger")?.inputSchema["properties"]?["period"])
+        XCTAssertNotNil(MCPToolCatalog.descriptor(for: "get_week_ledger")?.inputSchema["properties"]?["period"])
+        XCTAssertFalse(MCPToolCatalog.timeHint.contains("Z）"), "示例不再写 UTC")
         XCTAssertNil(MCPToolCatalog.descriptor(for: "delete_everything"))
     }
 

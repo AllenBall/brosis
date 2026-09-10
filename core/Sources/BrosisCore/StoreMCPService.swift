@@ -170,47 +170,108 @@ public final class StoreMCPService: @unchecked Sendable {
         var note: String?
     }
 
+    /// 一次调用的钟：`now` 只取一次，grant 窗口起点、相对 period（`24h`）、`serverNow` 都从它算，
+    /// 三者才对得上（`hours` 被窗口封顶时 `hours == timeWindowDays * 24` 就靠这个）。
+    struct Clock {
+        let now: Int64
+        let windowStart: Int64
+        let timeZone: TimeZone
+        var calendar: DayCalendar { DayCalendar(timeZone) }
+        var today: String { calendar.dayString(now) }
+    }
+
     private func run(tool: MCPTool, args: [String: JSONValue], grant: Grant) throws -> ToolOutcome {
         let now = Int64(Date().timeIntervalSince1970 * 1000)
-        let windowStart = now - Int64(grant.timeWindowDays) * 86_400_000
-        let calendar = DayCalendar(store.retrieval.timeZone)
+        let clock = Clock(now: now, windowStart: now - Int64(grant.timeWindowDays) * 86_400_000,
+                          timeZone: store.retrieval.timeZone)
         let scoped = !grant.apps.contains("*")
 
         switch tool {
-        case .search:
-            return try runSearch(args, grant: grant, windowStart: windowStart, scoped: scoped)
-        case .getEvidence:
-            return try runEvidence(args, grant: grant)
-        case .getContext:
-            return try runContext(args, grant: grant, windowStart: windowStart,
-                                  scoped: scoped, calendar: calendar)
-        case .getTimeline:
-            return try runTimeline(args, grant: grant, windowStart: windowStart, scoped: scoped)
-        case .getDayLedger:
-            return try runDayLedger(args, grant: grant, windowStart: windowStart, scoped: scoped)
-        case .getItem:
-            return try runItem(args, grant: grant, windowStart: windowStart, scoped: scoped)
-        case .getWeekLedger:
-            return try runWeekLedger(args, grant: grant, windowStart: windowStart, scoped: scoped)
-        case .getPatterns:
-            return try runPatterns(args, grant: grant, windowStart: windowStart, scoped: scoped)
-        case .recentActivity:
-            return try runRecentActivity(args, grant: grant, scoped: scoped)
+        case .search:         return try runSearch(args, grant: grant, clock: clock, scoped: scoped)
+        case .getEvidence:    return try runEvidence(args, grant: grant, clock: clock)
+        case .getContext:     return try runContext(args, grant: grant, clock: clock, scoped: scoped)
+        case .getTimeline:    return try runTimeline(args, grant: grant, clock: clock, scoped: scoped)
+        case .getDayLedger:   return try runDayLedger(args, grant: grant, clock: clock, scoped: scoped)
+        case .getItem:        return try runItem(args, grant: grant, clock: clock, scoped: scoped)
+        case .getWeekLedger:  return try runWeekLedger(args, grant: grant, clock: clock, scoped: scoped)
+        case .getPatterns:    return try runPatterns(args, grant: grant, clock: clock, scoped: scoped)
+        case .recentActivity: return try runRecentActivity(args, grant: grant, clock: clock, scoped: scoped)
+        case .listActivity:   return try runListActivity(args, grant: grant, clock: clock, scoped: scoped)
         }
+    }
+
+    // MARK: - 时间范围（所有工具同一个入口，见 TimeScope.swift 顶上的三条规矩）
+
+    /// 把 `period` / `start` / `end`（以及老参数换算成的 period）解析成窗口，再按 grant 时间窗抬起点。
+    ///
+    /// - `legacy`：`get_context.hours` / `recent_activity.minutes` 这两个老参数，语义就是
+    ///   `"<N>h"` / `"<N>m"`；与新参数同时给就报错，不猜。
+    /// - `fallback`：这个工具"什么都没给"时的窗口，nil = 必须给范围。
+    private func scope(_ args: [String: JSONValue], clock: Clock,
+                       legacy: (key: String, unit: Character)? = nil,
+                       default fallback: TimeScope?) throws -> TimeScope {
+        var args = args
+        if let legacy, let n = args[legacy.key]?.intValue {
+            let others = ["period", "start", "end"].filter { args[$0].map { !$0.isNull } ?? false }
+            guard others.isEmpty else {
+                throw MCPBadArgument(message: "\(legacy.key) 与 \(others.joined(separator: " / ")) 只能给一种"
+                                            + "（\(legacy.key) 就是 period=\"<N>\(legacy.unit)\" 的老写法）")
+            }
+            args["period"] = .string("\(max(1, n))\(legacy.unit)")
+        }
+        let resolved = try TimeScope.resolve(args: args, now: clock.now, timeZone: clock.timeZone,
+                                             default: fallback)
+        return resolved.clipped(toGrantStart: clock.windowStart)
+    }
+
+    /// 工具默认窗口是一个 period（`today` / `24h` / …）时用它：来源标成 `default`。
+    private func defaultScope(_ period: String, clock: Clock) throws -> TimeScope {
+        var scope = try TimeScope.parsePeriod(period, now: clock.now, timeZone: clock.timeZone)
+        scope.source = .default
+        return scope
+    }
+
+    /// search / get_item 的默认窗口：整个 grant 时间窗、上不封顶——它们是找东西的工具，
+    /// 「上周看到的那个页面」不该被静默截成今天。结果里 `window.resolvedFrom = "default"` 会把
+    /// "你没限定范围"这件事明说；要今天就传 `period = "today"`。
+    private func grantWindowScope(_ grant: Grant, clock: Clock) -> TimeScope {
+        TimeScope(start: clock.windowStart, end: nil,
+                  label: "grant 时间窗（最近 \(grant.timeWindowDays) 天，上不封顶）", source: .default)
+    }
+
+    /// 每个结果都带：真正用到的窗口 + 服务端的现在 / 今天 / 时区。
+    /// Agent 不必知道今天几号、什么时区，也一眼能看出自己有没有限定范围。
+    private func attachClock(_ object: inout [String: JSONValue], scope: TimeScope?, clock: Clock) {
+        if let scope { object["window"] = scope.json(timeZone: clock.timeZone) }
+        object["serverNow"] = .int(clock.now)
+        object["serverNowLocal"] = .string(clock.calendar.stamp(clock.now))
+        object["serverToday"] = .string(clock.today)
+        object["serverTimeZone"] = .string(clock.timeZone.identifier)
+    }
+
+    /// 有上界且没被 grant 窗口整个吃掉的区间；否则按老规矩报错。
+    private func boundedWindow(_ scope: TimeScope, tool: String, grant: Grant) throws -> (start: Int64, end: Int64) {
+        guard let end = scope.end else {
+            throw MCPBadArgument(message: "\(tool) 需要有上界的区间：给 end，或改用 period（\(TimeScope.periodGrammar)）")
+        }
+        guard end > scope.start else {
+            throw MCPDeniedByGrant(message: "区间整体落在 grant 的时间窗（\(grant.timeWindowDays) 天）之外")
+        }
+        return (scope.start, end)
     }
 
     // MARK: - search
 
-    private func runSearch(_ args: [String: JSONValue], grant: Grant,
-                           windowStart: Int64, scoped: Bool) throws -> ToolOutcome {
+    private func runSearch(_ args: [String: JSONValue], grant: Grant, clock: Clock,
+                           scoped: Bool) throws -> ToolOutcome {
         guard let q = args["q"]?.stringValue, !q.isEmpty else {
             throw MCPBadArgument(message: "search 需要非空的 q")
         }
         let limit = min(max(1, Int(args["limit"]?.intValue ?? 20)), options.maxSearchLimit)
-        let asked = try Self.time(args["start"], field: "start", calendar: DayCalendar(store.retrieval.timeZone))
-        let end = try Self.time(args["end"], field: "end", calendar: DayCalendar(store.retrieval.timeZone))
-        // 3.6 的时间窗：grant 的窗口是硬下界，客户端给的 start 只能更晚。
-        let start = max(asked ?? windowStart, windowStart)
+        // 3.6 的时间窗：grant 的窗口是硬下界，客户端给的 start 只能更晚（`scope` 里已经抬过）。
+        let scope = try scope(args, clock: clock, default: grantWindowScope(grant, clock: clock))
+        let start = scope.start
+        let end = scope.end
 
         var app = args["app"]?.stringValue?.trimmingCharacters(in: .whitespaces)
         if app?.isEmpty == true { app = nil }
@@ -236,13 +297,15 @@ public final class StoreMCPService: @unchecked Sendable {
         object["hitCount"] = .int(Int64(hits.count))
         object["appliedStart"] = .int(start)
         if let end { object["appliedEnd"] = .int(end) }
-        object["grant"] = grantBlock(grant, windowStart: windowStart,
+        attachClock(&object, scope: scope, clock: clock)
+        object["grant"] = grantBlock(grant, windowStart: clock.windowStart,
                                      filtered: scoped, droppedByGrant: dropped)
         // 3.4 的分层目标要按它报：查询嵌入热延迟 ≤ 150 ms（M2 d / T15）。
         object["queryEmbed"] = try JSONValue(encoding: timing.timing)
         var note = "qvec=\(timing.timing.source)"
         if let ms = timing.timing.elapsedMS { note += String(format: " embed_ms=%.1f", ms) }
         if scoped { note += " grant_filtered=\(dropped)" }
+        note += " window=\(scope.source.rawValue)"
         return ToolOutcome(value: .object(object), count: hits.count, note: note)
     }
 
@@ -283,7 +346,7 @@ public final class StoreMCPService: @unchecked Sendable {
 
     // MARK: - get_evidence
 
-    private func runEvidence(_ args: [String: JSONValue], grant: Grant) throws -> ToolOutcome {
+    private func runEvidence(_ args: [String: JSONValue], grant: Grant, clock: Clock) throws -> ToolOutcome {
         guard let raw = args["ids"]?.arrayValue, !raw.isEmpty else {
             throw MCPBadArgument(message: "get_evidence 需要非空的 ids 数组")
         }
@@ -299,9 +362,9 @@ public final class StoreMCPService: @unchecked Sendable {
         // **包括 items[].before / after 这两串出现上下文**：它们带 bundle id 与窗口标题，
         // 不按白名单过滤就等于把白名单外的应用漏出去（M1 第一轮验收抓到的口子）。
         let result = try store.getEvidence(ids: ids, grant: grant, neighbors: neighbors)
-        let now = Int64(Date().timeIntervalSince1970 * 1000)
         var object = try JSONValue(encoding: result).objectValue ?? [:]
-        object["grant"] = grantBlock(grant, windowStart: now - Int64(grant.timeWindowDays) * 86_400_000,
+        attachClock(&object, scope: nil, clock: clock)
+        object["grant"] = grantBlock(grant, windowStart: clock.windowStart,
                                      filtered: !grant.apps.contains("*"),
                                      droppedByGrant: result.deniedByGrant.count
                                                    + result.droppedNeighbors)
@@ -314,16 +377,18 @@ public final class StoreMCPService: @unchecked Sendable {
 
     // MARK: - get_context
 
-    private func runContext(_ args: [String: JSONValue], grant: Grant, windowStart: Int64,
-                            scoped: Bool, calendar: DayCalendar) throws -> ToolOutcome {
-        var hours = max(1, Int(args["hours"]?.intValue ?? 24))
-        // 时间窗是硬上界：grant 给 30 天，就问不出 90 天的上下文。
-        let cappedHours = grant.timeWindowDays * 24
-        let clamped = hours > cappedHours
-        hours = min(hours, cappedHours)
+    private func runContext(_ args: [String: JSONValue], grant: Grant, clock: Clock,
+                            scoped: Bool) throws -> ToolOutcome {
+        // 老参数 `hours` 就是 period = "<N>h"。默认最近 24 小时，**锚点是现在**——
+        // 原来锚在库里最新一条观察上，录制一停窗口就往回漂，结果里却仍写着「24 h」。
+        // 要「今天」就传 period = "today"。时间窗是硬下界，被抬高时 hoursClampedByGrant = true。
+        let scope = try scope(args, clock: clock, legacy: ("hours", "h"),
+                              default: try defaultScope("24h", clock: clock))
+        let window = try boundedWindow(scope, tool: "get_context", grant: grant)
         let maxTokens = min(max(50, Int(args["max_tokens"]?.intValue ?? 2000)), options.maxContextTokens)
 
-        let bundle = try store.getContext(hours: hours, maxTokens: maxTokens)
+        let bundle = try store.getContext(start: window.start, end: window.end, maxTokens: maxTokens)
+        let hours = bundle.hours
         let redact = grant.fields == .summary
 
         var apps = bundle.apps
@@ -355,19 +420,20 @@ public final class StoreMCPService: @unchecked Sendable {
             // `text` 是 core 拼好的整段上下文，裁剪之后必须重拼，不能把没过滤的那份发出去。
             let text = Self.contextText(hours: hours, start: bundle.start, end: bundle.end,
                                         apps: apps, sessions: sessions, snippets: snippets,
-                                        calendar: calendar)
+                                        calendar: clock.calendar)
             object["apps"] = try JSONValue(encoding: apps)
             object["sessions"] = try JSONValue(encoding: sessions)
             object["snippets"] = try JSONValue(encoding: snippets)
             object["text"] = .string(text)
             object["usedTokens"] = .int(Int64(TokenBudget.tokens(of: text)))
         }
-        object["hoursClampedByGrant"] = .bool(clamped)
+        object["hoursClampedByGrant"] = .bool(scope.clippedByGrant)
         object["redactedByGrant"] = .bool(redact)
-        object["grant"] = grantBlock(grant, windowStart: windowStart,
+        attachClock(&object, scope: scope, clock: clock)
+        object["grant"] = grantBlock(grant, windowStart: clock.windowStart,
                                      filtered: scoped, droppedByGrant: dropped)
         return ToolOutcome(value: .object(object), count: snippets.count,
-                           note: "hours=\(hours) tokens=\(maxTokens)"
+                           note: "hours=\(hours) tokens=\(maxTokens) window=\(scope.source.rawValue)"
                                + (scoped ? " grant_filtered=\(dropped)" : "")
                                + (redact ? " redacted" : ""))
     }
@@ -393,17 +459,11 @@ public final class StoreMCPService: @unchecked Sendable {
 
     // MARK: - get_timeline
 
-    private func runTimeline(_ args: [String: JSONValue], grant: Grant,
-                             windowStart: Int64, scoped: Bool) throws -> ToolOutcome {
-        let calendar = DayCalendar(store.retrieval.timeZone)
-        guard let askedStart = try Self.time(args["start"], field: "start", calendar: calendar),
-              let end = try Self.time(args["end"], field: "end", calendar: calendar) else {
-            throw MCPBadArgument(message: "get_timeline 需要 start 与 end")
-        }
-        let start = max(askedStart, windowStart)
-        guard end > start else {
-            throw MCPDeniedByGrant(message: "区间整体落在 grant 的时间窗（\(grant.timeWindowDays) 天）之外")
-        }
+    private func runTimeline(_ args: [String: JSONValue], grant: Grant, clock: Clock,
+                             scoped: Bool) throws -> ToolOutcome {
+        // 不给范围 = 今天。给了 start 就必须给 end（时间线要有上界才能分桶）。
+        let scope = try scope(args, clock: clock, default: try defaultScope("today", clock: clock))
+        let (start, end) = try boundedWindow(scope, tool: "get_timeline", grant: grant)
         let granularity = TimelineGranularity(rawValue: args["granularity"]?.stringValue ?? "day")
         guard let granularity else {
             throw MCPBadArgument(message: "granularity 只能是 hour / day / week")
@@ -440,22 +500,35 @@ public final class StoreMCPService: @unchecked Sendable {
             object["droppedFields"] = .array([.string("buckets[].onlineUnionS")])
         }
         object["appliedStart"] = .int(start)
-        object["grant"] = grantBlock(grant, windowStart: windowStart,
+        object["appliedEnd"] = .int(end)
+        attachClock(&object, scope: scope, clock: clock)
+        object["grant"] = grantBlock(grant, windowStart: clock.windowStart,
                                      filtered: scoped, droppedByGrant: dropped)
         return ToolOutcome(value: .object(object), count: timeline.buckets.count,
-                           note: "granularity=\(granularity.rawValue)"
+                           note: "granularity=\(granularity.rawValue) window=\(scope.source.rawValue)"
                                + (scoped ? " grant_filtered=\(dropped)" : ""))
     }
 
     // MARK: - get_day_ledger
 
-    private func runDayLedger(_ args: [String: JSONValue], grant: Grant,
-                              windowStart: Int64, scoped: Bool) throws -> ToolOutcome {
-        guard let date = args["date"]?.stringValue, !date.isEmpty else {
-            throw MCPBadArgument(message: "get_day_ledger 需要 date（YYYY-MM-DD）")
+    private func runDayLedger(_ args: [String: JSONValue], grant: Grant, clock: Clock,
+                              scoped: Bool) throws -> ToolOutcome {
+        // `date` 是老参数，就是 period 的单日写法；两者都不给 = 今天。
+        var args = args
+        if let date = args["date"]?.stringValue?.trimmingCharacters(in: .whitespaces), !date.isEmpty {
+            guard (args["period"]?.stringValue ?? "").isEmpty else {
+                throw MCPBadArgument(message: "date 与 period 只能给一种（date 就是 period 的 YYYY-MM-DD 写法）")
+            }
+            args["period"] = .string(date)
+        }
+        let asked = try TimeScope.resolve(args: args, now: clock.now, timeZone: clock.timeZone,
+                                          default: try defaultScope("today", clock: clock))
+        guard let date = asked.singleDay(in: clock.timeZone) else {
+            throw MCPBadArgument(message: "日台账只认单个自然日（today / yesterday / YYYY-MM-DD）；"
+                                        + "多日请用 get_timeline，整周用 get_week_ledger。收到：\(asked.label)")
         }
         let ledger = try store.getDayLedger(date: date)
-        guard ledger.end > windowStart else {
+        guard ledger.end > clock.windowStart else {
             throw MCPDeniedByGrant(message: "\(date) 早于 grant 的时间窗（\(grant.timeWindowDays) 天）")
         }
         var object = try JSONValue(encoding: ledger).objectValue ?? [:]
@@ -463,7 +536,7 @@ public final class StoreMCPService: @unchecked Sendable {
         // 切不成半天，所以 windowStart 落在这一天里面时，窗口之前那几小时的观察数与时长
         // 也在返回的数字里。search / get_timeline / get_item 是逐条查询，能把 start 抬到
         // windowStart，这里做不到——如实标出来，不假装裁过（README 第 10 节也写了）。
-        object["coversBeforeWindowStart"] = .bool(ledger.start < windowStart)
+        object["coversBeforeWindowStart"] = .bool(ledger.start < clock.windowStart)
         var dropped = 0
         var dropList: [String] = []
         if scoped {
@@ -488,35 +561,64 @@ public final class StoreMCPService: @unchecked Sendable {
                                          model: ledger.model, meta: ledger.narrativeMeta,
                                          isStale: ledger.narrativeIsStale, scoped: scoped)
         if !dropList.isEmpty { object["droppedFields"] = .array(dropList.map { .string($0) }) }
-        object["grant"] = grantBlock(grant, windowStart: windowStart,
+        // 窗口如实回整天（台账切不成半天，不按 grant 抬起点；coversBeforeWindowStart 已经在标）。
+        var window = asked
+        window.start = ledger.start
+        window.end = ledger.end
+        window.label = ledger.date
+        attachClock(&object, scope: window, clock: clock)
+        object["grant"] = grantBlock(grant, windowStart: clock.windowStart,
                                      filtered: scoped, droppedByGrant: dropped)
         let count = (object["apps"]?.arrayValue?.count) ?? ledger.apps.count
         return ToolOutcome(value: .object(object), count: count,
-                           note: "date=\(date)"
+                           note: "date=\(date) window=\(asked.source.rawValue)"
                                + (ledger.narrative == nil ? "" : " narrative")
                                + (scoped ? " grant_filtered=\(dropped)" : ""))
     }
 
     // MARK: - get_week_ledger（M2 / T14）
 
-    private func runWeekLedger(_ args: [String: JSONValue], grant: Grant,
-                               windowStart: Int64, scoped: Bool) throws -> ToolOutcome {
-        guard let week = args["week"]?.stringValue, !week.isEmpty else {
-            throw MCPBadArgument(message: "get_week_ledger 需要 week（YYYY-Www 或周内任意一天的 YYYY-MM-DD）")
+    private func runWeekLedger(_ args: [String: JSONValue], grant: Grant, clock: Clock,
+                               scoped: Bool) throws -> ToolOutcome {
+        // `week` 是老参数（YYYY-Www 或周内任意一天，core 会对齐到周一）；period 认 this_week /
+        // last_week / YYYY-Www / 周内某一天；两者都不给 = 本周。
+        let weekSpec: String
+        let source: TimeScope.Source
+        let period: String?
+        if let week = args["week"]?.stringValue?.trimmingCharacters(in: .whitespaces), !week.isEmpty {
+            guard (args["period"]?.stringValue ?? "").isEmpty else {
+                throw MCPBadArgument(message: "week 与 period 只能给一种")
+            }
+            weekSpec = week
+            source = .period
+            period = nil
+        } else {
+            let asked = try TimeScope.resolve(args: args, now: clock.now, timeZone: clock.timeZone,
+                                              default: try defaultScope("this_week", clock: clock))
+            if let week = asked.singleWeek(in: clock.timeZone) {
+                weekSpec = week
+            } else if let day = asked.singleDay(in: clock.timeZone) {
+                weekSpec = day
+            } else {
+                throw MCPBadArgument(message: "周台账只认整周（this_week / last_week / YYYY-Www）"
+                                            + "或周内某一天（YYYY-MM-DD）；收到：\(asked.label)")
+            }
+            source = asked.source
+            period = asked.period
         }
         let ledger: WeekLedger
         do {
-            ledger = try store.getWeekLedger(weekStart: week)
+            ledger = try store.getWeekLedger(weekStart: weekSpec)
         } catch let e as StoreError {
             throw MCPBadArgument(message: "\(e)")
         }
-        guard ledger.end > windowStart else {
+        guard ledger.end > clock.windowStart else {
             throw MCPDeniedByGrant(message: "\(ledger.week) 早于 grant 的时间窗（\(grant.timeWindowDays) 天）")
         }
         var object = try JSONValue(encoding: ledger).objectValue ?? [:]
         // 与 get_day_ledger 同一条口径：台账是**整周**的预聚合，切不成半周。
         // 窗口起点落在这一周里面时，窗口之前那几天的数字也在返回值里，如实标出来。
-        object["coversBeforeWindowStart"] = .bool(ledger.start < windowStart)
+        object["coversBeforeWindowStart"] = .bool(ledger.start < clock.windowStart)
         var dropped = 0
         var dropList: [String] = []
         if scoped {
@@ -541,30 +643,26 @@ public final class StoreMCPService: @unchecked Sendable {
                                          model: ledger.model, meta: ledger.narrativeMeta,
                                          isStale: ledger.narrativeIsStale, scoped: scoped)
         if !dropList.isEmpty { object["droppedFields"] = .array(dropList.map { .string($0) }) }
-        object["grant"] = grantBlock(grant, windowStart: windowStart,
+        attachClock(&object, scope: TimeScope(start: ledger.start, end: ledger.end, label: ledger.week,
+                                               source: source, period: period),
+                    clock: clock)
+        object["grant"] = grantBlock(grant, windowStart: clock.windowStart,
                                      filtered: scoped, droppedByGrant: dropped)
         let count = (object["apps"]?.arrayValue?.count) ?? ledger.apps.count
         return ToolOutcome(value: .object(object), count: count,
                            note: "week=\(ledger.week) recomputed=\(ledger.daysRecomputed.count)"
-                               + " cache=\(ledger.servedFromCache)"
+                               + " cache=\(ledger.servedFromCache) window=\(source.rawValue)"
                                + (ledger.narrative == nil ? "" : " narrative")
                                + (scoped ? " grant_filtered=\(dropped)" : ""))
     }
 
     // MARK: - get_patterns（M2 / T14）
 
-    private func runPatterns(_ args: [String: JSONValue], grant: Grant,
-                             windowStart: Int64, scoped: Bool) throws -> ToolOutcome {
-        let calendar = DayCalendar(store.retrieval.timeZone)
-        guard let askedStart = try Self.time(args["start"], field: "start", calendar: calendar),
-              let end = try Self.time(args["end"], field: "end", calendar: calendar) else {
-            throw MCPBadArgument(message: "get_patterns 需要 start 与 end")
-        }
-        // 时间窗是硬下界（与 search / get_timeline 同一条规矩）。
-        let start = max(askedStart, windowStart)
-        guard end > start else {
-            throw MCPDeniedByGrant(message: "区间整体落在 grant 的时间窗（\(grant.timeWindowDays) 天）之外")
-        }
+    private func runPatterns(_ args: [String: JSONValue], grant: Grant, clock: Clock,
+                             scoped: Bool) throws -> ToolOutcome {
+        // 不给范围 = 今天；时间窗是硬下界（与 search / get_timeline 同一条规矩）。
+        let scope = try scope(args, clock: clock, default: try defaultScope("today", clock: clock))
+        let (start, end) = try boundedWindow(scope, tool: "get_patterns", grant: grant)
         let days = Double(end - start) / 86_400_000.0
         guard days <= Double(options.maxPatternDays) else {
             throw MCPBadArgument(message: "区间太长：get_patterns 一次最多 \(options.maxPatternDays) 天，"
@@ -592,7 +690,9 @@ public final class StoreMCPService: @unchecked Sendable {
                                              options: patternOptions)
         var object = try JSONValue(encoding: patterns).objectValue ?? [:]
         object["appliedStart"] = .int(start)
-        object["grant"] = grantBlock(grant, windowStart: windowStart,
+        object["appliedEnd"] = .int(end)
+        attachClock(&object, scope: scope, clock: clock)
+        object["grant"] = grantBlock(grant, windowStart: clock.windowStart,
                                      filtered: scoped, droppedByGrant: 0)
         if scoped {
             object["scopeNote"] = .string(
@@ -602,44 +702,79 @@ public final class StoreMCPService: @unchecked Sendable {
         return ToolOutcome(value: .object(object), count: patterns.heatmap.count,
                            note: "days=\(String(format: "%.2f", patterns.spanDays))"
                                + " obs=\(patterns.observations)"
-                               + " blocks=\(patterns.focus.count)"
+                               + " blocks=\(patterns.focus.count) window=\(scope.source.rawValue)"
                                + (scoped ? " app_filter=\(grant.apps.count)" : ""))
     }
 
-    // MARK: - recent_activity（M2 / T14）
+    // MARK: - recent_activity（M2 / T14）与 list_activity
 
-    private func runRecentActivity(_ args: [String: JSONValue], grant: Grant,
+    /// 两个工具共用的一句说明：3.6 的 fields 分级只管**原文**，这里每条都是 ≤ 100 token 的摘要
+    /// （与 search 同口径），原文一律走 get_evidence，那里才按 fields 裁。说清楚，免得被读成"summary 也漏原文"。
+    private func fieldsNote(_ budget: Int) -> JSONValue {
+        .string("items[].summary 是 ≤ \(budget) token 的摘要，与 search 的命中摘要同一口径；"
+                + "原文只能经 get_evidence 展开，受 grant.fields 限制。")
+    }
+
+    private func runRecentActivity(_ args: [String: JSONValue], grant: Grant, clock: Clock,
                                    scoped: Bool) throws -> ToolOutcome {
-        var minutes = max(1, Int(args["minutes"]?.intValue ?? 30))
-        // 时间窗是硬上界：grant 给 30 天，就问不出 90 天前的"最近活动"。
-        let cappedMinutes = grant.timeWindowDays * 1440
-        let clamped = minutes > cappedMinutes
-        minutes = min(minutes, cappedMinutes)
+        // 老参数 `minutes` 就是 period = "<N>m"；默认最近 30 分钟，锚点是现在。
+        // 这是「刚才在干什么」的滚动窗口，**不是自然日**——要今天用 list_activity(period = "today")。
+        let scope = try scope(args, clock: clock, legacy: ("minutes", "m"),
+                              default: try defaultScope("30m", clock: clock))
+        let (start, end) = try boundedWindow(scope, tool: "recent_activity", grant: grant)
         let maxItems = min(max(0, Int(args["max_items"]?.intValue ?? 20)), options.maxRecentItems)
 
-        let recent = try store.recentActivity(minutes: minutes, maxItems: maxItems,
-                                              apps: scoped ? grant.apps : nil)
+        let list = try store.listActivity(start: start, end: end, maxItems: maxItems,
+                                          apps: scoped ? grant.apps : nil)
+        let minutes = Int((Double(end - start) / 60_000).rounded())
+        let recent = RecentActivity(minutes: minutes, list: list)
         var object = try JSONValue(encoding: recent).objectValue ?? [:]
-        object["minutesClampedByGrant"] = .bool(clamped)
-        object["grant"] = grantBlock(grant, windowStart: recent.start,
+        object["minutesClampedByGrant"] = .bool(scope.clippedByGrant)
+        attachClock(&object, scope: scope, clock: clock)
+        object["grant"] = grantBlock(grant, windowStart: clock.windowStart,
                                      filtered: scoped, droppedByGrant: 0)
-        // 3.6 的 fields 分级只管**原文**：这里每条都是 ≤ 100 token 的摘要（与 search 同口径），
-        // 原文一律走 get_evidence，那里才按 fields 裁。说清楚，免得被读成"summary 也漏原文"。
-        object["fieldsNote"] = .string(
-            "items[].summary 是 ≤ \(recent.summaryTokenBudget) token 的摘要，与 search 的命中摘要同一口径；"
-            + "原文只能经 get_evidence 展开，受 grant.fields 限制。")
+        object["fieldsNote"] = fieldsNote(recent.summaryTokenBudget)
         return ToolOutcome(value: .object(object), count: recent.items.count,
                            note: "minutes=\(minutes) items=\(recent.items.count)"
-                               + "/\(recent.observations)"
-                               + (clamped ? " clamped" : "")
+                               + "/\(recent.observations) window=\(scope.source.rawValue)"
+                               + (scope.clippedByGrant ? " clamped" : "")
+                               + (scoped ? " app_filter=\(grant.apps.count)" : ""))
+    }
+
+    private func runListActivity(_ args: [String: JSONValue], grant: Grant, clock: Clock,
+                                 scoped: Bool) throws -> ToolOutcome {
+        // 不给范围 = 今天。这是按自然日（或任意区间）取**内容**的入口：
+        // get_day_ledger 只给数字，Agent 讲「今天做了什么」要的逐条摘要从这里拿，按 before_id 翻页。
+        let scope = try scope(args, clock: clock, default: try defaultScope("today", clock: clock))
+        let (start, end) = try boundedWindow(scope, tool: "list_activity", grant: grant)
+        let maxItems = min(max(0, Int(args["max_items"]?.intValue ?? 50)), options.maxRecentItems)
+        let beforeID = args["before_id"]?.intValue
+        if let beforeID, beforeID <= 0 {
+            throw MCPBadArgument(message: "before_id 要是上一页返回的 nextBeforeID（正整数）")
+        }
+
+        let list = try store.listActivity(start: start, end: end, maxItems: maxItems,
+                                          beforeID: beforeID, apps: scoped ? grant.apps : nil)
+        var object = try JSONValue(encoding: list).objectValue ?? [:]
+        // 键永远在：nil 时显式 null，客户端才分得清"没有下一页"和"这个版本没这个字段"。
+        object["nextBeforeID"] = list.nextBeforeID.map { .int($0) } ?? .null
+        object["beforeID"] = beforeID.map { .int($0) } ?? .null
+        attachClock(&object, scope: scope, clock: clock)
+        object["grant"] = grantBlock(grant, windowStart: clock.windowStart,
+                                     filtered: scoped, droppedByGrant: 0)
+        object["fieldsNote"] = fieldsNote(list.summaryTokenBudget)
+        return ToolOutcome(value: .object(object), count: list.items.count,
+                           note: "items=\(list.items.count)/\(list.observations) window=\(scope.source.rawValue)"
+                               + (beforeID.map { " before=\($0)" } ?? "")
+                               + (list.nextBeforeID.map { " next=\($0)" } ?? " last_page")
+                               + (scope.clippedByGrant ? " clamped" : "")
                                + (scoped ? " app_filter=\(grant.apps.count)" : ""))
     }
 
     // MARK: - get_item
 
-    private func runItem(_ args: [String: JSONValue], grant: Grant,
-                         windowStart: Int64, scoped: Bool) throws -> ToolOutcome {
-        let calendar = DayCalendar(store.retrieval.timeZone)
+    private func runItem(_ args: [String: JSONValue], grant: Grant, clock: Clock,
+                         scoped: Bool) throws -> ToolOutcome {
         let given = ["url", "path", "app"].filter { args[$0]?.stringValue?.isEmpty == false }
         guard given.count == 1 else {
             throw MCPBadArgument(message: "get_item 需要 url / path / app 三者给且只给一个，收到 \(given.count) 个")
@@ -654,9 +789,10 @@ public final class StoreMCPService: @unchecked Sendable {
         if case .app(let bundle) = selector, !grant.allows(app: bundle) {
             throw MCPDeniedByGrant(message: "grant 的应用白名单不含 \(bundle)")
         }
-        let asked = try Self.time(args["start"], field: "start", calendar: calendar)
-        let start = max(asked ?? windowStart, windowStart)
-        let end = try Self.time(args["end"], field: "end", calendar: calendar)
+        // 与 search 同一条规矩：不给范围 = 整个 grant 时间窗（对象汇总本来就是"它一共出现过哪些天"）。
+        let scope = try scope(args, clock: clock, default: grantWindowScope(grant, clock: clock))
+        let start = scope.start
+        let end = scope.end
 
         let summary = try store.getItem(selector, start: start, end: end)
         var object = try JSONValue(encoding: summary).objectValue ?? [:]
@@ -676,10 +812,13 @@ public final class StoreMCPService: @unchecked Sendable {
             object["droppedFields"] = .array(droppedFields.map { .string($0) })
         }
         object["appliedStart"] = .int(start)
-        object["grant"] = grantBlock(grant, windowStart: windowStart,
+        if let end { object["appliedEnd"] = .int(end) }
+        attachClock(&object, scope: scope, clock: clock)
+        object["grant"] = grantBlock(grant, windowStart: clock.windowStart,
                                      filtered: scoped, droppedByGrant: dropped)
         return ToolOutcome(value: .object(object), count: summary.observations,
-                           note: "kind=\(selector.kind)" + (scoped ? " grant_filtered=\(dropped)" : ""))
+                           note: "kind=\(selector.kind) window=\(scope.source.rawValue)"
+                               + (scoped ? " grant_filtered=\(dropped)" : ""))
     }
 
     // MARK: - admin（grant 管理）
@@ -846,25 +985,10 @@ public final class StoreMCPService: @unchecked Sendable {
 
     // MARK: - 参数解析
 
-    /// 时间参数：Unix 毫秒（整数或数字串）、ISO 8601、或 `YYYY-MM-DD`（按服务端时区取当天 00:00）。
+    /// 时间参数（老入口，测试与 `getEvidence` 之外的旧调用还在用）：现在只是 `TimeScope.parseInstant`
+    /// 的包装，`start` 语义（裸日期取当天 00:00）。新代码走 `scope(_:clock:legacy:default:)`。
     static func time(_ value: JSONValue?, field: String, calendar: DayCalendar) throws -> Int64? {
-        guard let value, !value.isNull else { return nil }
-        if case .int(let ms) = value { return ms }
-        if case .double(let ms) = value { return Int64(ms) }
-        guard let text = value.stringValue?.trimmingCharacters(in: .whitespaces), !text.isEmpty else {
-            throw MCPBadArgument(message: "\(field) 只能是 Unix 毫秒或 ISO 8601 字符串")
-        }
-        if let ms = Int64(text) { return ms }
-        if text.count == 10, text.contains("-"), let bounds = try? calendar.dayBounds(text) {
-            return bounds.start
-        }
-        let withFraction = ISO8601DateFormatter()
-        withFraction.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        if let d = withFraction.date(from: text) { return Int64((d.timeIntervalSince1970 * 1000).rounded()) }
-        let plain = ISO8601DateFormatter()
-        plain.formatOptions = [.withInternetDateTime]
-        if let d = plain.date(from: text) { return Int64((d.timeIntervalSince1970 * 1000).rounded()) }
-        throw MCPBadArgument(message: "无法解析 \(field)：\(text)（要 Unix 毫秒、ISO 8601 或 YYYY-MM-DD）")
+        try TimeScope.parseInstant(value, field: field, isEnd: false, timeZone: calendar.timeZone)
     }
 
     static func enumValue<T: RawRepresentable & CaseIterable>(
@@ -885,6 +1009,10 @@ public final class StoreMCPService: @unchecked Sendable {
             TextPipeline.sha256(text).prefix(4).map { String(format: "%02x", $0) }.joined()
         }
         var parts: [String] = []
+        // 时间范围只记形状：period 是日期 / 相对写法（不是内容），原样记；start / end 只记给没给。
+        if let period = args["period"]?.stringValue, !period.isEmpty { parts.append("period=\(period)") }
+        let bounds = ["start", "end"].filter { args[$0].map { !$0.isNull } ?? false }
+        if !bounds.isEmpty { parts.append("bounds=\(bounds.joined(separator: ","))") }
         switch tool {
         case .search:
             let q = args["q"]?.stringValue ?? ""
@@ -910,6 +1038,9 @@ public final class StoreMCPService: @unchecked Sendable {
         case .recentActivity:
             parts.append("minutes=\(args["minutes"]?.intValue.map(String.init) ?? "-")")
             parts.append("max_items=\(args["max_items"]?.intValue.map(String.init) ?? "-")")
+        case .listActivity:
+            parts.append("max_items=\(args["max_items"]?.intValue.map(String.init) ?? "-")")
+            parts.append("before_id=\(args["before_id"]?.intValue.map(String.init) ?? "-")")
         case .getItem:
             if let app = args["app"]?.stringValue {
                 parts.append("kind=app key=\(app)")            // bundle id 不是隐私内容

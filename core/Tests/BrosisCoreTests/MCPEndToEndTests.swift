@@ -293,7 +293,8 @@ final class MCPEndToEndTests: XCTestCase {
          ("get_item", ["app": Self.bundles[0]]),
          ("get_week_ledger", ["week": day(baseTS)]),
          ("get_patterns", ["start": baseTS - 3_600_000, "end": baseTS + 3_600_000]),
-         ("recent_activity", ["minutes": 180, "max_items": 5])]
+         ("recent_activity", ["minutes": 180, "max_items": 5]),
+         ("list_activity", ["period": day(baseTS), "max_items": 5])]
     }
 
     // MARK: - 1. initialize / tools/list / 没有 grant 全拒
@@ -306,8 +307,9 @@ final class MCPEndToEndTests: XCTestCase {
         XCTAssertEqual(run.protocolVersion, "2025-06-18")
         XCTAssertEqual(run.toolNames, ["get_context", "get_day_ledger", "get_evidence",
                                        "get_item", "get_patterns", "get_timeline",
-                                       "get_week_ledger", "recent_activity", "search"])
-        XCTAssertEqual(run.steps.count, 9)
+                                       "get_week_ledger", "list_activity", "recent_activity",
+                                       "search"])
+        XCTAssertEqual(run.steps.count, 10)
         for step in run.steps {
             XCTAssertTrue(step.isError, "\(step.tool) 在没有 grant 时必须报错")
             XCTAssertTrue(step.text.contains("no_grant"), step.tool)
@@ -320,17 +322,17 @@ final class MCPEndToEndTests: XCTestCase {
             with: try Data(contentsOf: URL(fileURLWithPath: run.reportPath))) as? [String: Any] ?? [:]
         let tools = ((listed["tools_list"] as? [String: Any])?["result"] as? [String: Any])?["tools"]
             as? [[String: Any]] ?? []
-        XCTAssertEqual(tools.count, 9)
+        XCTAssertEqual(tools.count, 10)
         for tool in tools {
             let annotations = tool["annotations"] as? [String: Any] ?? [:]
             XCTAssertEqual(annotations["readOnlyHint"] as? Bool, true, "\(tool["name"] ?? "?")")
             XCTAssertNotNil(tool["inputSchema"] as? [String: Any], "\(tool["name"] ?? "?")")
         }
 
-        // 审计：九条 no_grant
+        // 审计：十条 no_grant
         let audit = try storeCLI(["mcp-audit", "--limit", "20"])
         XCTAssertEqual(audit.status, 0, audit.err)
-        XCTAssertEqual(audit.out.components(separatedBy: "\"no_grant\"").count - 1, 9, audit.out)
+        XCTAssertEqual(audit.out.components(separatedBy: "\"no_grant\"").count - 1, 10, audit.out)
     }
 
     // MARK: - 1b. M2 的三个工具走完整条链路（M2 c / T14）
@@ -652,7 +654,7 @@ final class MCPEndToEndTests: XCTestCase {
         // 不起 serve，直接跑客户端
         let run = try runMCP(client: "claude-code",
                              calls: [("search", ["q": "知识图谱"])], label: "no-server")
-        XCTAssertEqual(run.toolNames.count, 9, "连不上服务端也要能 tools/list（清单是本地的）")
+        XCTAssertEqual(run.toolNames.count, 10, "连不上服务端也要能 tools/list（清单是本地的）")
         XCTAssertTrue(run.steps[0].isError)
         XCTAssertTrue(run.steps[0].text.contains("连不上"), run.steps[0].text)
         XCTAssertTrue(run.steps[0].text.contains("brosis.app"), run.steps[0].text)

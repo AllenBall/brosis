@@ -330,3 +330,28 @@ public struct RecentActivity: Sendable, Codable {
     public var timeZone: String
     public var computedAt: Int64
 }
+
+/// `list_activity(period | start / end, max_items, before_id)` 的结果：一段窗口内的应用聚合、
+/// 会话汇总与观察摘要（最近的在前），按 `beforeID` 游标分页。`recent_activity` 是它的特例
+/// （窗口 = 最近 N 分钟）。摘要口径、"只看本机产生的观察"与 `RecentActivity` 完全一致。
+public struct ActivityList: Sendable, Codable {
+    /// 半开区间 `[start, end)`。
+    public var start: Int64
+    public var end: Int64
+    public var maxItems: Int
+    public var apps: [LedgerEntry]
+    public var sessions: [SessionRow]
+    public var items: [RecentItem]
+    /// 窗口内活着的观察总数（应用过滤之后、与游标无关）。
+    public var observations: Int
+    /// 这一页之后还有更早的观察。
+    public var truncated: Bool
+    /// 下一页的游标：把它当 `before_id` 再调一次就拿到更早的一页；nil = 没有下一页。
+    public var nextBeforeID: Int64?
+    /// 本页是从哪个游标之后开始的（原样回显）。
+    public var beforeID: Int64?
+    public var summaryTokenBudget: Int
+    public var appFilter: [String]?
+    public var timeZone: String
+    public var computedAt: Int64
+}

@@ -36,7 +36,7 @@
 
 **检索。** 三条通道融合：精确字段（应用、URL、路径）、全文检索（SQLite FTS5，中文按二元组切分）、可选的向量语义检索。融合用加权 RRF。
 
-**交给 AI 助手。** 内置 MCP 服务器，9 个只读工具：`search`、`get_evidence`、`get_context`、`get_timeline`、`get_day_ledger`、`get_week_ledger`、`get_patterns`、`get_item`、`recent_activity`。
+**交给 AI 助手。** 内置 MCP 服务器，10 个只读工具：`search`、`get_evidence`、`get_context`、`get_timeline`、`get_day_ledger`、`get_week_ledger`、`get_patterns`、`get_item`、`recent_activity`、`list_activity`。所有带时间的工具共用一个 `period` 参数（`today`、`yesterday`、`2026-09-08..2026-09-10`、`2026-W37`、`24h` …），按服务端时区解析；每个结果都回显实际使用的窗口与服务端的 `serverToday`。
 
 ## 四条硬约束
 

@@ -382,15 +382,34 @@ bigram 从 2 字起才有 token，单个汉字在 bigram 索引里基本命中�
 
 | 工具（3.6） | 本包的方法 | 说明 |
 |---|---|---|
-| `search(q, start, end, app, limit)` | `Store.search` | 上面三通道；每条 ≤ 100 token 摘要 + evidence id |
+| `search(q, period \| start, end, app, limit)` | `Store.search` | 上面三通道；每条 ≤ 100 token 摘要 + evidence id。**不给范围 = 整个 grant 时间窗**（找东西的工具），结果里 `window.resolvedFrom = "default"` 会明说 |
 | `get_evidence(ids)` | `Store.getEvidence(ids:grant:neighbors:)` | 原文（按 `ord` 拼）+ 出现上下文（同屏前后各 N 条的摘要）。**受 grant 字段级限制**：`fields = summary` 时不返回原文、`redactedByGrant = true`；应用白名单与时间窗挡掉的 id 进 `deniedByGrant`；不存在 / 已删除的 id 只回 id 本身进 `missing`（3.8 要求这几类不返回任何内容）；**出现上下文同样按白名单与时间窗过滤**，被丢掉的条数进 `droppedNeighbors`（只回条数不回 id） |
-| `get_timeline(start, end, granularity)` | `Store.getTimeline` | `hour` / `day` / `week` 分桶，每桶给应用分布、三类时间、区间并集、切换次数 |
-| `get_item(url \| path \| app)` | `Store.getItem` | 两步式；给首末次、按天分布、应用分布、标题样本、最近证据 id 与时长 |
-| `get_context(hours, max_tokens)` | `Store.getContext` | 应用聚合 + 会话汇总 + 最近正文片段，按 token 预算截断 |
-| `get_day_ledger(date)` | `Store.getDayLedger` | 见下一章 |
-| `get_week_ledger(week)`（M2 / T14） | `Store.getWeekLedger(weekStart:)` | **7 个日台账的聚合**：三类时间、应用 / 站点 / 文件排行、切换与打断、7 行按天分布；增量（只重算变过的那几天）、stale 联动 |
-| `get_patterns(start, end)`（M2 / T14） | `Store.getPatterns(start:end:apps:options:)` | 确定性模式：星期 × 小时热力（附按小时 / 按星期两张边际表）、每应用常用时段、会话平均长度与打断率、最常切换对、连续工作块 |
-| `recent_activity(minutes, max_items)`（M2 / T14） | `Store.recentActivity(minutes:maxItems:apps:endingAt:)` | 最近 N 分钟的应用聚合 + 会话 + ≤ 100 token 的观察摘要；只看本机产生的观察 |
+| `get_timeline(period \| start, end, granularity)` | `Store.getTimeline` | `hour` / `day` / `week` 分桶，每桶给应用分布、三类时间、区间并集、切换次数；不给范围 = 今天 |
+| `get_item(url \| path \| app, period \| start, end)` | `Store.getItem` | 两步式；给首末次、按天分布、应用分布、标题样本、最近证据 id 与时长；不给范围 = 整个 grant 时间窗 |
+| `get_context(period \| start, end \| hours, max_tokens)` | `Store.getContext(start:end:maxTokens:)` | 应用聚合 + 会话汇总 + 最近正文片段，按 token 预算截断。默认 `24h`、**锚点是现在**（老入口 `getContext(hours:endingAt:)` 仍锚在库里最新一条观察，给离线合成库用） |
+| `get_day_ledger(period \| date)` | `Store.getDayLedger` | 见下一章；只认单个自然日，不给 = 今天。**只给数字不给内容**，逐条内容走 `list_activity` |
+| `get_week_ledger(period \| week)`（M2 / T14） | `Store.getWeekLedger(weekStart:)` | **7 个日台账的聚合**：三类时间、应用 / 站点 / 文件排行、切换与打断、7 行按天分布；增量（只重算变过的那几天）、stale 联动 |
+| `get_patterns(period \| start, end)`（M2 / T14） | `Store.getPatterns(start:end:apps:options:)` | 确定性模式：星期 × 小时热力（附按小时 / 按星期两张边际表）、每应用常用时段、会话平均长度与打断率、最常切换对、连续工作块 |
+| `recent_activity(period \| start, end \| minutes, max_items)`（M2 / T14） | `Store.recentActivity(minutes:maxItems:apps:endingAt:)` | 最近 N 分钟的应用聚合 + 会话 + ≤ 100 token 的观察摘要；只看本机产生的观察。`listActivity` 的特例 |
+| `list_activity(period \| start, end, max_items, before_id)`（2026-09-10） | `Store.listActivity(start:end:maxItems:beforeID:apps:)` | **按自然日 / 任意区间取内容的入口**：窗口内的应用聚合 + 会话 + 观察摘要（最近的在前），`nextBeforeID` 游标翻页；不给范围 = 今天 |
+
+**时间范围统一（2026-09-10）。** 原来每个工具各有一套窗口语义（`hours` 从库里最新一条观察往回滚、
+`minutes` 从现在往回滚、`search` 默认整个 grant 窗口、schema 示例写 UTC），Agent 问「今天做了什么」时
+能拿到正文的三条路没有一条切在自然日上，昨晚的、上周的内容就混进了今天。现在三条规矩
+（实现在 `TimeScope.swift`，服务端入口 `StoreMCPService.scope(_:clock:legacy:default:)`）：
+
+1. **一套语法**：`period` = `today` / `yesterday` / `this_week` / `last_week` / `YYYY-MM-DD` /
+   `YYYY-MM-DD..YYYY-MM-DD`（两端都含）/ `YYYY-Www` / `<N>h` / `<N>m` / `<N>d`（从现在往回），
+   所有工具同一个函数解析；`start` / `end` 保留给精确边界（毫秒、ISO 8601 带偏移、不带偏移按服务端时区、
+   裸日期——放在 `end` 位置取当天 24:00）。
+2. **服务端解析、回显、报时**：按 `retrieval.timeZone` 解析；每个结果带 `window`（真正用到的
+   `[start, end)`、当地时间戳、时区、`resolvedFrom` = explicit / period / default、`clippedByGrant`）
+   与 `serverNow` / `serverNowLocal` / `serverToday` / `serverTimeZone`。
+3. **优先级** `start` / `end` > `period` > 工具默认；`period` 与 `start` / `end`（或老参数 `hours` /
+   `minutes` / `date` / `week`）同时给直接报 `bad_request`，不猜。grant 时间窗仍是硬下界。
+
+不给范围时：`search` / `get_item` = 整个 grant 时间窗（它们是找东西的工具）；`get_context` = `24h`、
+`recent_activity` = `30m`（滚动窗口，不是自然日）；其余日历类工具 = 今天，周台账 = 本周。
 
 `grants` 表的读写是 `setGrant` / `grant(clientID:)` / `allGrants()` / `removeGrant(clientID:)`。
 这一章说的是**数据层**；把一条 IPC 请求变成一次这样的调用、按 grant 裁剪返回值、写审计，
@@ -1073,7 +1092,7 @@ $BIN mcp-audit --dir $W/db --key-file $W/db.key --limit 20
 | `StoreAPITests` | schema 全表自检与 D17 / D23 的列级核对、`device_id` 稳定性、`app_policies` 三档、运行期事件与遥测、dbstat 分项口径、多片段按 ord 重建、`deleteByObject` 各变体、半开区间、空删除也留审计 |
 | `RetrievalTests`（T3，20 个） | bigram 命中 / 未命中 / 跨句边界；子串复核滤掉分词假阳性（含反向对照）；**全角原文用半角 / 全角查询都能过 FTS 通道的子串复核**、**全角原文用半角查询也能被 1–2 字扫描通道命中**；1–2 字扫描的默认 7 天窗口、显式区间、限应用、窗口可配置、**上界半开**、**纯汉字两字不开扫描通道而召回不变**、**≤2 字含非汉字仍然要扫**；五个字段前缀的两步式与「命中 0 行第一步就空集返回」；**`EXPLAIN QUERY PLAN` 对照**一条 JOIN 与两步式的计划差别；带路径 URL 不退回 host；摘要 ≤ 100 token；时间与应用过滤（半开区间）；删除后 search / getEvidence / getContext / 台账四个入口都不再返回内容；**FTS 候选被截断 + 早期时间窗会漏召回、且 `ftsCandidatesTruncated` 必须报 true**；grant 的字段级 / 应用白名单 / 时间窗（**含出现上下文：白名单外与窗口外的相邻观察不给、`droppedNeighbors` 计数，并有「不加 grant 时它们确实在」的反向对照**）；getItem / getContext 预算 / getTimeline 分桶；查询路由 |
 | `IPCProtocolTests`（T5，14 个） | `JSONValue` 往返（> 2^53 的整数、全角、正文里的换行必须被转义成 `\n`）；请求 / 响应往返；六种坏输入都不被当成合法请求；换行分隔框架跨 read 边界与超长行；socket 路径超 104 字节报错；限流的滑动窗口、按客户端隔离、客户端数上限；**九个工具的 schema 与 `readOnlyHint`，且 `tools/list` 的顺序 == `MCPTool.allCases` 的顺序**；**真 socket 往返**（0600 权限、uid、同连接连发）、坏 JSON 与错协议版本都到不了处理器、**限流时处理器返回的结果被丢弃**、**对端发完请求就挂断时服务端不死**（必须看到 `ipc_write_error`，否则这条用例算没验到） |
-| `MCPServiceTests`（T5，17 个） | 没有 grant 时**九个工具全拒且不带任何数据**（审计条数 = `MCPTool.allCases.count`）；`fields` 控制原文（summary 不回 `text` / 逐片段正文，evidence 回）；summary 时 `get_context` 片段截到 ≤ 100 token 且 `text` 重拼；应用白名单对 search / get_evidence / get_item / 台账 / 时间线各自的效果（含「桶的 dwell 按留下的应用重算」、**`get_evidence` 的 `before` / `after` 里不能出现白名单外的 bundle id 与窗口标题**、以及 `apps = ["*"]` 下它们确实在的反向对照）；时间窗是硬下界（`appliedStart` 被抬高、窗口外的日期与证据被拒、`hours` 被封顶）；**删除后 search / get_evidence / get_context / get_day_ledger 都不再返回内容**（3.8）；审计只记形状不记查询串且同一条查询摘要可复现；`maintenance` 滚动清理审计；未知工具与七种坏参数；时间参数三种写法；**`MCPGate` 的 locked / paused 与审计补写**；传输层拒绝也进审计；admin 生命周期（含"签名没过的对端不能改授权"）；**v1 → v2 schema 迁移**；**被 grant 丢掉的相邻观察不占 `neighbors` 的名额**（白名单外的邻居密集时 `before` / `after` 仍各拿满，附「不加白名单时紧邻的都在白名单外」的反向对照）；**时间窗起点落在某天中间时 `get_day_ledger` 标 `coversBeforeWindowStart`**（同一天 `get_timeline` 只回窗口之后的观察，两个数字的差就是这个标记要提醒的事；整天在窗口里的那天标 false） |
+| `MCPServiceTests`（T5，24 个） | 没有 grant 时**九个工具全拒且不带任何数据**（审计条数 = `MCPTool.allCases.count`）；`fields` 控制原文（summary 不回 `text` / 逐片段正文，evidence 回）；summary 时 `get_context` 片段截到 ≤ 100 token 且 `text` 重拼；应用白名单对 search / get_evidence / get_item / 台账 / 时间线各自的效果（含「桶的 dwell 按留下的应用重算」、**`get_evidence` 的 `before` / `after` 里不能出现白名单外的 bundle id 与窗口标题**、以及 `apps = ["*"]` 下它们确实在的反向对照）；时间窗是硬下界（`appliedStart` 被抬高、窗口外的日期与证据被拒、`hours` 被封顶）；**删除后 search / get_evidence / get_context / get_day_ledger 都不再返回内容**（3.8）；审计只记形状不记查询串且同一条查询摘要可复现；`maintenance` 滚动清理审计；未知工具与七种坏参数；时间参数三种写法；**`MCPGate` 的 locked / paused 与审计补写**；传输层拒绝也进审计；admin 生命周期（含"签名没过的对端不能改授权"）；**v1 → v2 schema 迁移**；**被 grant 丢掉的相邻观察不占 `neighbors` 的名额**（白名单外的邻居密集时 `before` / `after` 仍各拿满，附「不加白名单时紧邻的都在白名单外」的反向对照）；**时间窗起点落在某天中间时 `get_day_ledger` 标 `coversBeforeWindowStart`**（同一天 `get_timeline` 只回窗口之后的观察，两个数字的差就是这个标记要提醒的事；整天在窗口里的那天标 false）；**时间范围统一**（2026-09-10，7 个）：period 每种写法在 Asia/Shanghai 上按固定 now 钉住边界、精确边界的三种写法（裸日期在 end 取 24:00、不带偏移按服务端时区）、同一个 period 在八个工具上解析出同一对边界且每个结果回显 window 与服务端的钟、不给范围时的默认在结果里标 default、冲突报错与老参数等价、`list_activity` 翻页不重叠且合起来是全窗口、`get_context` 锚在现在而老入口仍锚在最新一条观察 |
 | `MCPEndToEndTests`（T5 11 个 + T14 1 个 = 12 个） | **四个真进程**（XCTest → python3 客户端 → `brosis-mcp` → `brosis-store serve`）：initialize / tools/list / **九个工具各一次真实调用**（T14 的三个另有一条专门的用例，核对周台账 7 行按天分布、热力图 / 边际表长度、每条摘要 ≤ 100 token、审计里三条 ok）；没有 grant 全拒且提示怎么授权；**闭环「记录 → 找回 → 展开原文 → 删除后四个入口都消失」**；summary 与 evidence 两档的差别（长正文尾部标记在不在）；白名单与时间窗（**含真链路上 `get_evidence` 的出现上下文不漏白名单外应用**）；locked / paused 拒绝且审计补写；限流；admin 与审计形状；服务端不在时的错误提示；**连接层的抗打击**：客户端中途挂断时 `serve` 不死、`serve` 收到 SIGTERM 走完收尾（退出码 0、socket 文件删掉）、**服务端在会话中途整个重启之后 `brosis-mcp` 还活着且下一次调用自己重连成功** |
 | `CaptureAuditTests`（T8，13 个） | **schema v3**：覆盖率口径七条（完全一致 = 1；**全角 / 半角与空白差异不扣分**；**NFKC 折叠这一步单独有用例**——全角字母数字 `ＯＣＲ １００` 对上半角 `OCR 100`，标点那条测不出折叠，因为全角标点不折叠也会被当分隔符丢掉；OCR 多出的内容不扣分；只读到一半时介于 0 和 1 之间；AX 全空时 = 0 而不是 NaN；重复 token 只计一票）；`capture_audit` 写入 / 倒序读回 / 按应用过滤 / 按应用聚合；**观察被配额过期删掉之后审计行还在**（弱引用）；`maintenance()` 按保留天数滚动清理；`occurrences.confidence` / `note` 往返（AX 片段是 nil、OCR 片段有值）与**老写法 `TextFragment(text:region:)` 的向后兼容**；**v2 → v3 就地迁移**（把库改回 v2 的形状再重开，老数据一字不差、`migrations` 留三条审计、新表可写） |
 | `AppInventoryTests`（T9，6 个） | 3.12 应用采集清单的数据层：按应用的观察数与完整性四态分布（**四态之和 == 总数**、窗口外的观察不算、**墓碑行不算**、`since = 0` 就是全库）；**只算本机**（直接写一行 `device_id = 'another-device'` 的观察，它不进本机统计）；**`EXPLAIN QUERY PLAN` 必须走 `idx_obs_live` 部分索引**（这三个查询存在的理由就是不让采集端扫全表）；`app_policies` 全表往返与 UPSERT 不加行；`appNames()`；**降档删数据的闭环**（`deleteByApp(reason: .policy)` 之后统计行消失、`appObservationCount` 归零、策略行原样保留） |

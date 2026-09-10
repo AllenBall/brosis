@@ -238,26 +238,41 @@ extension Store {
         }
     }
 
-    // MARK: - recent_activity
+    // MARK: - recent_activity / list_activity
 
     /// 3.6 的 `recent_activity(minutes, max_items)`：最近 N 分钟的会话 + 观察摘要。
+    /// 它是 `listActivity` 的特例：窗口 = `[endingAt - minutes, endingAt)`。
     ///
-    /// - 每条摘要 ≤ `RetrievalOptions.summaryTokenBudget` token（3.6 的 100 token 口径）。
-    /// - **只看本机产生的观察**（`origin_device IS NULL`）：这是"这台机器最近在干什么"，
-    ///   D17 从别的设备导入的副本不该混进同一条时间线（与 3.9 里 sessions / ledgers 的
-    ///   口径一致；要找别的设备的内容走 `search` / `get_evidence`）。
-    /// - `apps`：只统计这些 bundle id（grant 的白名单），nil 或含 `"*"` = 全部。
     /// - `endingAt`：窗口右端（不含）。默认"现在"；测试与验收传一个固定值好有确定性。
     public func recentActivity(minutes: Int, maxItems: Int = 20, apps: [String]? = nil,
                                endingAt: Int64? = nil) throws -> RecentActivity {
         let clampedMinutes = max(1, minutes)
+        let end = endingAt ?? Int64(Date().timeIntervalSince1970 * 1000)
+        let list = try listActivity(start: end - Int64(clampedMinutes) * 60_000, end: end,
+                                    maxItems: maxItems, apps: apps)
+        return RecentActivity(minutes: clampedMinutes, list: list)
+    }
+
+    /// `list_activity(period | start / end, max_items, before_id)`：半开区间 `[start, end)` 内的
+    /// 应用聚合、会话汇总与观察摘要（最近的在前），按游标分页。这是按自然日取**内容**的入口——
+    /// `get_day_ledger` 只给数字，Agent 讲「今天做了什么」要的逐条摘要从这里拿。
+    ///
+    /// - 每条摘要 ≤ `RetrievalOptions.summaryTokenBudget` token（3.6 的 100 token 口径）。
+    /// - **只看本机产生的观察**（`origin_device IS NULL`）：这是"这台机器在干什么"，
+    ///   D17 从别的设备导入的副本不该混进同一条时间线（与 3.9 里 sessions / ledgers 的
+    ///   口径一致；要找别的设备的内容走 `search` / `get_evidence`）。
+    /// - `apps`：只统计这些 bundle id（grant 的白名单），nil 或含 `"*"` = 全部。
+    /// - `beforeID`：只回这一条**之后**（更早）的观察。游标按窗口内的排序位置找，所以
+    ///   ts 相同的几条也不会漏；游标本身不在窗口里（比如刚被删了）时退化成 `id < beforeID`。
+    ///   应用聚合与会话汇总永远是整个窗口的，不随页变。
+    public func listActivity(start: Int64, end: Int64, maxItems: Int = 50,
+                             beforeID: Int64? = nil, apps: [String]? = nil) throws -> ActivityList {
+        guard start < end else { throw StoreError.invalidUsage("时间区间要求 start < end") }
         let limit = max(0, maxItems)
         let retrievalOptions = retrieval
         let filter = Self.normalizedAppFilter(apps)
         return try withLock { conn in
             let cal = DayCalendar(retrievalOptions.timeZone)
-            let end = endingAt ?? Int64(Date().timeIntervalSince1970 * 1000)
-            let start = end - Int64(clampedMinutes) * 60_000
             let margin = Int64(sessionConfig.maxDwellSeconds * 1000) + 1000
 
             let appNames = try appMap(conn: conn)
@@ -292,7 +307,16 @@ extension Store {
             // （理由与 `getContext` 里那段一样：带 ORDER BY 的单条 SQL 会把正文一起读出来排序）。
             let inWindow = slices.filter { $0.ts >= start && $0.ts < end }
                 .sorted { $0.ts == $1.ts ? $0.id > $1.id : $0.ts > $1.ts }
-            let picked = Array(inWindow.prefix(limit))
+            var page = inWindow
+            if let beforeID {
+                if let at = inWindow.firstIndex(where: { $0.id == beforeID }) {
+                    page = Array(inWindow[(at + 1)...])
+                } else {
+                    page = inWindow.filter { $0.id < beforeID }
+                }
+            }
+            let picked = Array(page.prefix(limit))
+            let hasMore = page.count > picked.count
             let metas = try observationMetas(picked.map(\.id), conn: conn)
             let bodies = try snippetSources(picked.map(\.id), conn: conn)
             let budget = retrievalOptions.summaryTokenBudget
@@ -316,10 +340,11 @@ extension Store {
                     summary: summary, summaryTokens: TokenBudget.tokens(of: summary)))
             }
 
-            return RecentActivity(
-                minutes: clampedMinutes, start: start, end: end, maxItems: limit,
+            return ActivityList(
+                start: start, end: end, maxItems: limit,
                 apps: appEntries, sessions: sessions, items: items,
-                observations: inWindow.count, truncated: inWindow.count > picked.count,
+                observations: inWindow.count, truncated: hasMore,
+                nextBeforeID: hasMore ? picked.last?.id : nil, beforeID: beforeID,
                 summaryTokenBudget: budget,
                 appFilter: filter == nil ? nil : (apps ?? []),
                 timeZone: retrievalOptions.timeZone.identifier,
@@ -529,5 +554,16 @@ extension Store {
         guard !sorted.isEmpty else { return 0 }
         let rank = Int((p * Double(sorted.count)).rounded(.up))
         return sorted[min(max(rank, 1), sorted.count) - 1]
+    }
+}
+
+extension RecentActivity {
+    /// `recent_activity` = `list_activity` 的特例：同一份结果，多一个 `minutes` 标签。
+    init(minutes: Int, list: ActivityList) {
+        self.init(minutes: minutes, start: list.start, end: list.end, maxItems: list.maxItems,
+                  apps: list.apps, sessions: list.sessions, items: list.items,
+                  observations: list.observations, truncated: list.truncated,
+                  summaryTokenBudget: list.summaryTokenBudget, appFilter: list.appFilter,
+                  timeZone: list.timeZone, computedAt: list.computedAt)
     }
 }

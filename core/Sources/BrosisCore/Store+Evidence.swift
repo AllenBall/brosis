@@ -356,95 +356,116 @@ extension Store {
         return (ids, names, column)
     }
 
-    // MARK: - get_context(hours, max_tokens)
+    // MARK: - get_context(hours, max_tokens) / get_context(start, end)
 
-    /// 3.6 的 `get_context(hours, max_tokens)`。**按 token 预算截断**，
-    /// token 口径见 `TokenBudget`（字符数 ÷ 2，向上取整）。
+    /// 3.6 的 `get_context(hours, max_tokens)`——**老入口**，CLI / bench / 测试还在用。
     ///
-    /// - Parameter endingAt: 窗口右端；nil 表示「库里最新一条观察」——记录器在跑的时候
-    ///   它就约等于此刻，而离线的合成库上它才是唯一有意义的锚点。
+    /// - Parameter endingAt: 窗口右端（含）；nil 表示「库里最新一条观察」——离线的合成库上
+    ///   它是唯一有意义的锚点。**MCP 那一层不走这个入口**：它按 `TimeScope` 解析出 `[start, end)`
+    ///   后调下面那个重载，锚点是"现在"——原来锚在最新一条观察上，录制一停窗口就往回漂，
+    ///   结果里却仍写着「24 h」。
     public func getContext(hours: Int, maxTokens: Int = 2000,
                            endingAt: Int64? = nil) throws -> ContextBundle {
         let options = retrieval
         return try withLock { conn in
-            let cal = DayCalendar(options.timeZone)
             let end = try endingAt
                 ?? conn.scalarInt("SELECT COALESCE(MAX(ts), 0) FROM observations WHERE device_id = ?;",
                                   [.text(deviceID)]) ?? 0
             let start = end - Int64(max(0, hours)) * 3_600_000
-            let margin = Int64(sessionConfig.maxDwellSeconds * 1000) + 1000
-            // 只按应用聚合，不做 urls / files 的 LEFT JOIN（24 h 窗口 8640 条观察上省一半时间）。
-            let appNames = try appMap(conn: conn)
-            var slices = try observationSlices(from: start - margin, to: end + 1 + margin,
-                                               withLabels: false, conn: conn)
-            for i in slices.indices {
-                if let id = slices[i].appID, let a = appNames[id] {
-                    slices[i].appBundleID = a.bundleID
-                    slices[i].appName = a.name
-                }
-            }
-            let apps = Self.sortedEntries(Self.aggregate(slices, clipTo: (start, end + 1)) { s in
-                guard let b = s.appBundleID else { return nil }
-                return (b, s.appName)
-            })
-            // 会话只要时长与打断数，证据区间不展开。
-            let sessions = try sessionRows(from: start, to: end + 1, includeStale: false,
-                                           includeEvidence: false, conn: conn)
-
-            // 头部：应用聚合 + 会话汇总，先占预算。
-            var lines: [String] = []
-            lines.append("[窗口] \(cal.stamp(start)) — \(cal.stamp(end))（\(hours) h）")
-            for a in apps.prefix(8) {
-                lines.append(String(format: "[应用] %@ dwell %.0fs active %.0fs unknown %.0fs 切换 %d 次 观察 %d 条",
-                                    a.name ?? a.key, a.dwellS, a.activeS, a.unknownS,
-                                    a.switches, a.observations))
-            }
-            lines.append("[会话] \(sessions.count) 段，打断 \(sessions.reduce(0) { $0 + $1.interruptions }) 次")
-            var text = lines.joined(separator: "\n")
-            var used = TokenBudget.tokens(of: text)
-
-            // 正文片段：最近的在前，按剩余预算逐条加。**两步式**：
-            // 先在 observations 上纯索引扫出前 N 条 id（不碰正文），再按 id 取正文与标签。
-            // 一条 SQL 带 `ORDER BY o.ts DESC, oc.ord` 会让规划器上临时排序器，
-            // 那要求把整个窗口的行（连正文一起）都读出来再排，`LIMIT` 救不了——
-            // 同一个库上实测，这一条就占掉了 get_context 几乎全部的时间（一个数量级）。
-            var snippets: [ContextSnippet] = []
-            var truncated = false
-            // 取回条数按预算封顶：每条片段至少要花掉「[时间 应用] 」这个头部（约 18 token），
-            // 所以 maxTokens/16 条之外的行永远用不上。
-            let wanted = max(8, maxTokens / 16)
-            let recent = try conn.intPairs("""
-                SELECT id, ts FROM observations
-                 WHERE device_id = ? AND deleted_at IS NULL AND ts >= ? AND ts <= ?
-                 ORDER BY ts DESC LIMIT ?;
-                """, [.text(deviceID), .int(start), .int(end), .int(Int64(wanted))])
-            let bodies = try snippetSources(recent.map(\.0), conn: conn)
-            let metas = try observationMetas(recent.map(\.0), conn: conn)
-            for (id, ts) in recent {
-                let remaining = maxTokens - used
-                if remaining <= 8 { truncated = true; break }
-                guard let raw = bodies[id] else { continue }
-                let body = TokenBudget.truncate(raw.replacingOccurrences(of: "\n", with: " "),
-                                                toTokens: min(remaining - 8, 200))
-                let meta = metas[id]
-                let line = "[\(cal.stamp(ts)) \(meta?.appBundleID ?? "?")] " + body
-                // **分隔符要算进预算**：拼进 `text` 的是 "\n" + line，只按 line 计费的话
-                // 每条片段少算半个 token，片段一多，`usedTokens`（按拼好的全文重算）就可能
-                // 超出 `maxTokens` 几个 token。
-                let cost = TokenBudget.tokens(of: "\n" + line)
-                if used + cost > maxTokens { truncated = true; break }
-                used += cost
-                text += "\n" + line
-                snippets.append(ContextSnippet(evidenceID: id, ts: ts,
-                                               appBundleID: meta?.appBundleID,
-                                               windowTitle: meta?.windowTitle,
-                                               text: body, tokens: cost))
-            }
-            if snippets.count == recent.count && recent.count == wanted { truncated = true }
-            return ContextBundle(hours: hours, start: start, end: end, maxTokens: maxTokens,
-                                 usedTokens: TokenBudget.tokens(of: text), apps: apps,
-                                 sessions: sessions, snippets: snippets, truncated: truncated,
-                                 text: text)
+            // 老口径的右端是"含"，半开区间要 +1 才把那条观察自己也算进来。
+            return try contextUnlocked(start: start, end: end + 1, maxTokens: maxTokens,
+                                       hours: hours, options: options, conn: conn)
         }
+    }
+
+    /// 半开区间 `[start, end)` 上的上下文：MCP 的 `get_context(period | start / end)` 走这里。
+    /// `hours` 按区间长度四舍五入（只是标签；精确边界看 `start` / `end`）。
+    public func getContext(start: Int64, end: Int64, maxTokens: Int = 2000) throws -> ContextBundle {
+        guard start < end else { throw StoreError.invalidUsage("时间区间要求 start < end") }
+        let options = retrieval
+        let hours = Int((Double(end - start) / 3_600_000).rounded())
+        return try withLock { conn in
+            try contextUnlocked(start: start, end: end, maxTokens: maxTokens,
+                                hours: hours, options: options, conn: conn)
+        }
+    }
+
+    /// **按 token 预算截断**，token 口径见 `TokenBudget`（字符数 ÷ 2，向上取整）。
+    private func contextUnlocked(start: Int64, end: Int64, maxTokens: Int, hours: Int,
+                                 options: RetrievalOptions, conn: SQLiteConnection) throws -> ContextBundle {
+        let cal = DayCalendar(options.timeZone)
+        let margin = Int64(sessionConfig.maxDwellSeconds * 1000) + 1000
+        // 只按应用聚合，不做 urls / files 的 LEFT JOIN（24 h 窗口 8640 条观察上省一半时间）。
+        let appNames = try appMap(conn: conn)
+        var slices = try observationSlices(from: start - margin, to: end + margin,
+                                           withLabels: false, conn: conn)
+        for i in slices.indices {
+            if let id = slices[i].appID, let a = appNames[id] {
+                slices[i].appBundleID = a.bundleID
+                slices[i].appName = a.name
+            }
+        }
+        let apps = Self.sortedEntries(Self.aggregate(slices, clipTo: (start, end)) { s in
+            guard let b = s.appBundleID else { return nil }
+            return (b, s.appName)
+        })
+        // 会话只要时长与打断数，证据区间不展开。
+        let sessions = try sessionRows(from: start, to: end, includeStale: false,
+                                       includeEvidence: false, conn: conn)
+
+        // 头部：应用聚合 + 会话汇总，先占预算。
+        var lines: [String] = []
+        lines.append("[窗口] \(cal.stamp(start)) — \(cal.stamp(end))（\(hours) h）")
+        for a in apps.prefix(8) {
+            lines.append(String(format: "[应用] %@ dwell %.0fs active %.0fs unknown %.0fs 切换 %d 次 观察 %d 条",
+                                a.name ?? a.key, a.dwellS, a.activeS, a.unknownS,
+                                a.switches, a.observations))
+        }
+        lines.append("[会话] \(sessions.count) 段，打断 \(sessions.reduce(0) { $0 + $1.interruptions }) 次")
+        var text = lines.joined(separator: "\n")
+        var used = TokenBudget.tokens(of: text)
+
+        // 正文片段：最近的在前，按剩余预算逐条加。**两步式**：
+        // 先在 observations 上纯索引扫出前 N 条 id（不碰正文），再按 id 取正文与标签。
+        // 一条 SQL 带 `ORDER BY o.ts DESC, oc.ord` 会让规划器上临时排序器，
+        // 那要求把整个窗口的行（连正文一起）都读出来再排，`LIMIT` 救不了——
+        // 同一个库上实测，这一条就占掉了 get_context 几乎全部的时间（一个数量级）。
+        var snippets: [ContextSnippet] = []
+        var truncated = false
+        // 取回条数按预算封顶：每条片段至少要花掉「[时间 应用] 」这个头部（约 18 token），
+        // 所以 maxTokens/16 条之外的行永远用不上。
+        let wanted = max(8, maxTokens / 16)
+        let recent = try conn.intPairs("""
+            SELECT id, ts FROM observations
+             WHERE device_id = ? AND deleted_at IS NULL AND ts >= ? AND ts < ?
+             ORDER BY ts DESC LIMIT ?;
+            """, [.text(deviceID), .int(start), .int(end), .int(Int64(wanted))])
+        let bodies = try snippetSources(recent.map(\.0), conn: conn)
+        let metas = try observationMetas(recent.map(\.0), conn: conn)
+        for (id, ts) in recent {
+            let remaining = maxTokens - used
+            if remaining <= 8 { truncated = true; break }
+            guard let raw = bodies[id] else { continue }
+            let body = TokenBudget.truncate(raw.replacingOccurrences(of: "\n", with: " "),
+                                            toTokens: min(remaining - 8, 200))
+            let meta = metas[id]
+            let line = "[\(cal.stamp(ts)) \(meta?.appBundleID ?? "?")] " + body
+            // **分隔符要算进预算**：拼进 `text` 的是 "\n" + line，只按 line 计费的话
+            // 每条片段少算半个 token，片段一多，`usedTokens`（按拼好的全文重算）就可能
+            // 超出 `maxTokens` 几个 token。
+            let cost = TokenBudget.tokens(of: "\n" + line)
+            if used + cost > maxTokens { truncated = true; break }
+            used += cost
+            text += "\n" + line
+            snippets.append(ContextSnippet(evidenceID: id, ts: ts,
+                                           appBundleID: meta?.appBundleID,
+                                           windowTitle: meta?.windowTitle,
+                                           text: body, tokens: cost))
+        }
+        if snippets.count == recent.count && recent.count == wanted { truncated = true }
+        return ContextBundle(hours: hours, start: start, end: end, maxTokens: maxTokens,
+                             usedTokens: TokenBudget.tokens(of: text), apps: apps,
+                             sessions: sessions, snippets: snippets, truncated: truncated,
+                             text: text)
     }
 }
