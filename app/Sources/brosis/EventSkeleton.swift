@@ -487,7 +487,10 @@ final class EventSkeleton {
             captureMethod = scan.captureMethod
             visibleRange = scan.visibleRange
             // 排了重扫就把这一帧的 OCR 请求扔掉：现在还分不清"读不到"和"读早了"。
-            if noteAXOutcome(app: app, pid: pid, trigger: trigger, chars: scan.totalChars) {
+            // **只对真的读了 AX 的规则算**：纯 OCR 的规则（Chrome / 微信 / 飞书会议）字符数恒为 0，
+            // 那不是"读早了"而是"压根没读"，当成前者就会把 OCR 请求白白撤掉。
+            if rule.readsAX,
+               noteAXOutcome(app: app, pid: pid, trigger: trigger, chars: scan.totalChars) {
                 adapterScan?.ocrRequests = []
             }
             if scan.truncated || scan.regions.contains(where: { $0.truncated }) {

@@ -225,6 +225,14 @@ struct AdapterRule: Sendable {
     /// （`SCContentFilter(desktopIndependentWindow:)`）。见 `CaptureController.capture`。
     var capturesWindow: Bool = false
 
+    /// 这条规则**读不读 AX**。全部区域都声明 `.ocr` 时为 false。
+    ///
+    /// 用途只有一个：Chromium 系「读到空树 ⇒ 排一次重扫」那条路（`EventSkeleton.noteAXOutcome`）
+    /// 只该对**真的试过读 AX**的规则生效。Chrome 的规则一个 AX 区域都没有，AX 字符数恒为 0，
+    /// 而它又确实被判为 Chromium 系——不加这道门的话，每个 Chrome 进程头两次扫描都会被当成
+    /// 「读早了」，连带把这一帧的 OCR 请求一起丢掉（那正是重扫的设计意图：撤掉回退）。
+    var readsAX: Bool { regions.contains { !$0.read.declaresOCR } }
+
     /// 这条规则声明了哪些区域必须走 OCR。
     var ocrRegions: [RegionRule] { regions.filter { $0.read.declaresOCR } }
 

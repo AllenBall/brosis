@@ -356,8 +356,63 @@ enum AX {
             // Safari / Chromium 的 URL 挂在 AXWebArea 上，不在窗口上。
             url = firstWebAreaURL(in: window, limits: limits)
         }
+        if url == nil, let bundleID, PrivateBrowsing.browserBundleIDs.contains(bundleID) {
+            // Chrome 系压根没有 AXWebArea：网页无障碍树要私有的 `AXEnhancedUserInterface`
+            // 才会建，而本项目只用公开属性（见 chromiumFamilyBundleIDs 的说明）。
+            // 实测 Chrome 153 整棵树 43 个节点全是浏览器外壳——但**地址栏那个 AXTextField 有值**，
+            // 那就是当前页的 URL，不需要任何额外权限，也不需要装扩展。
+            url = addressBarURL(in: window, limits: limits)
+        }
         return (window, WindowInfo(title: title, url: url, document: document,
                                    frame: frame(window), timedOut: false))
+    }
+
+    /// 从浏览器工具栏里那个地址栏 `AXTextField` 取当前页 URL。
+    ///
+    /// 两件事要小心：
+    ///  1. **地址栏里未必是 URL**。用户正在输入时它是搜索词；新标签页是空的。所以只接受
+    ///     "第一个 `/` 之前带点、且整串没有空白"的值，别的一律当没读到。
+    ///  2. **Chrome 把 scheme 省掉了**（显示 `example.com/x` 而不是 `https://example.com/x`），
+    ///     而 `EventSkeleton.urlRef` 要有 scheme 才认成 web、才抽得出 host。
+    ///     没有 `://` 时补 `https://`：**这是个假设**，站点是 http 的话 scheme 会存错，
+    ///     但 host 与 path 是对的，而这个字段的用途正是 `url:` / `host:` / `path:` 检索。
+    static func addressBarURL(in window: AXUIElement, limits: BFSLimits) -> String? {
+        guard let raw = firstTextFieldValue(in: window, limits: limits) else { return nil }
+        return normalizedAddressBarURL(raw)
+    }
+
+    /// 纯函数，自检逐条覆盖。
+    static func normalizedAddressBarURL(_ raw: String) -> String? {
+        let value = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !value.isEmpty, value.rangeOfCharacter(from: .whitespacesAndNewlines) == nil
+        else { return nil }
+        if value.lowercased().hasPrefix("http://") || value.lowercased().hasPrefix("https://") {
+            return value
+        }
+        // 别把别的 scheme（chrome://、about:、file://）改写成 https。
+        guard !value.contains("://"), !value.hasPrefix("about:") else { return value }
+        let host = value.split(separator: "/", maxSplits: 1).first.map(String.init) ?? value
+        // `localhost` / `localhost:3000` 没有点，但它是开发时最常见的一类地址，单独放行。
+        let looksLikeHost = (host.contains(".") && !host.hasPrefix(".") && !host.hasSuffix("."))
+            || host == "localhost" || host.hasPrefix("localhost:")
+        guard looksLikeHost else { return nil }
+        return "https://" + value
+    }
+
+    private static func firstTextFieldValue(in window: AXUIElement, limits: BFSLimits) -> String? {
+        var queue: [(AXUIElement, Int)] = [(window, 0)]
+        var visited = 0
+        while let (element, depth) = queue.first {
+            queue.removeFirst()
+            visited += 1
+            if visited > min(webAreaSearchNodes, limits.maxNodes) || depth > limits.maxDepth { break }
+            if role(element) == "AXTextField",
+               let value = string(element, kAXValueAttribute as String), !value.isEmpty {
+                return value
+            }
+            for child in children(element) { queue.append((child, depth + 1)) }
+        }
+        return nil
     }
 
     private static func firstWebAreaURL(in window: AXUIElement, limits: BFSLimits) -> String? {

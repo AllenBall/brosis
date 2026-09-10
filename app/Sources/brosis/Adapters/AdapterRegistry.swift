@@ -63,6 +63,61 @@ enum AdapterRegistry {
              + "设上之后若仍读不到 AXWebArea 就整窗口视口 OCR。代码块用的是等宽小字，"
              + "OCR 回退时按 D24 不降采样；折叠起来的长回复只记展开部分。")
 
+    // MARK: - Chrome 系浏览器（AX 只给外壳）
+
+    /// Chrome 顶部外壳（标签条 + 地址栏）的高度（点）。默认 80 ≈ 标签条 40 + 工具栏 40。
+    ///
+    /// **宁可切小不切大**：切大了会把页面顶部真内容裁掉，切小了只是多认一条地址栏——
+    /// 而地址栏的 URL 本来就另外单独取了，重复一次无害。开了书签栏的加约 32：
+    /// `defaults write com.brosis.app adapter.chrome.toolbarHeight -float 112`
+    static let chromeToolbarKey = "adapter.chrome.toolbarHeight"
+    static let chromeToolbarDefault: Double = 80
+
+    /// Chrome / Edge / Brave / Vivaldi / Arc：**AX 只给浏览器外壳，一个字正文都没有**。
+    ///
+    /// 实测（--ax-probe，Chrome 153，窗口 1728×1070）：整棵树 43 个节点，
+    /// 角色全是 AXGroup / AXButton / AXToolbar / AXTabGroup，**没有 AXWebArea**；
+    /// 全部 68 个"正文"字符其实是地址栏那一串 URL。七个取样时刻、maxDepth 8→100 结果一致。
+    /// 原因是 Chrome 的网页无障碍树要私有属性 `AXEnhancedUserInterface` 才会建，
+    /// 而本项目只用公开的 `AXManualAccessibility`（见 `AX.chromiumFamilyBundleIDs` 的说明）。
+    /// 所以正文只能 OCR，URL 单独从地址栏取（`AX.addressBarURL`）——两件事都不需要装扩展。
+    ///
+    /// 在这条规则之前 Chrome 落在 `genericChromium` 上，后果有两个：
+    ///  1. 那 68 个字符让 AX 看起来"非空"，正文里于是只有一串 URL；
+    ///  2. 截的是**整块显示器再裁窗口矩形**，压在 Chrome 上面的别的窗口的像素会一起进来，
+    ///     并以 Chrome 的身份入库——2026-09-10 库里就有一条，页面正文里混着另一个窗口的
+    ///     "AppleCare+ 按年经"、"Phone 16 Pra"。这不只是脏，是**归错了应用**。
+    ///
+    /// 所以走 `capturesWindow`：只渲染 Chrome 自己那个窗口，别人的画面根本不进这张图。
+    /// 代价与微信那条一致，也是 2026-09-08 用户明确选过的那个取舍：**会连被盖住的部分一起采**，
+    /// 库里可能出现用户当时其实看不见的页面内容。
+    ///
+    /// 无痕窗口不受影响：`PrivateBrowsing` 认标题里的 Incognito / 无痕浏览，那一支不读正文。
+    static let chrome = AdapterRule(
+        id: "chrome",
+        name: "Chrome 系浏览器",
+        bundleIDs: ["com.google.Chrome", "com.google.Chrome.beta", "com.google.Chrome.canary",
+                    "com.microsoft.edgemac", "com.brave.Browser", "com.vivaldi.Vivaldi",
+                    "com.operasoftware.Opera", "company.thebrowser.Browser"],
+        electron: false,
+        regions: [
+            RegionRule(name: "page", kind: .body,
+                       locator: .insetRect(WindowInset(
+                           top: resolvePoints(chromeToolbarKey,
+                                              default: chromeToolbarDefault, maximum: 400),
+                           minWidth: 240, minHeight: 120,
+                           fallback: RelativeRect(x: 0, y: 0.08, width: 1.0, height: 0.92))),
+                       read: .ocr, ocrFallback: false, required: true, clipToViewport: true),
+        ],
+        chatLayout: nil,
+        limits: AX.BFSLimits(maxNodes: 300, maxDepth: 8),
+        notes: "AX 只给浏览器外壳（实测 43 节点、无 AXWebArea），正文走整页视口 OCR；"
+             + "URL 从地址栏的 AXTextField 取，不装扩展、不用私有属性。"
+             + "截图走窗口定向：别的窗口盖在上面时不会把它的像素记成 Chrome 的页面。"
+             + "顶部外壳按点数裁（默认 80，开书签栏约 112，adapter.chrome.toolbarHeight 可校准）；"
+             + "只记屏幕上显示出来的字：视频、图片、canvas 里的内容只有渲染成文字才认得到。",
+        capturesWindow: true)
+
     // MARK: - 飞书（Electron）
 
     /// 飞书：AX 树几乎为空（M0 合计 156 字符）。规则先试消息列表的 AXList/AXRow，
@@ -276,7 +331,7 @@ enum AdapterRegistry {
     }()
 
     /// 首批规则（有序，进 README 与结果文件的规则表）。
-    static let all: [AdapterRule] = [safari, claudeDesktop, feishu, feishuMeeting, wechat]
+    static let all: [AdapterRule] = [safari, chrome, claudeDesktop, feishu, feishuMeeting, wechat]
 
     /// bundle id → 规则；查不到就是兜底规则。
     /// 没有专属规则时兜底走哪一条，由**这里**决定，不再让每个调用点自己 derive——

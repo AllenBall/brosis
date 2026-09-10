@@ -1055,6 +1055,36 @@ enum SelfCheck {
               meetingRule.id == AdapterRegistry.feishuMeeting.id && meetingDeclaresOCR,
               "\(meetingRule.id)，声明 OCR=\(meetingDeclaresOCR)")
 
+        // Chrome：AX 只给外壳（实测 43 节点、无 AXWebArea），所以规则必须走 OCR、
+        // 必须窗口定向截图（否则压在上面的别的窗口会被记成 Chrome 的页面），
+        // 而且**不能读 AX**——读了就会被 Chromium 空树重扫那条路撤掉 OCR 请求。
+        let chromeRule = AdapterRegistry.rule(for: "com.google.Chrome")
+        check("Chrome 命中专用规则：走 OCR、窗口定向、不读 AX",
+              chromeRule.id == AdapterRegistry.chrome.id && chromeRule.declaresOCR
+                && chromeRule.capturesWindow && !chromeRule.readsAX,
+              "\(chromeRule.id)，OCR=\(chromeRule.declaresOCR) "
+                + "窗口定向=\(chromeRule.capturesWindow) 读AX=\(chromeRule.readsAX)")
+
+        // 地址栏取 URL 的纯函数。Chrome 把 scheme 省掉，而 urlRef 要有 scheme 才抽得出 host。
+        let urlCases: [(String, String?)] = [
+            ("7to12.yangcong345.com/onion-tenon/#/home", "https://7to12.yangcong345.com/onion-tenon/#/home"),
+            ("https://example.com/a", "https://example.com/a"),
+            ("http://example.com", "http://example.com"),
+            ("localhost:3000/x", "https://localhost:3000/x"),   // 开发地址没有点，单独放行
+            ("chrome://settings", "chrome://settings"),          // 别的 scheme 不改写
+            ("about:blank", "about:blank"),
+            ("洋葱 学园", nil),                                   // 正在输入的搜索词：有空格
+            ("怎么写 SwiftUI", nil),
+            ("搜索关键词", nil),                                   // 没有点、也不是 localhost
+            ("", nil),
+        ]
+        let urlFailures = urlCases.compactMap { input, want -> String? in
+            let got = AX.normalizedAddressBarURL(input)
+            return got == want ? nil : "\(input.isEmpty ? "(空)" : input)→\(got ?? "nil")（期望 \(want ?? "nil")）"
+        }
+        check("地址栏 URL 归一化 \(urlCases.count) 条（省略的 scheme 补 https，搜索词一律不认）",
+              urlFailures.isEmpty, urlFailures.joined(separator: " "))
+
         let fallbackRule = AdapterRegistry.rule(for: "com.apple.finder")
         check("适配规则路由：\(AdapterRegistry.all.count) 条首批规则 + 兜底",
               routingOK && fallbackRule.bundleIDs.isEmpty
