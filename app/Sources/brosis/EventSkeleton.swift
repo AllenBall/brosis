@@ -254,9 +254,14 @@ final class EventSkeleton {
         if observedPID != pid {
             detachObserver()
             // Chromium / Electron 系必须先打开手动无障碍再读树（报告 3.2）。
+            // 只给"规则真的会读 AX 树"的应用设私有属性（见 enableManualAccessibilityIfNeeded）。
+            let wantsEnhanced = AdapterRegistry.rule(for: app.bundleIdentifier,
+                                                     bundleURL: app.bundleURL)
+                .enhancedRegions != nil
             let manual = AX.enableManualAccessibilityIfNeeded(bundleID: app.bundleIdentifier,
                                                               bundleURL: app.bundleURL,
-                                                              pid: pid)
+                                                              pid: pid,
+                                                              wantsEnhanced: wantsEnhanced)
             if manual.firstSeen {
                 recorder.logEvent(kind: "ax_manual_accessibility", detail: manual.detail)
             }

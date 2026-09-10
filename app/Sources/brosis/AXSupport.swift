@@ -261,12 +261,19 @@ enum AX {
     ///
     /// 两个属性的分工：`AXManualAccessibility` 是 Electron 层为第三方 AT 打的补丁（公开），
     /// 纯 Chromium（Chrome / Edge）不认，只吃私有的 `AXEnhancedUserInterface`。
-    /// 后者只在用户显式打开开关时才设。
+    ///
+    /// `wantsEnhanced`：**这个应用的规则真的会去读 AX 树吗**。只有会读的才设私有属性。
+    /// 不加这道门的话，凡是被判为 Chromium 系的应用都会被设上——本机 `/Applications` 里
+    /// 结构检测命中 19 个（Slack、VS Code、Discord、Codex、Claude 桌面版……），
+    /// 而声明了 `enhancedRegions` 的只有 3 条规则。其余十几个应用要为此长期承担
+    /// Chromium 侧的无障碍树维护开销（每个标签页 / webview 都建树并保持同步），
+    /// 我们一个字都不读；更要紧的是，**按键重放的风险面被扩大到了零收益的应用上**。
     ///
     /// **设了就不再撤**：按键重放发生在"客户端断开"那一刻，我们能做的是不主动制造这个时刻——
     /// 不去把它设回 false。进程退出时系统那一侧的断开无法避免，这是开关本身的代价。
     @discardableResult
     static func enableManualAccessibilityIfNeeded(bundleID: String?, bundleURL: URL?, pid: pid_t,
+                                                  wantsEnhanced: Bool,
                                                   defaults: UserDefaults = .standard)
         -> ManualAccessibilityResult {
         let (detection, firstSeen) = chromiumDetection(bundleID: bundleID, bundleURL: bundleURL)
@@ -279,7 +286,7 @@ enum AX {
         let error = AXUIElementSetAttributeValue(
             element, "AXManualAccessibility" as CFString, kCFBooleanTrue)
         var enhanced: AXError?
-        if enhancedUserInterfaceEnabled(defaults) {
+        if wantsEnhanced, enhancedUserInterfaceEnabled(defaults) {
             enhanced = AXUIElementSetAttributeValue(
                 element, "AXEnhancedUserInterface" as CFString, kCFBooleanTrue)
         }
@@ -413,44 +420,30 @@ enum AX {
         let document = string(window, kAXDocumentAttribute as String)
         var url = string(window, kAXURLAttribute as String)
         if url == nil {
-            // Safari / Chromium 的 URL 挂在 AXWebArea 上，不在窗口上。
-            url = firstWebAreaURL(in: window, limits: limits)
-        }
-        if url == nil, let bundleID, PrivateBrowsing.browserBundleIDs.contains(bundleID) {
-            // Chrome 系默认没有 AXWebArea：网页无障碍树要私有的 `AXEnhancedUserInterface`
-            // 才会建，而那个开关默认是关的（见 `enhancedUserInterfaceKey`）。
-            // 开关开着时这里通常取不到——AXWebArea 那条路已经先拿到 URL 了。
-            // 实测 Chrome 153 整棵树 43 个节点全是浏览器外壳——但**地址栏那个 AXTextField 有值**，
-            // 那就是当前页的 URL，不需要任何额外权限，也不需要装扩展。
-            url = addressBarURL(in: window, limits: limits)
+            // Safari / Chromium 的 URL 挂在 AXWebArea 上，不在窗口上；地址栏那条是它的兜底，
+            // 两者同一趟遍历里一起找（见 `urlSources`）。
+            let isBrowser = bundleID.map(PrivateBrowsing.browserBundleIDs.contains) ?? false
+            let sources = urlSources(in: window, limits: limits, includeAddressBar: isBrowser)
+            url = sources.webArea ?? sources.addressBar.flatMap(normalizedAddressBarURL)
         }
         return (window, WindowInfo(title: title, url: url, document: document,
                                    frame: frame(window), timedOut: false))
     }
 
-    /// 从浏览器工具栏里那个地址栏 `AXTextField` 取当前页 URL。
-    ///
-    /// 两件事要小心：
+    /// 地址栏取到的原始值怎么变成一条能入库的 URL。两件事要小心：
     ///  1. **地址栏里未必是 URL**。用户正在输入时它是搜索词；新标签页是空的。所以只接受
     ///     "第一个 `/` 之前带点、且整串没有空白"的值，别的一律当没读到。
     ///  2. **Chrome 把 scheme 省掉了**（显示 `example.com/x` 而不是 `https://example.com/x`），
     ///     而 `EventSkeleton.urlRef` 要有 scheme 才认成 web、才抽得出 host。
     ///     没有 `://` 时补 `https://`：**这是个假设**，站点是 http 的话 scheme 会存错，
     ///     但 host 与 path 是对的，而这个字段的用途正是 `url:` / `host:` / `path:` 检索。
-    static func addressBarURL(in window: AXUIElement, limits: BFSLimits) -> String? {
-        guard let raw = firstTextFieldValue(in: window, limits: limits) else { return nil }
-        return normalizedAddressBarURL(raw)
-    }
-
     /// 纯函数，自检逐条覆盖。
     static func normalizedAddressBarURL(_ raw: String) -> String? {
         let value = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !value.isEmpty, value.rangeOfCharacter(from: .whitespacesAndNewlines) == nil
         else { return nil }
-        if value.lowercased().hasPrefix("http://") || value.lowercased().hasPrefix("https://") {
-            return value
-        }
-        // 别把别的 scheme（chrome://、about:、file://）改写成 https。
+        // 已经带 scheme 的一律原样返回——http/https 不必单列一条，那条与这句结果相同。
+        // `about:` 没有 `//`，单独放行。
         guard !value.contains("://"), !value.hasPrefix("about:") else { return value }
         let host = value.split(separator: "/", maxSplits: 1).first.map(String.init) ?? value
         // `localhost` / `localhost:3000` 没有点，但它是开发时最常见的一类地址，单独放行。
@@ -460,36 +453,43 @@ enum AX {
         return "https://" + value
     }
 
-    private static func firstTextFieldValue(in window: AXUIElement, limits: BFSLimits) -> String? {
-        var queue: [(AXUIElement, Int)] = [(window, 0)]
-        var visited = 0
-        while let (element, depth) = queue.first {
-            queue.removeFirst()
-            visited += 1
-            if visited > min(webAreaSearchNodes, limits.maxNodes) || depth > limits.maxDepth { break }
-            if role(element) == "AXTextField",
-               let value = string(element, kAXValueAttribute as String), !value.isEmpty {
-                return value
-            }
-            for child in children(element) { queue.append((child, depth + 1)) }
-        }
-        return nil
-    }
+    /// 地址栏在树里的最大深度。Chrome 实测在 `AXWindow → AXGroup → AXToolbar → AXTextField`
+    /// 一带，深度 4 足够；网页正文比这深得多，所以这道界同时起到"别钻进 DOM 里找输入框"的作用
+    /// （Safari / Firefox 的 `AXWebArea` 底下有成百上千个节点）。
+    static let addressBarMaxDepth = 5
 
-    private static func firstWebAreaURL(in window: AXUIElement, limits: BFSLimits) -> String? {
+    /// 一次遍历，同时找**网页区的 URL** 与**地址栏的值**。
+    ///
+    /// 合并的理由是它们本来就走同一棵树：地址栏那条只在网页区那条落空时才用得上，而
+    /// "落空"意味着上一趟已经把整棵树按上限走完了。分成两个函数就要走两遍，
+    /// 每个节点两次跨进程调用（`role` + `children`），每次都挂着 0.5 s 的超时。
+    /// 两条都拿到就提前收工。
+    private static func urlSources(in window: AXUIElement, limits: BFSLimits,
+                                   includeAddressBar: Bool) -> (webArea: String?, addressBar: String?) {
         let nodeCap = min(webAreaSearchNodes, limits.maxNodes)
+        var webArea: String?
+        var addressBar: String?
         var queue: [(AXUIElement, Int)] = [(window, 0)]
         var visited = 0
         while let (element, depth) = queue.first {
             queue.removeFirst()
             visited += 1
             if visited > nodeCap || depth > limits.maxDepth { break }
-            if role(element) == "AXWebArea", let url = string(element, kAXURLAttribute as String) {
-                return url
+            switch role(element) {
+            case "AXWebArea":
+                if webArea == nil { webArea = string(element, kAXURLAttribute as String) }
+            case "AXTextField":
+                if includeAddressBar, addressBar == nil, depth <= addressBarMaxDepth,
+                   let value = string(element, kAXValueAttribute as String), !value.isEmpty {
+                    addressBar = value
+                }
+            default:
+                break
             }
+            if webArea != nil, !includeAddressBar || addressBar != nil { break }
             for child in children(element) { queue.append((child, depth + 1)) }
         }
-        return nil
+        return (webArea, addressBar)
     }
 
     // MARK: - 正文文本统计

@@ -167,7 +167,9 @@ enum AdapterVectors {
                  mustNotContain: [],
                  expectedOCRRegions: ["conversation"]),
         RuleCase(name: "飞书：消息列表只取视口内已渲染的行",
-                 rule: AdapterRegistry.feishu,
+                 // **显式取"开关关着"那副样子**：合成树里是 AXList，而默认配置下飞书跑的是
+                 // AXWebArea 那副。不写清楚的话，这条向量看起来在测默认行为，其实不是。
+                 rule: AdapterRegistry.feishu.resolvingEnhanced(false),
                  tree: feishuTree,
                  expectedFragments: 1,
                  expectedCompleteness: .partial,

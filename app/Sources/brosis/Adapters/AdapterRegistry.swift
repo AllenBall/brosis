@@ -80,8 +80,8 @@ enum AdapterRegistry {
     /// 全部 68 个"正文"字符其实是地址栏那一串 URL。七个取样时刻、maxDepth 8→100 结果一致。
     /// 原因是 Chrome 的网页无障碍树要私有属性 `AXEnhancedUserInterface` 才会建，
     /// 而那个开关**默认开**（`AX.enhancedUserInterfaceKey`，代价见那里）。所以默认走的是
-    /// `chromeRule(enhanced: true)`：优先读 AXWebArea 的 DOM 文本。下面这副纯 OCR 的样子
-    /// 是**关掉开关之后**的形态，也是这条规则最初的形态。
+    /// `enhancedRegions`（`webAreaRegions()`）：优先读 AXWebArea 的 DOM 文本。
+    /// 下面这副纯 OCR 的样子是**关掉开关之后**的形态，也是这条规则最初的形态。
     /// 所以正文只能 OCR，URL 单独从地址栏取（`AX.addressBarURL`）——两件事都不需要装扩展。
     ///
     /// 在这条规则之前 Chrome 落在 `genericChromium` 上，后果有两个：
@@ -99,11 +99,14 @@ enum AdapterRegistry {
     /// 回退矩形跟着 AXWebArea 走，比按点数裁顶部外壳更准。这时 `readsAX` 变 true，
     /// Chromium「读到空树 ⇒ 排一次重扫」那条路重新生效——那正是它当初的设计场景
     /// （Chromium 的树是**异步**建起来的，第一次多半读到空）。
-    static let chromeEnhancedRegions = [
-        RegionRule(name: "web_area", kind: .body, locator: .role("AXWebArea"),
-                   read: .axSubtree, ocrFallback: true, required: true, clipToViewport: true,
-                   preferRichestMatch: true),
-    ]
+    /// 开关开着时那副样子的区域：读最富的那个 `AXWebArea` 的 DOM 文本，读空回退 OCR。
+    /// 三条规则（Chrome / 飞书 / 飞书会议）用的是同一副，只有 `kind` 不同——
+    /// 写成三份的话，改一次策略（比如 `preferRichestMatch` 或 `clipToViewport`）要改三处。
+    static func webAreaRegions(kind: RegionKind = .body) -> [RegionRule] {
+        [RegionRule(name: "web_area", kind: kind, locator: .role("AXWebArea"),
+                    read: .axSubtree, ocrFallback: true, required: true, clipToViewport: true,
+                    preferRichestMatch: true)]
+    }
 
     /// **未按开关定形**。定形只发生在 `all` 那一处（`resolvingEnhanced`），
     /// 所以这条以及自检拿到的都是基座；`rule(for:)` 返回的才是定过形的。
@@ -124,14 +127,20 @@ enum AdapterRegistry {
                        read: .ocr, ocrFallback: false, required: true, clipToViewport: true),
         ],
         chatLayout: nil,
-        limits: AX.BFSLimits(maxNodes: 300, maxDepth: 8),
-        notes: "AX 只给浏览器外壳（实测 43 节点、无 AXWebArea），正文走整页视口 OCR；"
+        // **限额按"开关开着"那副样子定**：300/8 是按关着时那棵 43 节点的外壳树估的，
+        // 开着时要走的是整棵网页 DOM 子树（飞书实测两个 web area 各 474 / 510 节点，
+        // Claude 桌面版当年要 3000/30）。限额跟着规则走、不跟着 regions 走，
+        // 所以必须按更大的那副定，否则开关一开就静默截断。
+        limits: AX.BFSLimits(maxNodes: 3_000, maxDepth: 30),
+        notes: "两副样子：私有属性开关关着时 AX 只给浏览器外壳（实测 43 节点、无 AXWebArea），"
+             + "走整页视口 OCR、顶部外壳按 adapter.chrome.toolbarHeight 裁；"
+             + "开着时改读最富的 AXWebArea（DOM 文本，逐字准确、含视口外内容），读空回退 OCR。"
              + "URL 从地址栏的 AXTextField 取，不装扩展、不用私有属性。"
              + "截图走窗口定向：别的窗口盖在上面时不会把它的像素记成 Chrome 的页面。"
              + "顶部外壳按点数裁（默认 80，开书签栏约 112，adapter.chrome.toolbarHeight 可校准）；"
              + "只记屏幕上显示出来的字：视频、图片、canvas 里的内容只有渲染成文字才认得到。",
         capturesWindow: true,
-        enhancedRegions: chromeEnhancedRegions)
+        enhancedRegions: webAreaRegions())
 
     // MARK: - 飞书（Electron）
 
@@ -166,11 +175,7 @@ enum AdapterRegistry {
         //
         // 会话名不用再单独 OCR 一次：飞书的窗口标题本来就带会话名
         //（"邱军雅 洋葱学园 张怡君 …"），不像微信恒为"微信"。
-        enhancedRegions: [
-            RegionRule(name: "web_area", kind: .messageList, locator: .role("AXWebArea"),
-                       read: .axSubtree, ocrFallback: true, required: true, clipToViewport: true,
-                       preferRichestMatch: true),
-        ])
+        enhancedRegions: webAreaRegions(kind: .messageList))
 
     // MARK: - 飞书会议（**另一个 app**，AX 是死的）
 
@@ -230,11 +235,7 @@ enum AdapterRegistry {
         // **没实测过**：写这条时手边没有正在进行的会议。逻辑上它和飞书主程序同源
         //（同一个 Lark Framework 的 Chromium），开关开着就可能建起树来。
         // `ocrFallback: true` 兜住：读到空就退回今天这条整窗 OCR，不会比现在更差。
-        enhancedRegions: [
-            RegionRule(name: "web_area", kind: .body, locator: .role("AXWebArea"),
-                       read: .axSubtree, ocrFallback: true, required: true, clipToViewport: true,
-                       preferRichestMatch: true),
-        ])
+        enhancedRegions: webAreaRegions())
 
     // MARK: - 微信（原生但 AX 空）
 
