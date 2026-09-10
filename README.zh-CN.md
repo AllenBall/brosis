@@ -211,7 +211,16 @@ brosis --dump-ocr       # OCR 识别结果逐行核对
 
 Electron 应用需要先设 `AXManualAccessibility` 才暴露无障碍树；一个窗口里往往有多个 `AXWebArea`（外壳一个、真正的应用一个、内嵌预览再一个），必须挑内容最多的那个而不是第一个。Chromium 建树是异步的，读到空树时会隔一会儿重扫。
 
-**不使用 `AXEnhancedUserInterface`**，即使某些应用只认它。该属性会让 Chromium 进入屏幕阅读器模式并缓冲按键，客户端断开时把缓冲的按键**重放进用户当前的焦点输入框**——对一个常驻后台的记录器来说不可接受。这类应用维持 OCR 路径。
+**Chrome 系浏览器**（Chrome / Edge / Brave / Vivaldi / Arc）只认私有属性 `AXEnhancedUserInterface`，不认公开的 `AXManualAccessibility`。实测 Chrome 153 的无障碍树只有 43 个节点、全是浏览器外壳、**没有 `AXWebArea`**。所以默认路径是：正文整页 OCR，URL 从地址栏的 `AXTextField` 直接读——两件事都不需要装扩展。截图走窗口定向，别的窗口盖在上面时不会把它的像素记成网页内容。
+
+**`AXEnhancedUserInterface` 默认关闭，可以自行打开。** 打开后 Chrome 会真的建起网页无障碍树，正文改为优先读 DOM 文本（比 OCR 完整得多，含滚动区外的内容），读空再回退 OCR。
+
+⚠️ **打开前请知道代价**：该属性会让 Chromium 进入屏幕阅读器模式并**缓冲按键**，设置它的客户端断开时，把缓冲的按键**重放进用户当时的焦点输入框**（见 [screenpipe #3884](https://github.com/mediar-ai/screenpipe/issues/3884)；1Password、Alfred 也出现过）。伤害落点不在 brosis 自己，而在你正在打字的**别的窗口**。这就是它默认关闭、且升级不会自动打开的原因。
+
+```bash
+defaults write com.brosis.app ax.enhancedUserInterface -bool true   # 打开，需重启 app
+defaults delete com.brosis.app ax.enhancedUserInterface             # 关掉
+```
 
 **向量检索是可选的。** 所有尺寸的模型统一截断到 1024 维，换模型只需重建向量、不用改表。模型在本地用 mlx-swift 跑。建索引受门控：接电、温度正常、未锁定、日均 GPU 预算。没装模型时向量通道显示为未启用，精确字段与全文检索不受影响。
 

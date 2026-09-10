@@ -1065,6 +1065,27 @@ enum SelfCheck {
               "\(chromeRule.id)，OCR=\(chromeRule.declaresOCR) "
                 + "窗口定向=\(chromeRule.capturesWindow) 读AX=\(chromeRule.readsAX)")
 
+        // 私有属性开关：关着 ⇒ 纯 OCR、不读 AX；开着 ⇒ 优先读 AXWebArea、读空回退 OCR。
+        // 开关默认关，因为 AXEnhancedUserInterface 会让 Chromium 缓冲按键、断开时重放进
+        // 用户当时的焦点输入框（screenpipe #3884）——伤害落在别的窗口，必须由人明确同意。
+        let chromeOff = AdapterRegistry.chromeRule(enhanced: false)
+        let chromeOn = AdapterRegistry.chromeRule(enhanced: true)
+        let axSuite = SelfCheckDefaults.name("ax-enhanced")
+        let axDefaults = UserDefaults(suiteName: axSuite)!
+        defer { SelfCheckDefaults.discard(axDefaults, name: axSuite) }
+        let defaultOff = !AX.enhancedUserInterfaceEnabled(axDefaults)
+        axDefaults.set(true, forKey: AX.enhancedUserInterfaceKey)
+        let readsBack = AX.enhancedUserInterfaceEnabled(axDefaults)
+        check("私有属性开关：默认关（升级不会悄悄把按键重放的风险带上），设了读得回来",
+              defaultOff && readsBack, "键 \(AX.enhancedUserInterfaceKey)")
+        check("开关关着：Chrome 纯 OCR、不读 AX；开着：读 AXWebArea 且保留 OCR 回退",
+              !chromeOff.readsAX && chromeOff.declaresOCR
+                && chromeOn.readsAX && chromeOn.declaresOCR
+                && chromeOn.regions.contains { $0.ocrFallback }
+                && chromeOff.capturesWindow && chromeOn.capturesWindow,
+              "关=\(chromeOff.regions.map(\.name).joined(separator: "/"))"
+                + "，开=\(chromeOn.regions.map(\.name).joined(separator: "/"))")
+
         // 地址栏取 URL 的纯函数。Chrome 把 scheme 省掉，而 urlRef 要有 scheme 才抽得出 host。
         let urlCases: [(String, String?)] = [
             ("7to12.yangcong345.com/onion-tenon/#/home", "https://7to12.yangcong345.com/onion-tenon/#/home"),

@@ -79,7 +79,8 @@ enum AdapterRegistry {
     /// 角色全是 AXGroup / AXButton / AXToolbar / AXTabGroup，**没有 AXWebArea**；
     /// 全部 68 个"正文"字符其实是地址栏那一串 URL。七个取样时刻、maxDepth 8→100 结果一致。
     /// 原因是 Chrome 的网页无障碍树要私有属性 `AXEnhancedUserInterface` 才会建，
-    /// 而本项目只用公开的 `AXManualAccessibility`（见 `AX.chromiumFamilyBundleIDs` 的说明）。
+    /// 而那个开关默认关（`AX.enhancedUserInterfaceKey`，理由见那里：按键会被重放进
+    /// 用户当时的焦点输入框）。开关打开后走的是 `chromeRule(enhanced: true)` 那一副样子。
     /// 所以正文只能 OCR，URL 单独从地址栏取（`AX.addressBarURL`）——两件事都不需要装扩展。
     ///
     /// 在这条规则之前 Chrome 落在 `genericChromium` 上，后果有两个：
@@ -93,7 +94,27 @@ enum AdapterRegistry {
     /// 库里可能出现用户当时其实看不见的页面内容。
     ///
     /// 无痕窗口不受影响：`PrivateBrowsing` 认标题里的 Incognito / 无痕浏览，那一支不读正文。
-    static let chrome = AdapterRule(
+    /// 开了私有属性开关就换一副样子。**做成纯函数**：`static let` 一个进程只算一次，
+    /// 自检没法在同一进程里同时验两种形态。
+    static func chromeRule(enhanced: Bool) -> AdapterRule {
+        var rule = chromeOCROnly
+        guard enhanced else { return rule }
+        // Chrome 收到 AXEnhancedUserInterface 之后会真的建网页无障碍树：正文优先走 AX
+        // （拿到的是 DOM 文本，含滚动区外、视口外的内容，比 OCR 完整得多），读空再回退 OCR。
+        // 回退时的矩形跟着 AXWebArea 走，比按点数裁顶部外壳更准——找不到才退回整窗。
+        //
+        // 这时 `readsAX` 变成 true，Chromium「读到空树 ⇒ 排一次重扫」那条路重新生效，
+        // 而这正是它当初的设计场景：Chromium 的树是**异步**建起来的，第一次多半读到空。
+        rule.regions = [
+            RegionRule(name: "web_area", kind: .body, locator: .role("AXWebArea"),
+                       read: .axSubtree, ocrFallback: true, required: true, clipToViewport: true),
+        ]
+        return rule
+    }
+
+    static let chrome: AdapterRule = chromeRule(enhanced: AX.enhancedUserInterfaceEnabled())
+
+    private static let chromeOCROnly = AdapterRule(
         id: "chrome",
         name: "Chrome 系浏览器",
         bundleIDs: ["com.google.Chrome", "com.google.Chrome.beta", "com.google.Chrome.canary",

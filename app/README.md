@@ -700,7 +700,7 @@ locked ──launch / menuUnlock / systemDidWake──▶ unlocking ──取钥
 | 2 | 分布式通知 `com.apple.screenIsLocked` / `com.apple.screenIsUnlocked` | 私有通知、不保证投递，只作补充 |
 
 **Chromium / Electron 系判定：两路。** 命中任意一路就在读树前设 `AXManualAccessibility`
-（公开属性，不用私有的 `AXEnhancedUserInterface`）：显式清单 `chromiumFamilyBundleIDs`（`detection=list`）、
+（默认只设公开属性；私有的 `AXEnhancedUserInterface` 由 `ax.enhancedUserInterface` 开关控制，默认关）：显式清单 `chromiumFamilyBundleIDs`（`detection=list`）、
 `Contents/Frameworks/` 下有 `Electron Framework.framework` 或 `Chromium Embedded Framework.framework`
 （`detection=framework`）。判定结果按 bundle id 缓存，每个 bundle id **第一次**判定时写一条
 `runtime_event:ax_manual_accessibility`。第二路不是万能的：改过框架名的应用匹配不到

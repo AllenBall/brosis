@@ -36,7 +36,8 @@ enum AX {
     // MARK: - Chromium / Electron 系判定
 
     /// **第一路：显式 bundle id 清单。**Chromium / Electron 系应用读 AX 前必须先设
-    /// `AXManualAccessibility`（报告 3.2）。这是公开属性，不用私有的 AXEnhancedUserInterface。
+    /// `AXManualAccessibility`（报告 3.2）。这是公开属性，**默认只设它**；私有的
+    /// `AXEnhancedUserInterface` 要用户显式打开开关才设，见 `enhancedUserInterfaceKey`。
     ///
     /// 清单只是第一路。M0 实测（`tools/bench/results/m0_closeout_2026-09-07.md` 2.2）：
     /// Claude 桌面版 `com.anthropic.claudefordesktop`（探针里停留时间第一）74 条观察、
@@ -196,6 +197,8 @@ enum AX {
         var axError: AXError?
         /// 这个 bundle id 是不是本进程第一次判定。调用方用它决定要不要写 runtime_events。
         var firstSeen: Bool
+        /// 设 `AXEnhancedUserInterface` 的返回值。nil = 开关关着，没设。
+        var enhancedAXError: AXError?
 
         var succeeded: Bool { applied && axError == .success }
 
@@ -207,13 +210,47 @@ enum AX {
             } else {
                 text += " set=skipped"
             }
+            // 私有属性单独记一段：出了事要能从审计里看出当时到底开没开。
+            if let enhancedAXError {
+                text += " enhanced=\(enhancedAXError == .success ? "ok" : "failed")"
+                      + " AXError=\(enhancedAXError.rawValue)"
+            }
             return text
         }
     }
 
+    // MARK: - AXEnhancedUserInterface（私有属性，默认关，用户可开）
+
+    /// 开关键。**默认 false**。
+    ///
+    /// 2026-09-10 用户要求把「只用公开属性」这条项目规则改成「允许使用私有属性」，
+    /// 于是这条路存在了——但**默认仍然是关的**，理由不是洁癖，是这个属性有确切的伤害：
+    ///
+    /// Chromium 收到它就进入屏幕阅读器模式，**开始缓冲按键**；设置它的那个客户端断开时，
+    /// 把缓冲的按键**重放进用户当时的焦点输入框**（出处 screenpipe #3884；1Password、
+    /// Alfred 也中过）。落点不在 brosis 自己，而在用户正在打字的**别的窗口**——
+    /// 密码框、聊天框都可能被塞进一段乱码。对一个整天常驻后台的记录器，这是必须由人
+    /// 明确同意才承担的风险，不该由升级悄悄带上。
+    ///
+    /// 打开：`defaults write com.brosis.app ax.enhancedUserInterface -bool true`（改完重启 app）
+    /// 关掉：`defaults delete com.brosis.app ax.enhancedUserInterface`
+    static let enhancedUserInterfaceKey = "ax.enhancedUserInterface"
+
+    static func enhancedUserInterfaceEnabled(_ defaults: UserDefaults = .standard) -> Bool {
+        defaults.bool(forKey: enhancedUserInterfaceKey)
+    }
+
     /// 对 Chromium / Electron 系应用打开手动无障碍。失败不影响其他通道。
+    ///
+    /// 两个属性的分工：`AXManualAccessibility` 是 Electron 层为第三方 AT 打的补丁（公开），
+    /// 纯 Chromium（Chrome / Edge）不认，只吃私有的 `AXEnhancedUserInterface`。
+    /// 后者只在用户显式打开开关时才设。
+    ///
+    /// **设了就不再撤**：按键重放发生在"客户端断开"那一刻，我们能做的是不主动制造这个时刻——
+    /// 不去把它设回 false。进程退出时系统那一侧的断开无法避免，这是开关本身的代价。
     @discardableResult
-    static func enableManualAccessibilityIfNeeded(bundleID: String?, bundleURL: URL?, pid: pid_t)
+    static func enableManualAccessibilityIfNeeded(bundleID: String?, bundleURL: URL?, pid: pid_t,
+                                                  defaults: UserDefaults = .standard)
         -> ManualAccessibilityResult {
         let (detection, firstSeen) = chromiumDetection(bundleID: bundleID, bundleURL: bundleURL)
         let key = bundleID ?? "(unknown)"
@@ -224,8 +261,14 @@ enum AX {
         let element = applicationElement(pid: pid)
         let error = AXUIElementSetAttributeValue(
             element, "AXManualAccessibility" as CFString, kCFBooleanTrue)
+        var enhanced: AXError?
+        if enhancedUserInterfaceEnabled(defaults) {
+            enhanced = AXUIElementSetAttributeValue(
+                element, "AXEnhancedUserInterface" as CFString, kCFBooleanTrue)
+        }
         return ManualAccessibilityResult(bundleID: key, detection: detection,
-                                         applied: true, axError: error, firstSeen: firstSeen)
+                                         applied: true, axError: error, firstSeen: firstSeen,
+                                         enhancedAXError: enhanced)
     }
 
     // MARK: - BFS 限额
@@ -357,8 +400,9 @@ enum AX {
             url = firstWebAreaURL(in: window, limits: limits)
         }
         if url == nil, let bundleID, PrivateBrowsing.browserBundleIDs.contains(bundleID) {
-            // Chrome 系压根没有 AXWebArea：网页无障碍树要私有的 `AXEnhancedUserInterface`
-            // 才会建，而本项目只用公开属性（见 chromiumFamilyBundleIDs 的说明）。
+            // Chrome 系默认没有 AXWebArea：网页无障碍树要私有的 `AXEnhancedUserInterface`
+            // 才会建，而那个开关默认是关的（见 `enhancedUserInterfaceKey`）。
+            // 开关开着时这里通常取不到——AXWebArea 那条路已经先拿到 URL 了。
             // 实测 Chrome 153 整棵树 43 个节点全是浏览器外壳——但**地址栏那个 AXTextField 有值**，
             // 那就是当前页的 URL，不需要任何额外权限，也不需要装扩展。
             url = addressBarURL(in: window, limits: limits)
