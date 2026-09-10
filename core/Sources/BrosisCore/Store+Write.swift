@@ -55,10 +55,57 @@ extension Store {
                 .optionalText(input.thumbRef),
             ])
 
+        let written = try writeTexts(input.texts, observationID: obsID, conn: conn)
+        try persistCounters()
+        return RecordResult(observationID: obsID, textVersionIDs: written.versionIDs,
+                            newTextVersions: written.newCount,
+                            reusedTextVersions: written.reusedCount)
+    }
+
+    /// **把正文补挂到一条已经写好的观察上。**
+    ///
+    /// 合并写入（`TextCoalescer`）用：一次流式输出里每秒一次扫描，只有最后那个稳定态
+    /// 有价值。采集端先把观察写下来（时间线不能缺段）、正文攒在内存里，等它安静下来
+    /// 再挂到**产生了这段正文的那条观察**上——所以时刻是准的，不是补写时的时刻。
+    ///
+    /// 与 `record` 走同一段写入逻辑（`writeTexts`），所以 sha256 去重、occurrences、
+    /// FTS 三件事的口径完全一致，不会因为多一条入口而漂。
+    @discardableResult
+    public func attachTexts(observationID: Int64, texts: [TextFragment]) throws -> RecordResult {
+        guard !texts.isEmpty else {
+            return RecordResult(observationID: observationID, textVersionIDs: [],
+                                newTextVersions: 0, reusedTextVersions: 0)
+        }
+        return try withLock { conn in
+            try conn.transaction {
+                let written = try writeTexts(texts, observationID: observationID, conn: conn)
+                try persistCounters()
+                return RecordResult(observationID: observationID,
+                                    textVersionIDs: written.versionIDs,
+                                    newTextVersions: written.newCount,
+                                    reusedTextVersions: written.reusedCount)
+            }
+        }
+    }
+
+    /// 正文 → 文本版本（sha256 去重）→ occurrences。`record` 与 `attachTexts` 共用。
+    ///
+    /// **`ord` 接着已有的往下排，不是从 0 重来**：`occurrences` 上有
+    /// `(device_id, observation_id, ord)` 唯一约束，而补挂这条路（`attachTexts`）面对的
+    /// 观察可能已经有 occurrence 了。写这段时我从 0 开始，自检当场撞了这个约束——
+    /// 生产路径上每条观察只挂一次、撞不到，但约束不该靠"调用方不会这么做"来满足。
+    private func writeTexts(_ texts: [TextFragment], observationID obsID: Int64,
+                            conn: SQLiteConnection)
+        throws -> (versionIDs: [Int64], newCount: Int, reusedCount: Int) {
         var versionIDs: [Int64] = []
         var newCount = 0
         var reusedCount = 0
-        for (ord, fragment) in input.texts.enumerated() {
+        let baseOrd = Int(try conn.scalarInt("""
+            SELECT COALESCE(MAX(ord) + 1, 0) FROM occurrences
+             WHERE device_id = ? AND observation_id = ?;
+            """, [.text(deviceID), .int(obsID)]) ?? 0)
+        for (offset, fragment) in texts.enumerated() {
+            let ord = baseOrd + offset
             let (tvID, isNew) = try upsertTextVersion(fragment.text, conn: conn)
             if isNew { newCount += 1 } else { reusedCount += 1 }
             versionIDs.append(tvID)
@@ -75,9 +122,7 @@ extension Store {
                     .optionalText(fragment.note),
                 ])
         }
-        try persistCounters()
-        return RecordResult(observationID: obsID, textVersionIDs: versionIDs,
-                            newTextVersions: newCount, reusedTextVersions: reusedCount)
+        return (versionIDs, newCount, reusedCount)
     }
 
     // MARK: - 规范化对象（对象身份 ≠ 内容版本）

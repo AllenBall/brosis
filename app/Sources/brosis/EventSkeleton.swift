@@ -32,6 +32,8 @@ private func axNotificationCallback(_ observer: AXObserver,
 final class EventSkeleton {
 
     private let recorder: Recorder
+    /// 正文写入合并：观察照写，正文攒到这一串扫描停下来再落盘（见 `TextCoalescer`）。
+    private let coalescer = TextCoalescer()
     private let policy: CapturePolicyStore
     /// 适配器 / 视口 OCR 的协调者（M1 R2 / T8）。事件骨架只往里推上下文，
     /// 真正跑 OCR 的是 `CaptureController.analyze` 那一侧——两边不用互相认识。
@@ -107,6 +109,13 @@ final class EventSkeleton {
     }
 
     func start() {
+        // 合并器的落盘动作在这里接上：正文挂到**产生它的那条观察**上，
+        // 所以时刻是那次扫描的时刻，不是补写时的时刻。
+        coalescer.install { [weak self] flush in
+            guard let self else { return }
+            self.recorder.attachTexts(observationID: flush.observationID,
+                                      fragments: flush.fragments)
+        }
         let center = NSWorkspace.shared.notificationCenter
         center.addObserver(self, selector: #selector(applicationActivated(_:)),
                            name: NSWorkspace.didActivateApplicationNotification, object: nil)
@@ -147,6 +156,10 @@ final class EventSkeleton {
     }
 
     func stop() {
+        // **先把攒着的正文落盘**，再拆观察者。锁库与退出都走这里，
+        // 手上那份不落就真丢了（合并的全部风险就在这几秒里）。
+        coalescer.flushNow(reason: "stopping")
+        coalescer.stop()
         NSWorkspace.shared.notificationCenter.removeObserver(self)
         DistributedNotificationCenter.default().removeObserver(self)
         detachObserver()
@@ -538,7 +551,14 @@ final class EventSkeleton {
             completeness: completeness,
             visibleRange: visibleRange,
             sourceState: sourceState,
-            texts: fragments))
+            // **正文不在这里落盘**：交给合并器攒着，等这一串扫描停下来再挂到
+            // 最后那条观察上（见 TextCoalescer）。观察本身照写——时间线不能缺段。
+            texts: []))
+        if let observationID, !fragments.isEmpty {
+            coalescer.offer(key: TextCoalescer.Key(bundleID: app.bundleIdentifier ?? "(unknown)",
+                                                   windowTitle: storedTitle ?? ""),
+                            observationID: observationID, fragments: fragments)
+        }
 
         if observationID != nil, axChars > 0 || privateBrowsing {
             recorder.recordCaptureStat(status: privateBrowsing ? "private_browsing" : "ax",

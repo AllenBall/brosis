@@ -127,6 +127,22 @@ final class Recorder: @unchecked Sendable {
         }
     }
 
+    /// 把正文补挂到一条已经写好的观察上（合并写入，见 `TextCoalescer`）。
+    /// 库没开就丢弃并计数——和 `record` 同一口径。
+    func attachTexts(observationID: Int64, fragments: [TextFragment]) {
+        let handle: Store? = lock.withLock { store }
+        guard let handle else {
+            lock.withLock { counters.droppedObservations += 1 }
+            return
+        }
+        do {
+            _ = try handle.attachTexts(observationID: observationID, texts: fragments)
+            lock.withLock { counters.observations += 1 }
+        } catch {
+            noteError(error)
+        }
+    }
+
     /// 运行期事件 → core 的 `jobs`（`type = 'runtime_event:<kind>'`）。
     func logEvent(kind: String, detail: String? = nil) {
         let handle: Store? = lock.withLock { store }

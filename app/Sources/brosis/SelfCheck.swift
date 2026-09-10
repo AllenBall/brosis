@@ -1420,6 +1420,73 @@ enum SelfCheck {
                 + "（阈值 \(CaptureCoordinator.coverageThresholdDefault)）")
 
 
+        // 12.13b 正文写入合并（2026-09-10）。判定是纯函数，先逐条钉住。
+        let coalesceKey = TextCoalescer.Key(bundleID: "com.selfcheck.a", windowTitle: "窗口一")
+        let otherKey = TextCoalescer.Key(bundleID: "com.selfcheck.b", windowTitle: "窗口二")
+        func pending(first: Double, last: Double) -> TextCoalescer.Pending {
+            TextCoalescer.Pending(key: coalesceKey, observationID: 1,
+                                  fragments: [TextFragment(text: "x", region: "r")],
+                                  firstOfferedAt: first, lastOfferedAt: last)
+        }
+        let coalesceCases: [(String, TextCoalescer.Pending?, TextCoalescer.Key?, Double, String?)] = [
+            ("手上没东西 ⇒ 不落盘", nil, coalesceKey, 100, nil),
+            ("同一个 key 又来一份 ⇒ 继续攒", pending(first: 100, last: 100), coalesceKey, 100.5, nil),
+            ("换了应用 ⇒ 立刻落盘", pending(first: 100, last: 100), otherKey, 100.5, "key_changed"),
+            ("安静够久 ⇒ 落盘", pending(first: 100, last: 100), nil, 103, "quiet"),
+            ("差一点点还不算安静", pending(first: 100, last: 100), nil, 102.9, nil),
+            // 一直在变的窗口（视频、滚动的日志）：不设这道闸它永远不落盘。
+            ("一直在变但超过最长暂存 ⇒ 落盘", pending(first: 100, last: 129.5), nil, 130, "max_hold"),
+            // 顺序：换 key 优先于安静期——换了应用不必再等三秒。
+            ("换 key 且已超最长暂存 ⇒ 先报换 key",
+             pending(first: 100, last: 100), otherKey, 200, "key_changed"),
+        ]
+        let coalesceFailures = coalesceCases.compactMap { label, p, incoming, now, want -> String? in
+            let got = TextCoalescer.decide(pending: p, incoming: incoming, now: now,
+                                           quiet: TextCoalescer.quietDefault,
+                                           maxHold: TextCoalescer.maxHoldDefault)
+            return got == want ? nil : "\(label)→\(got ?? "继续攒")（期望 \(want ?? "继续攒")）"
+        }
+        check("正文合并判定 \(coalesceCases.count) 条（安静 \(Int(TextCoalescer.quietDefault)) s / "
+                + "最长暂存 \(Int(TextCoalescer.maxHoldDefault)) s / 换 key 优先）",
+              coalesceFailures.isEmpty, coalesceFailures.joined(separator: " "))
+
+        // 端到端：补挂的正文必须与直接写的**完全等价**——能搜到、occurrence 挂对观察、
+        // 而且走的是同一段 sha256 去重（同样的文本第二次补挂不产生新版本）。
+        do {
+            let root = workspace.appendingPathComponent("coalesce-e2e", isDirectory: true)
+            var options = StoreOptions()
+            options.deviceID = "selfcheck-coalesce"
+            let store = try Store.open(directory: root,
+                                       keyProvider: try InMemoryKeyProvider.random(),
+                                       options: options)
+            defer { store.close() }
+            let obs = try store.record(ObservationInput(
+                ts: Recorder.milliseconds(), displayID: 1,
+                app: AppRef(bundleID: "com.selfcheck.coalesce", name: "自检合并"),
+                windowTitle: "会话", trigger: .appSwitch, captureMethod: .ax,
+                completeness: .partial, sourceState: .ok, texts: []))
+            let before = try store.count(table: "text_versions")
+            let text = "合并写入的正文应当能被检索到"
+            _ = try store.attachTexts(observationID: obs.observationID,
+                                      texts: [TextFragment(text: text, region: "adapter:x.body")])
+            let afterFirst = try store.count(table: "text_versions")
+            // 同一段文本再补挂一次：sha256 去重必须复用，不产生第二个版本。
+            _ = try store.attachTexts(observationID: obs.observationID,
+                                      texts: [TextFragment(text: text, region: "adapter:x.body")])
+            let afterSecond = try store.count(table: "text_versions")
+            let hits = try store.search(q: "合并写入", limit: 5).hits
+            let evidence = try store.getEvidence(ids: hits.map(\.evidenceID), grant: nil, neighbors: 0)
+            let item = evidence.items.first
+            check("正文合并端到端：补挂的正文能搜到、挂在原观察上、且照样按 sha256 去重",
+                  afterFirst == before + 1 && afterSecond == afterFirst
+                    && item?.evidenceID == obs.observationID
+                    && item?.text?.contains("合并写入") == true,
+                  "版本数 \(before)→\(afterFirst)→\(afterSecond)，命中 \(hits.count) 条")
+        } catch {
+            check("正文合并端到端：补挂的正文能搜到、挂在原观察上、且照样按 sha256 去重",
+                  false, "\(error)")
+        }
+
         // 12.14 端到端：合成上下文 → 协调者 → 自绘"屏幕" → OCR 观察 + capture_audit
         // 走的是产品路径本身（`CaptureCoordinator.handleFrame`），只把"显示器有多大"喂进来。
         do {
