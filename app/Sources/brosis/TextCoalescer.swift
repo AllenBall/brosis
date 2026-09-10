@@ -25,8 +25,12 @@ final class TextCoalescer {
     nonisolated static let quietKey = "capture.textCoalesceQuiet"
     nonisolated static let quietDefault: TimeInterval = 3
     /// 最长暂存。兜住"一直在变"的窗口（视频、滚动的日志），否则它永远不落盘。
+    ///
+    /// 60 s 是用户 2026-09-10 定的（方案里我提的是 30）。这个数只影响**一直在变**的窗口：
+    /// 会停下来的内容由安静期收口，根本走不到这里。放大它 = 这类窗口的快照更稀疏、
+    /// 省得更多，代价是崩溃时可能丢掉最多这么长时间的一份正文。
     nonisolated static let maxHoldKey = "capture.textCoalesceMaxHold"
-    nonisolated static let maxHoldDefault: TimeInterval = 30
+    nonisolated static let maxHoldDefault: TimeInterval = 60
 
     /// 归一 key：换应用或换窗口就是换内容，不能合并。
     struct Key: Hashable, Sendable {

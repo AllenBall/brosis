@@ -1435,7 +1435,11 @@ enum SelfCheck {
             ("安静够久 ⇒ 落盘", pending(first: 100, last: 100), nil, 103, "quiet"),
             ("差一点点还不算安静", pending(first: 100, last: 100), nil, 102.9, nil),
             // 一直在变的窗口（视频、滚动的日志）：不设这道闸它永远不落盘。
-            ("一直在变但超过最长暂存 ⇒ 落盘", pending(first: 100, last: 129.5), nil, 130, "max_hold"),
+            // **用例从常量算出来**，不写死秒数——2026-09-10 把 30 改成 60 时，
+            // 写死的那版会当场失效，而失效的原因和被测的行为无关。
+            ("一直在变但超过最长暂存 ⇒ 落盘",
+             pending(first: 100, last: 100 + TextCoalescer.maxHoldDefault - 0.5), nil,
+             100 + TextCoalescer.maxHoldDefault, "max_hold"),
             // 顺序：换 key 优先于安静期——换了应用不必再等三秒。
             ("换 key 且已超最长暂存 ⇒ 先报换 key",
              pending(first: 100, last: 100), otherKey, 200, "key_changed"),
