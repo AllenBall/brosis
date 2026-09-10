@@ -22,6 +22,11 @@ import Foundation
 final class TextCoalescer {
 
     /// 安静多久算"停下来了"。Claude 流式约 1 次/秒，3 秒没动静基本就是停了。
+    ///
+    /// **设成 0 就是关掉合并**：每次扫描的正文立刻落盘，回到 0.6.0 的行为
+    /// （`decide` 里 `now - lastOfferedAt >= 0` 恒真，下一次 offer 会把上一份直接落掉）。
+    /// 发布说明里承诺了这个开关，所以它必须真的能关——第一版的守卫写成 `raw > 0`，
+    /// 0 会被当成非法值悄悄退回默认 3 秒，等于给了一个看起来能用、实际无效的开关。
     nonisolated static let quietKey = "capture.textCoalesceQuiet"
     nonisolated static let quietDefault: TimeInterval = 3
     /// 最长暂存。兜住"一直在变"的窗口（视频、滚动的日志），否则它永远不落盘。
@@ -86,16 +91,30 @@ final class TextCoalescer {
     /// 落盘动作。由 `EventSkeleton` 接到 `Recorder.attachTexts`。
     private var onFlush: ((Int64, [TextFragment]) -> Void)?
 
-    init(defaults: UserDefaults = .standard) {
-        func seconds(_ key: String, _ fallback: TimeInterval) -> TimeInterval {
+    /// 从 defaults 解出两个参数。**`nonisolated static`**：这是纯函数，
+    /// 自检要能直接调它验"承诺的开关真的能关"，而 `TextCoalescer` 本身是 `@MainActor`。
+    ///
+    /// `quiet` 允许 0，那是**关掉合并**的开关（`decide` 里 `now - lastOfferedAt >= 0` 恒真，
+    /// 下一次 offer 会把上一份直接落掉，等于回到每次扫描都落盘）。
+    /// `maxHold` 不允许 0——0 的效果与 quiet=0 重复，却绕开了正路，语义难解释。
+    /// 负数与 NaN 一律当没设过：宁可用默认值，也不要让一个手误把采集改成另一副样子。
+    nonisolated static func resolve(_ defaults: UserDefaults)
+        -> (quiet: TimeInterval, maxHold: TimeInterval) {
+        func seconds(_ key: String, _ fallback: TimeInterval, allowZero: Bool) -> TimeInterval {
             guard defaults.object(forKey: key) != nil else { return fallback }
             let raw = defaults.double(forKey: key)
-            return raw.isFinite && raw > 0 ? raw : fallback
+            guard raw.isFinite, allowZero ? raw >= 0 : raw > 0 else { return fallback }
+            return raw
         }
-        let quiet = seconds(Self.quietKey, Self.quietDefault)
-        self.quiet = quiet
+        let quiet = seconds(quietKey, quietDefault, allowZero: true)
         // 夹住下限：`maxHold < quiet` 的话 `decide` 里那条安静期分支永远轮不到。
-        maxHold = max(seconds(Self.maxHoldKey, Self.maxHoldDefault), quiet)
+        return (quiet, max(seconds(maxHoldKey, maxHoldDefault, allowZero: false), quiet))
+    }
+
+    init(defaults: UserDefaults = .standard) {
+        let resolved = Self.resolve(defaults)
+        quiet = resolved.quiet
+        maxHold = resolved.maxHold
     }
 
     func configure(onFlush: @escaping (Int64, [TextFragment]) -> Void) {

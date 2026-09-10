@@ -1459,6 +1459,21 @@ enum SelfCheck {
 
         // 端到端：补挂的正文必须与直接写的**完全等价**——能搜到、occurrence 挂对观察、
         // 而且走的是同一段 sha256 去重（同样的文本第二次补挂不产生新版本）。
+        // 关掉合并的开关必须真的能关。第一版守卫写成 `raw > 0`，`-float 0` 会被当成非法值
+        // 悄悄退回默认 3 秒——而发布说明里承诺了这个开关。这条钉的就是"承诺与实现一致"。
+        let quietSuite = SelfCheckDefaults.name("coalesce-quiet")
+        let quietDefaults = UserDefaults(suiteName: quietSuite)!
+        defer { SelfCheckDefaults.discard(quietDefaults, name: quietSuite) }
+        let defaultQuiet = TextCoalescer.resolve(quietDefaults).quiet
+        quietDefaults.set(0, forKey: TextCoalescer.quietKey)
+        let zeroQuiet = TextCoalescer.resolve(quietDefaults).quiet
+        quietDefaults.set(-5, forKey: TextCoalescer.quietKey)
+        let negativeQuiet = TextCoalescer.resolve(quietDefaults).quiet
+        check("合并开关：没设过 = \(Int(TextCoalescer.quietDefault)) s，设 0 真的关得掉，负数当没设过",
+              defaultQuiet == TextCoalescer.quietDefault && zeroQuiet == 0
+                && negativeQuiet == TextCoalescer.quietDefault,
+              "默认 \(defaultQuiet)、设0 \(zeroQuiet)、设-5 \(negativeQuiet)")
+
         let coalesceE2ETitle = "正文合并端到端：补挂的正文能搜到、挂在原观察上、且照样按 sha256 去重"
         do {
             let root = workspace.appendingPathComponent("coalesce-e2e", isDirectory: true)
