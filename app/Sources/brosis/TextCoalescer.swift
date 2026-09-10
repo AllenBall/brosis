@@ -54,26 +54,37 @@ final class TextCoalescer {
         var reason: String
     }
 
-    /// **纯函数**：手上这份该不该落盘了。返回 nil = 继续攒。
+    /// 落盘的理由。**纯函数**：手上这份该不该落盘了，nil = 继续攒。
     ///
     /// `incoming` 是这一刻新来的 key（定时器来问时传 nil）。顺序有意义：
     /// 换 key 优先于安静期——换了应用就该立刻落盘，不必再等三秒。
+    enum Reason: String, Sendable {
+        case keyChanged = "key_changed"
+        case maxHold = "max_hold"
+        case quiet
+        case stopping
+    }
+
     /// `nonisolated`：这是纯函数，自检在非主线程上下文里也要能直接调。
     nonisolated static func decide(pending: Pending?, incoming: Key?, now: TimeInterval,
-                                   quiet: TimeInterval, maxHold: TimeInterval) -> String? {
+                                   quiet: TimeInterval, maxHold: TimeInterval) -> Reason? {
         guard let pending else { return nil }
-        if let incoming, incoming != pending.key { return "key_changed" }
-        if now - pending.firstOfferedAt >= maxHold { return "max_hold" }
-        if now - pending.lastOfferedAt >= quiet { return "quiet" }
+        if let incoming, incoming != pending.key { return .keyChanged }
+        if now - pending.firstOfferedAt >= maxHold { return .maxHold }
+        if now - pending.lastOfferedAt >= quiet { return .quiet }
         return nil
     }
 
     private var pending: Pending?
-    private var timer: Timer?
+    /// 排着的那次落盘。**只在手上有东西时才排**，每次 offer 取消重排——
+    /// 与 `CaptureController.schedulePending()` 同一个形状。
+    /// 上一版是每秒一跳的常驻 `Timer`（还没设 tolerance），空闲时也照跳：
+    /// 一天 8.6 万次主线程唤醒，而 `pending` 绝大多数时间是 nil。
+    private var scheduled: DispatchWorkItem?
     private let quiet: TimeInterval
     private let maxHold: TimeInterval
     /// 落盘动作。由 `EventSkeleton` 接到 `Recorder.attachTexts`。
-    private var onFlush: ((Flush) -> Void)?
+    private var onFlush: ((Int64, [TextFragment]) -> Void)?
 
     init(defaults: UserDefaults = .standard) {
         func seconds(_ key: String, _ fallback: TimeInterval) -> TimeInterval {
@@ -81,65 +92,64 @@ final class TextCoalescer {
             let raw = defaults.double(forKey: key)
             return raw.isFinite && raw > 0 ? raw : fallback
         }
-        quiet = seconds(Self.quietKey, Self.quietDefault)
-        maxHold = max(seconds(Self.maxHoldKey, Self.maxHoldDefault),
-                      seconds(Self.quietKey, Self.quietDefault))
+        let quiet = seconds(Self.quietKey, Self.quietDefault)
+        self.quiet = quiet
+        // 夹住下限：`maxHold < quiet` 的话 `decide` 里那条安静期分支永远轮不到。
+        maxHold = max(seconds(Self.maxHoldKey, Self.maxHoldDefault), quiet)
     }
 
-    func install(onFlush: @escaping (Flush) -> Void) {
+    func configure(onFlush: @escaping (Int64, [TextFragment]) -> Void) {
         self.onFlush = onFlush
-        guard timer == nil else { return }
-        // 每秒问一次。安静期与最长暂存都是秒级判据，1 s 的粒度足够，
-        // 而且这个定时器什么都不做时的代价就是一次比较。
-        let t = Timer(timeInterval: 1, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated { self?.tick() }
-        }
-        RunLoop.main.add(t, forMode: .common)
-        timer = t
-    }
-
-    func stop() {
-        timer?.invalidate()
-        timer = nil
     }
 
     /// 一次扫描读到了正文。**观察已经写好了**，这里只决定正文什么时候落盘。
     func offer(key: Key, observationID: Int64, fragments: [TextFragment],
                now: TimeInterval = Date().timeIntervalSince1970) {
         guard !fragments.isEmpty else { return }
-        if let reason = Self.decide(pending: pending, incoming: key, now: now,
-                                    quiet: quiet, maxHold: maxHold) {
-            emit(reason: reason)
+        if Self.decide(pending: pending, incoming: key, now: now,
+                       quiet: quiet, maxHold: maxHold) != nil {
+            flush()
         }
-        if var current = pending, current.key == key {
-            // 同一个 key 又来一份：直接覆盖，旧的从来没落过盘，丢掉不留痕迹。
-            current.observationID = observationID
-            current.fragments = fragments
-            current.lastOfferedAt = now
-            pending = current
-        } else {
-            pending = Pending(key: key, observationID: observationID, fragments: fragments,
-                              firstOfferedAt: now, lastOfferedAt: now)
-        }
+        // 走到这里时 `pending` 要么是 nil，要么就是同一个 key（不同 key 上面已经落盘并清空），
+        // 所以只有一条赋值：`firstOfferedAt` 沿用旧的（最长暂存从这一串的开头算）。
+        pending = Pending(key: key, observationID: observationID, fragments: fragments,
+                          firstOfferedAt: pending?.firstOfferedAt ?? now, lastOfferedAt: now)
+        reschedule(from: now)
     }
 
-    /// 锁库 / 退出：手上有什么立刻落盘，一个字都不能丢。
-    func flushNow(reason: String) {
-        emit(reason: reason)
-    }
-
-    private func tick() {
-        if let reason = Self.decide(pending: pending, incoming: nil,
-                                    now: Date().timeIntervalSince1970,
-                                    quiet: quiet, maxHold: maxHold) {
-            emit(reason: reason)
-        }
-    }
-
-    private func emit(reason: String) {
+    /// 锁库 / 退出 / 换 key：手上有什么立刻落盘，一个字都不能丢。
+    func flush() {
+        scheduled?.cancel()
+        scheduled = nil
         guard let ready = pending else { return }
         pending = nil
-        onFlush?(Flush(observationID: ready.observationID, fragments: ready.fragments,
-                       reason: reason))
+        onFlush?(ready.observationID, ready.fragments)
+    }
+
+    func stop() {
+        scheduled?.cancel()
+        scheduled = nil
+    }
+
+    /// 下一次该醒来的时刻：安静期与最长暂存里更近的那个。
+    private func reschedule(from now: TimeInterval) {
+        scheduled?.cancel()
+        guard let pending else { scheduled = nil; return }
+        let delay = max(0, min(pending.lastOfferedAt + quiet,
+                               pending.firstOfferedAt + maxHold) - now)
+        let item = DispatchWorkItem { [weak self] in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                if Self.decide(pending: self.pending, incoming: nil,
+                               now: Date().timeIntervalSince1970,
+                               quiet: self.quiet, maxHold: self.maxHold) != nil {
+                    self.flush()
+                } else {
+                    self.reschedule(from: Date().timeIntervalSince1970)
+                }
+            }
+        }
+        scheduled = item
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: item)
     }
 }

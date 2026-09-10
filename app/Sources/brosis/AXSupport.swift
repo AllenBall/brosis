@@ -103,12 +103,12 @@ enum AX {
     /// 判定结果按 bundle id 缓存：通用检测要摸文件系统，每次切应用都摸一遍没必要；
     /// 缓存同时用来决定要不要写 `runtime_events`——同一个 bundle id 只在第一次判定时写一条，
     /// 否则一天几百次应用切换会把 runtime_events 刷满。
-    private final class DetectionCache: @unchecked Sendable {
+    private final class KeyedCache<Value>: @unchecked Sendable {
         private let lock = NSLock()
-        private var values: [String: ChromiumDetection] = [:]
+        private var values: [String: Value] = [:]
 
         /// 只读，不算也不存。
-        func peek(_ key: String) -> ChromiumDetection? {
+        func peek(_ key: String) -> Value? {
             lock.lock()
             defer { lock.unlock() }
             return values[key]
@@ -116,8 +116,7 @@ enum AX {
 
         /// 命中缓存就直接返回；没有就在**锁外**算一次再存进去。
         /// `firstSeen` = 这次是不是本进程第一次判定这个 bundle id。
-        func resolve(_ key: String, compute: () -> ChromiumDetection)
-            -> (detection: ChromiumDetection, firstSeen: Bool) {
+        func resolve(_ key: String, compute: () -> Value) -> (value: Value, firstSeen: Bool) {
             lock.lock()
             if let cached = values[key] {
                 lock.unlock()
@@ -133,30 +132,11 @@ enum AX {
         }
     }
 
-    private static let detectionCache = DetectionCache()
+    private static let detectionCache = KeyedCache<ChromiumDetection>()
 
-    /// 「这个 bundle 注册了自己是 http/https 的处理器吗」的缓存。判据只读 Info.plist，
-    /// 但一次要解一整个 plist，而 `rule(for:)` 每次扫描都会问，所以按 bundle id 缓存。
-    private static let browserCache = BooleanCache()
-
-    /// 同 `DetectionCache`，只是存 Bool。两个缓存分开而不是合成一个结构体：
-    /// `ChromiumDetection` 有 `rawValue`、被写进 runtime_events 与自检输出，
-    /// 把它改成结构体要动十几个消费点，而这两件事本来就是独立的判据。
-    private final class BooleanCache: @unchecked Sendable {
-        private let lock = NSLock()
-        private var values: [String: Bool] = [:]
-        func resolve(_ key: String, compute: () -> Bool) -> Bool {
-            lock.lock()
-            if let cached = values[key] { lock.unlock(); return cached }
-            lock.unlock()
-            let computed = compute()          // 读 plist 不在锁里做
-            lock.lock()
-            defer { lock.unlock() }
-            if let raced = values[key] { return raced }
-            values[key] = computed
-            return computed
-        }
-    }
+    /// 「这个 bundle 是不是浏览器」的缓存。判据只读 Info.plist，但一次要解一整个 plist，
+    /// 而 `rule(for:)` 每次扫描都会问，所以按 bundle id 缓存。
+    private static let browserCache = KeyedCache<Bool>()
 
     /// 这个 bundle 有没有**把网页链接当成自己的主业**——即：`CFBundleURLTypes` 里存在一条
     /// **只含 http / https** 的类型。
@@ -189,17 +169,16 @@ enum AX {
         }
     }
 
-    /// **是不是 Chromium 系的浏览器**（而不只是"用 Chromium 做的应用"）。
+    /// `bundleHandlesWebLinks` 的带缓存版本。判据只读 Info.plist，但一次要解一整个 plist，
+    /// 而 `rule(for:)` 每次扫描都会问。
     ///
-    /// 存在的理由：窗口定向截图、从地址栏取 URL、无痕窗口排除，这三件事是"浏览器"的性质，
-    /// 不是"Chrome"的性质。靠一份手写包名清单的话，新装一个 Chromium 浏览器（Edge Beta、
-    /// Arc、Opera GX……）就会落到通用规则上，连带把"别的窗口的像素被记成这个应用的网页内容"
-    /// 那个归错应用的缺陷原样带回来——而这正是 `bundleLooksChromium` 当初取代手写清单的理由。
-    static func isChromiumBrowser(bundleID: String?, bundleURL: URL?) -> Bool {
-        guard chromiumDetection(bundleID: bundleID, bundleURL: bundleURL).detection.isChromium
-        else { return false }
+    /// **只管"是不是浏览器"这一件事**，不再和 Chromium 判定 AND 在一起：
+    /// 上一版写成 `isChromiumBrowser`，而唯一的调用点在八行之前就已经算出并持有
+    /// `chromium` 这个局部量了——包起来只是让同一件事被算两遍，还多出一条永远走不到的
+    /// 空 bundleID 分支。两个判据本来就正交（Safari、Firefox 是浏览器但不是 Chromium 系）。
+    static func bundleIsBrowser(bundleID: String?, bundleURL: URL?) -> Bool {
         guard let bundleID, !bundleID.isEmpty else { return bundleHandlesWebLinks(at: bundleURL) }
-        return browserCache.resolve(bundleID) { bundleHandlesWebLinks(at: bundleURL) }
+        return browserCache.resolve(bundleID) { bundleHandlesWebLinks(at: bundleURL) }.value
     }
 
     /// 通用检测：`<bundle>/Contents/Frameworks/` 下有没有 Electron / CEF 框架目录。
@@ -244,10 +223,11 @@ enum AX {
             // 没有 bundle id 就没法缓存（不同应用会撞同一个 key），也不写 runtime_events。
             return (bundleLooksChromium(at: bundleURL) ? .framework : .notChromium, false)
         }
-        return detectionCache.resolve(bundleID) {
+        let cached = detectionCache.resolve(bundleID) {
             if chromiumFamilyBundleIDs.contains(bundleID) { return .list }
             return bundleLooksChromium(at: bundleURL) ? .framework : .notChromium
         }
+        return (cached.value, cached.firstSeen)
     }
 
     /// 应用元素。这里再设一次是冗余的防守：全局超时正常时它与全局值相同，

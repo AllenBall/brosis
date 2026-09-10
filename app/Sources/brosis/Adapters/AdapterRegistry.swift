@@ -368,6 +368,10 @@ enum AdapterRegistry {
     }()
 
     /// 首批规则（有序，进 README 与结果文件的规则表）。
+    /// 定过形的 Chrome 规则。`all.first(where:)` 是对一个已知成员做线性搜索——
+    /// 直接指名更清楚，也省掉每次扫描的那次字符串比较。
+    static let resolvedChrome = all.first { $0.id == chrome.id } ?? chrome
+
     /// **规则表在这里按开关定形**：`enhancedRegions` 只是声明，套用只有这一处。
     static let all: [AdapterRule] = {
         let enhanced = AX.enhancedUserInterfaceEnabled()
@@ -407,9 +411,9 @@ enum AdapterRegistry {
         //
         // 只在拿得到 bundleURL 时判：没有 URL 就读不了 plist，而把一个错的 false
         // 缓存起来比不答更糟（同 `cachedChromiumDetection` 的理由）。
-        if bundleURL != nil, AX.isChromiumBrowser(bundleID: bundleID, bundleURL: bundleURL),
-           let browserRule = all.first(where: { $0.id == chrome.id }) {
-            return browserRule
+        if chromium, bundleURL != nil,
+           AX.bundleIsBrowser(bundleID: bundleID, bundleURL: bundleURL) {
+            return resolvedChrome
         }
         // 访达等已经有 BFS 收紧值的应用：兜底规则 + 它自己的限额（`AX.bfsLimits`）。
         var fallback = base

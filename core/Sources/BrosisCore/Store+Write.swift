@@ -55,7 +55,8 @@ extension Store {
                 .optionalText(input.thumbRef),
             ])
 
-        let written = try writeTexts(input.texts, observationID: obsID, conn: conn)
+        // `baseOrd: 0`：这条观察是刚 INSERT 出来的，`occurrences` 里不可能已经有它的行。
+        let written = try writeTexts(input.texts, observationID: obsID, baseOrd: 0, conn: conn)
         try persistCounters()
         return RecordResult(observationID: obsID, textVersionIDs: written.versionIDs,
                             newTextVersions: written.newCount,
@@ -78,7 +79,13 @@ extension Store {
         }
         return try withLock { conn in
             try conn.transaction {
-                let written = try writeTexts(texts, observationID: observationID, conn: conn)
+                // 补挂面对的是**已经存在**的观察，`ord` 必须接着已有的往下排。
+                let baseOrd = Int(try conn.scalarInt("""
+                    SELECT COALESCE(MAX(ord) + 1, 0) FROM occurrences
+                     WHERE device_id = ? AND observation_id = ?;
+                    """, [.text(deviceID), .int(observationID)]) ?? 0)
+                let written = try writeTexts(texts, observationID: observationID,
+                                             baseOrd: baseOrd, conn: conn)
                 try persistCounters()
                 return RecordResult(observationID: observationID,
                                     textVersionIDs: written.versionIDs,
@@ -90,20 +97,17 @@ extension Store {
 
     /// 正文 → 文本版本（sha256 去重）→ occurrences。`record` 与 `attachTexts` 共用。
     ///
-    /// **`ord` 接着已有的往下排，不是从 0 重来**：`occurrences` 上有
-    /// `(device_id, observation_id, ord)` 唯一约束，而补挂这条路（`attachTexts`）面对的
-    /// 观察可能已经有 occurrence 了。写这段时我从 0 开始，自检当场撞了这个约束——
-    /// 生产路径上每条观察只挂一次、撞不到，但约束不该靠"调用方不会这么做"来满足。
+    /// **`ord` 由调用方给起点**：`occurrences` 上有 `(device_id, observation_id, ord)`
+    /// 唯一约束。`record` 面对的是刚 INSERT 的观察，起点恒为 0；只有补挂那条
+    /// （`attachTexts`）才需要去查 `MAX(ord)+1`——查询留在它那边，别让每秒一次的
+    /// 写入路径为一个恒等于 0 的答案白跑一次 prepare/step/finalize。
     private func writeTexts(_ texts: [TextFragment], observationID obsID: Int64,
-                            conn: SQLiteConnection)
+                            baseOrd: Int, conn: SQLiteConnection)
         throws -> (versionIDs: [Int64], newCount: Int, reusedCount: Int) {
+        guard !texts.isEmpty else { return ([], 0, 0) }
         var versionIDs: [Int64] = []
         var newCount = 0
         var reusedCount = 0
-        let baseOrd = Int(try conn.scalarInt("""
-            SELECT COALESCE(MAX(ord) + 1, 0) FROM occurrences
-             WHERE device_id = ? AND observation_id = ?;
-            """, [.text(deviceID), .int(obsID)]) ?? 0)
         for (offset, fragment) in texts.enumerated() {
             let ord = baseOrd + offset
             let (tvID, isNew) = try upsertTextVersion(fragment.text, conn: conn)

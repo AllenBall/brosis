@@ -1428,27 +1428,30 @@ enum SelfCheck {
                                   fragments: [TextFragment(text: "x", region: "r")],
                                   firstOfferedAt: first, lastOfferedAt: last)
         }
-        let coalesceCases: [(String, TextCoalescer.Pending?, TextCoalescer.Key?, Double, String?)] = [
+        typealias CoalesceReason = TextCoalescer.Reason
+        let coalesceCases: [(String, TextCoalescer.Pending?, TextCoalescer.Key?, Double,
+                             CoalesceReason?)] = [
             ("手上没东西 ⇒ 不落盘", nil, coalesceKey, 100, nil),
             ("同一个 key 又来一份 ⇒ 继续攒", pending(first: 100, last: 100), coalesceKey, 100.5, nil),
-            ("换了应用 ⇒ 立刻落盘", pending(first: 100, last: 100), otherKey, 100.5, "key_changed"),
-            ("安静够久 ⇒ 落盘", pending(first: 100, last: 100), nil, 103, "quiet"),
+            ("换了应用 ⇒ 立刻落盘", pending(first: 100, last: 100), otherKey, 100.5, .keyChanged),
+            ("安静够久 ⇒ 落盘", pending(first: 100, last: 100), nil, 103, .quiet),
             ("差一点点还不算安静", pending(first: 100, last: 100), nil, 102.9, nil),
             // 一直在变的窗口（视频、滚动的日志）：不设这道闸它永远不落盘。
             // **用例从常量算出来**，不写死秒数——2026-09-10 把 30 改成 60 时，
             // 写死的那版会当场失效，而失效的原因和被测的行为无关。
             ("一直在变但超过最长暂存 ⇒ 落盘",
              pending(first: 100, last: 100 + TextCoalescer.maxHoldDefault - 0.5), nil,
-             100 + TextCoalescer.maxHoldDefault, "max_hold"),
+             100 + TextCoalescer.maxHoldDefault, .maxHold),
             // 顺序：换 key 优先于安静期——换了应用不必再等三秒。
             ("换 key 且已超最长暂存 ⇒ 先报换 key",
-             pending(first: 100, last: 100), otherKey, 200, "key_changed"),
+             pending(first: 100, last: 100), otherKey, 200, .keyChanged),
         ]
         let coalesceFailures = coalesceCases.compactMap { label, p, incoming, now, want -> String? in
             let got = TextCoalescer.decide(pending: p, incoming: incoming, now: now,
                                            quiet: TextCoalescer.quietDefault,
                                            maxHold: TextCoalescer.maxHoldDefault)
-            return got == want ? nil : "\(label)→\(got ?? "继续攒")（期望 \(want ?? "继续攒")）"
+            return got == want ? nil
+                : "\(label)→\(got?.rawValue ?? "继续攒")（期望 \(want?.rawValue ?? "继续攒")）"
         }
         check("正文合并判定 \(coalesceCases.count) 条（安静 \(Int(TextCoalescer.quietDefault)) s / "
                 + "最长暂存 \(Int(TextCoalescer.maxHoldDefault)) s / 换 key 优先）",
@@ -1456,6 +1459,7 @@ enum SelfCheck {
 
         // 端到端：补挂的正文必须与直接写的**完全等价**——能搜到、occurrence 挂对观察、
         // 而且走的是同一段 sha256 去重（同样的文本第二次补挂不产生新版本）。
+        let coalesceE2ETitle = "正文合并端到端：补挂的正文能搜到、挂在原观察上、且照样按 sha256 去重"
         do {
             let root = workspace.appendingPathComponent("coalesce-e2e", isDirectory: true)
             var options = StoreOptions()
@@ -1481,14 +1485,13 @@ enum SelfCheck {
             let hits = try store.search(q: "合并写入", limit: 5).hits
             let evidence = try store.getEvidence(ids: hits.map(\.evidenceID), grant: nil, neighbors: 0)
             let item = evidence.items.first
-            check("正文合并端到端：补挂的正文能搜到、挂在原观察上、且照样按 sha256 去重",
+            check(coalesceE2ETitle,
                   afterFirst == before + 1 && afterSecond == afterFirst
                     && item?.evidenceID == obs.observationID
                     && item?.text?.contains("合并写入") == true,
                   "版本数 \(before)→\(afterFirst)→\(afterSecond)，命中 \(hits.count) 条")
         } catch {
-            check("正文合并端到端：补挂的正文能搜到、挂在原观察上、且照样按 sha256 去重",
-                  false, "\(error)")
+            check(coalesceE2ETitle, false, "\(error)")
         }
 
         // 12.14 端到端：合成上下文 → 协调者 → 自绘"屏幕" → OCR 观察 + capture_audit
@@ -1822,29 +1825,34 @@ enum SelfCheck {
                 cases.append((layout.title, got == layout.want,
                               "\(got)（期望 \(layout.want)）"))
 
-                // 顺带在同一个假 bundle 上验"是不是浏览器"的结构判据：写一份带 / 不带
-                // http 的 Info.plist。这一条是 2026-09-10 补的——没有它，新装的
-                // Chromium 浏览器会落到通用规则上，归错应用的缺陷会原样回来。
-                let plist = bundle.appendingPathComponent("Contents/Info.plist")
-                for (title, schemes, want) in [
-                    ("专用的 http/https 类型 ⇒ 是浏览器", ["https", "http"], true),
-                    // 这一条是 2026-09-10 自检抓出来的真误报：ChatGPT 把 http 塞进了自己
-                    // 那条 URL 类型里（[codex, http, https]），"含 http 即可"会把它判成浏览器。
-                    ("http 混在自有 scheme 里 ⇒ 不是浏览器", ["codex", "http", "https"], false),
-                    ("只注册自有 scheme ⇒ 不是浏览器", ["slack", "vscode"], false),
-                    ("没有 CFBundleURLTypes ⇒ 不是浏览器", [], false),
-                ] {
-                    var dict: [String: Any] = ["CFBundleIdentifier": "com.selfcheck.\(layout.app)"]
-                    if !schemes.isEmpty {
-                        dict["CFBundleURLTypes"] = [["CFBundleURLSchemes": schemes]]
-                    }
-                    try (dict as NSDictionary).write(to: plist)
-                    let isBrowser = AX.bundleHandlesWebLinks(at: bundle)
-                    cases.append(("\(layout.app)：\(title)", isBrowser == want,
-                                  "\(isBrowser)（期望 \(want)）"))
-                }
             } catch {
                 cases.append((layout.title, false, "造假 bundle 失败：\(error)"))
+            }
+        }
+
+        // "是不是浏览器"的结构判据：只读 Contents/Info.plist，和上面那些 Frameworks 布局
+        // 无关，所以**在循环外跑一遍就够**。放在循环里的话 5 个布局各测一遍同样的四件事，
+        // 20 条断言里 16 条永远不可能独立失败。
+        let browserBundle = root.appendingPathComponent("BrowserProbe.app", isDirectory: true)
+        for (title, schemes, want) in [
+            ("专用的 http/https 类型 ⇒ 是浏览器", ["https", "http"], true),
+            // 这一条是 2026-09-10 自检抓出来的真误报：ChatGPT 把 http 塞进了自己
+            // 那条 URL 类型里（[codex, http, https]），"含 http 即可"会把它判成浏览器。
+            ("http 混在自有 scheme 里 ⇒ 不是浏览器", ["codex", "http", "https"], false),
+            ("只注册自有 scheme ⇒ 不是浏览器", ["slack", "vscode"], false),
+            ("没有 CFBundleURLTypes ⇒ 不是浏览器", [], false),
+        ] {
+            do {
+                let plist = browserBundle.appendingPathComponent("Contents/Info.plist")
+                try fm.createDirectory(at: plist.deletingLastPathComponent(),
+                                       withIntermediateDirectories: true)
+                var dict: [String: Any] = ["CFBundleIdentifier": "com.selfcheck.browserprobe"]
+                if !schemes.isEmpty { dict["CFBundleURLTypes"] = [["CFBundleURLSchemes": schemes]] }
+                try (dict as NSDictionary).write(to: plist)
+                let got = AX.bundleHandlesWebLinks(at: browserBundle)
+                cases.append((title, got == want, "\(got)（期望 \(want)）"))
+            } catch {
+                cases.append((title, false, "造假 bundle 失败：\(error)"))
             }
         }
 

@@ -111,10 +111,8 @@ final class EventSkeleton {
     func start() {
         // 合并器的落盘动作在这里接上：正文挂到**产生它的那条观察**上，
         // 所以时刻是那次扫描的时刻，不是补写时的时刻。
-        coalescer.install { [weak self] flush in
-            guard let self else { return }
-            self.recorder.attachTexts(observationID: flush.observationID,
-                                      fragments: flush.fragments)
+        coalescer.configure { [weak self] observationID, fragments in
+            self?.recorder.attachTexts(observationID: observationID, fragments: fragments)
         }
         let center = NSWorkspace.shared.notificationCenter
         center.addObserver(self, selector: #selector(applicationActivated(_:)),
@@ -158,7 +156,7 @@ final class EventSkeleton {
     func stop() {
         // **先把攒着的正文落盘**，再拆观察者。锁库与退出都走这里，
         // 手上那份不落就真丢了（合并的全部风险就在这几秒里）。
-        coalescer.flushNow(reason: "stopping")
+        coalescer.flush()
         coalescer.stop()
         NSWorkspace.shared.notificationCenter.removeObserver(self)
         DistributedNotificationCenter.default().removeObserver(self)
