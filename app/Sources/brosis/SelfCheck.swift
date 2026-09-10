@@ -1055,29 +1055,38 @@ enum SelfCheck {
               meetingRule.id == AdapterRegistry.feishuMeeting.id && meetingDeclaresOCR,
               "\(meetingRule.id)，声明 OCR=\(meetingDeclaresOCR)")
 
-        // Chrome：AX 只给外壳（实测 43 节点、无 AXWebArea），所以规则必须走 OCR、
-        // 必须窗口定向截图（否则压在上面的别的窗口会被记成 Chrome 的页面），
-        // 而且**不能读 AX**——读了就会被 Chromium 空树重扫那条路撤掉 OCR 请求。
+        // Chrome 命中专用规则，且**无论开关开关**都保留两件事：
+        //  * OCR（开关开着时是 AX 读空的回退，关着时是唯一通路）；
+        //  * 窗口定向截图——否则压在上面的别的窗口会被记成 Chrome 的页面内容。
+        // "读不读 AX"跟着开关走，由下面那条两形态的用例管。
         let chromeRule = AdapterRegistry.rule(for: "com.google.Chrome")
-        check("Chrome 命中专用规则：走 OCR、窗口定向、不读 AX",
+        check("Chrome 命中专用规则：始终有 OCR 通路、始终窗口定向",
               chromeRule.id == AdapterRegistry.chrome.id && chromeRule.declaresOCR
-                && chromeRule.capturesWindow && !chromeRule.readsAX,
+                && chromeRule.capturesWindow,
               "\(chromeRule.id)，OCR=\(chromeRule.declaresOCR) "
-                + "窗口定向=\(chromeRule.capturesWindow) 读AX=\(chromeRule.readsAX)")
+                + "窗口定向=\(chromeRule.capturesWindow) 读AX=\(chromeRule.readsAX)（跟开关走）")
 
         // 私有属性开关：关着 ⇒ 纯 OCR、不读 AX；开着 ⇒ 优先读 AXWebArea、读空回退 OCR。
-        // 开关默认关，因为 AXEnhancedUserInterface 会让 Chromium 缓冲按键、断开时重放进
-        // 用户当时的焦点输入框（screenpipe #3884）——伤害落在别的窗口，必须由人明确同意。
-        let chromeOff = AdapterRegistry.chromeRule(enhanced: false)
-        let chromeOn = AdapterRegistry.chromeRule(enhanced: true)
+        // 开关**默认开**（2026-09-10 用户在看过实测与核实过的危害之后定的）：不设这个属性
+        // Chrome 连 AXWebArea 都没有，正文只能 OCR 且中文错字率高到不可用。
+        // 代价是退出那一刻可能把最近的按键重放进 Chromium 应用的焦点输入框
+        // （screenpipe #3884），所以开关必须留着、且"设成 false"要真的关得掉。
+        // 打在**基座**上（`AdapterRegistry.chrome` 未定形，定形只在 `all` 那一处）：
+        // 拿定过形的规则再 resolvingEnhanced(false) 是回不去的——定形是单向的。
+        let chromeOff = AdapterRegistry.chrome.resolvingEnhanced(false)
+        let chromeOn = AdapterRegistry.chrome.resolvingEnhanced(true)
         let axSuite = SelfCheckDefaults.name("ax-enhanced")
         let axDefaults = UserDefaults(suiteName: axSuite)!
         defer { SelfCheckDefaults.discard(axDefaults, name: axSuite) }
-        let defaultOff = !AX.enhancedUserInterfaceEnabled(axDefaults)
+        // 没设过 ⇒ 开；显式设 false ⇒ 必须真的关掉（用 bool(forKey:) 实现的话这条会挂：
+        // 它读不到键也返回 false，"没设过"会被当成"用户关掉了"，默认值根本生效不了）。
+        let defaultOn = AX.enhancedUserInterfaceEnabled(axDefaults)
+        axDefaults.set(false, forKey: AX.enhancedUserInterfaceKey)
+        let turnedOff = !AX.enhancedUserInterfaceEnabled(axDefaults)
         axDefaults.set(true, forKey: AX.enhancedUserInterfaceKey)
-        let readsBack = AX.enhancedUserInterfaceEnabled(axDefaults)
-        check("私有属性开关：默认关（升级不会悄悄把按键重放的风险带上），设了读得回来",
-              defaultOff && readsBack, "键 \(AX.enhancedUserInterfaceKey)")
+        let turnedOn = AX.enhancedUserInterfaceEnabled(axDefaults)
+        check("私有属性开关：默认开，显式设 false 关得掉，设 true 开得回来",
+              defaultOn && turnedOff && turnedOn, "键 \(AX.enhancedUserInterfaceKey)")
         check("开关关着：Chrome 纯 OCR、不读 AX；开着：读 AXWebArea 且保留 OCR 回退",
               !chromeOff.readsAX && chromeOff.declaresOCR
                 && chromeOn.readsAX && chromeOn.declaresOCR
@@ -1085,6 +1094,22 @@ enum SelfCheck {
                 && chromeOff.capturesWindow && chromeOn.capturesWindow,
               "关=\(chromeOff.regions.map(\.name).joined(separator: "/"))"
                 + "，开=\(chromeOn.regions.map(\.name).joined(separator: "/"))")
+
+        // 三条"原本假定 AX 是空的"规则都要跟着开关走，且开着时都保留 OCR 回退
+        //（读空就退回原来的路，不会比关着更差）。
+        let enhancedRules = [AdapterRegistry.chrome, AdapterRegistry.feishu,
+                             AdapterRegistry.feishuMeeting]
+        let enhancedFailures = enhancedRules.compactMap { base -> String? in
+            let on = base.resolvingEnhanced(true)
+            let off = base.resolvingEnhanced(false)
+            let ok = on.enhancedRegions != nil
+                && on.regions.contains { $0.locator == .role("AXWebArea") }
+                && on.regions.allSatisfy { $0.ocrFallback || $0.read.declaresOCR }
+                && off.regions.map(\.name) == base.regions.map(\.name)
+            return ok ? nil : "\(base.id)（开=\(on.regions.map(\.name).joined(separator: "/"))）"
+        }
+        check("开关开着时 Chrome / 飞书 / 飞书会议都改读 AXWebArea，且都留着 OCR 回退",
+              enhancedFailures.isEmpty, enhancedFailures.joined(separator: " "))
 
         // 地址栏取 URL 的纯函数。Chrome 把 scheme 省掉，而 urlRef 要有 scheme 才抽得出 host。
         let urlCases: [(String, String?)] = [

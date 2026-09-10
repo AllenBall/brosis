@@ -213,15 +213,15 @@ Electron 应用需要先设 `AXManualAccessibility` 才暴露无障碍树；一�
 
 **Chrome 系浏览器**（Chrome / Edge / Brave / Vivaldi / Arc）只认私有属性 `AXEnhancedUserInterface`，不认公开的 `AXManualAccessibility`。实测 Chrome 153 的无障碍树只有 43 个节点、全是浏览器外壳、**没有 `AXWebArea`**。所以默认路径是：正文整页 OCR，URL 从地址栏的 `AXTextField` 直接读——两件事都不需要装扩展。截图走窗口定向，别的窗口盖在上面时不会把它的像素记成网页内容。
 
-**`AXEnhancedUserInterface` 默认关闭，可以自行打开。** 打开后 Chrome 会真的建起网页无障碍树，正文改为优先读 DOM 文本（比 OCR 完整得多，含滚动区外的内容），读空再回退 OCR。
+**`AXEnhancedUserInterface` 默认开启，可以自行关闭。** 开着时 Chrome、飞书、飞书会议都会真的建起无障碍树，正文优先读 DOM 文本（逐字准确、含滚动区外的内容、且完全不跑 OCR），读空再回退 OCR。实测：Chrome 从「43 个节点全是外壳、0 字正文」变成可读；飞书从 0 字变成两个 `AXWebArea` 合计约 1650 字符。关掉则退回整页 OCR。
 
 ⚠️ **打开前请知道代价**：该属性会让 Chromium 进入无障碍模式并镜像输入，设置它的客户端**突然断开**时，把最近缓冲的按键**重放进当时的焦点输入框**——复现用例是输入 `abcd`、退出客户端后变成 `abcdbcdbcd`，即**把你刚敲的内容重复一遍**（见 [screenpipe #3884](https://github.com/mediar-ai/screenpipe/issues/3884)；1Password、Alfred、TextExpander 中过同一个）。
 
 风险窗口是 **brosis 退出的那一刻**（包括更新时），落点是 Chromium 系应用里当时的焦点输入框。平时开着不触发。这就是它默认关闭、且升级不会自动打开的原因。
 
 ```bash
-defaults write com.brosis.app ax.enhancedUserInterface -bool true   # 打开，需重启 app
-defaults delete com.brosis.app ax.enhancedUserInterface             # 关掉
+defaults write com.brosis.app ax.enhancedUserInterface -bool false  # 关掉，需重启 app
+defaults delete com.brosis.app ax.enhancedUserInterface             # 回到默认（开）
 ```
 
 **向量检索是可选的。** 所有尺寸的模型统一截断到 1024 维，换模型只需重建向量、不用改表。模型在本地用 mlx-swift 跑。建索引受门控：接电、温度正常、未锁定、日均 GPU 预算。没装模型时向量通道显示为未启用，精确字段与全文检索不受影响。

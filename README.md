@@ -213,15 +213,15 @@ Electron apps need `AXManualAccessibility` set before they expose an accessibili
 
 **Chromium-based browsers** (Chrome, Edge, Brave, Vivaldi, Arc) honor only the private `AXEnhancedUserInterface`, not the public `AXManualAccessibility`. Measured on Chrome 153, the accessibility tree is 43 nodes of browser shell with **no `AXWebArea`** at all. The default path is therefore: OCR the page viewport, and read the URL straight from the address bar's `AXTextField` — neither needs an extension. Screenshots are window-directed, so another window sitting on top of the browser never has its pixels recorded as page content.
 
-**`AXEnhancedUserInterface` is off by default and can be turned on.** With it on, Chrome really does build the web accessibility tree, and body text switches to reading the DOM (far more complete than OCR, including content scrolled out of view), falling back to OCR when the read comes back empty.
+**`AXEnhancedUserInterface` is on by default and can be turned off.** With it on, Chrome, Feishu and Feishu Meetings all build a real accessibility tree, and body text is read from the DOM (character-exact, includes content scrolled out of view, and skips OCR entirely), falling back to OCR when the read comes back empty. Measured: Chrome goes from "43 nodes of shell, zero body text" to readable; Feishu from 0 characters to roughly 1,650 across two `AXWebArea` nodes. Turn it off and both fall back to full-page OCR.
 
 ⚠️ **Know the cost before turning it on.** The attribute puts Chromium into accessibility mode where it mirrors input, and when the client that set it **disconnects abruptly** it **replays recently buffered keystrokes into the focused field** — the reproduction is typing `abcd`, quitting the client, and finding `abcdbcdbcd`, i.e. **your recent keystrokes duplicated**, not random garbage (see [screenpipe #3884](https://github.com/mediar-ai/screenpipe/issues/3884); 1Password, Alfred and TextExpander have hit the same one).
 
 The exposure window is **the moment brosis exits** (including when it is updated), and it lands on the focused field of a Chromium app. Simply having it on does not trigger it. That is why it is off by default and why upgrading never turns it on.
 
 ```bash
-defaults write com.brosis.app ax.enhancedUserInterface -bool true   # on; restart the app
-defaults delete com.brosis.app ax.enhancedUserInterface             # off
+defaults write com.brosis.app ax.enhancedUserInterface -bool false  # off; restart the app
+defaults delete com.brosis.app ax.enhancedUserInterface             # back to the default (on)
 ```
 
 **Vector search is optional.** Every model size is truncated to a uniform 1024 dimensions, so switching models only requires rebuilding vectors, never a schema change. Models run locally through mlx-swift. Index building is gated on AC power, normal thermal state, an unlocked database and a daily GPU budget. With no model installed the vector channel simply reports as off; exact fields and full-text search are unaffected.

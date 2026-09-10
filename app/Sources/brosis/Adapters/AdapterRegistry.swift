@@ -79,8 +79,9 @@ enum AdapterRegistry {
     /// 角色全是 AXGroup / AXButton / AXToolbar / AXTabGroup，**没有 AXWebArea**；
     /// 全部 68 个"正文"字符其实是地址栏那一串 URL。七个取样时刻、maxDepth 8→100 结果一致。
     /// 原因是 Chrome 的网页无障碍树要私有属性 `AXEnhancedUserInterface` 才会建，
-    /// 而那个开关默认关（`AX.enhancedUserInterfaceKey`，理由见那里：按键会被重放进
-    /// 用户当时的焦点输入框）。开关打开后走的是 `chromeRule(enhanced: true)` 那一副样子。
+    /// 而那个开关**默认开**（`AX.enhancedUserInterfaceKey`，代价见那里）。所以默认走的是
+    /// `chromeRule(enhanced: true)`：优先读 AXWebArea 的 DOM 文本。下面这副纯 OCR 的样子
+    /// 是**关掉开关之后**的形态，也是这条规则最初的形态。
     /// 所以正文只能 OCR，URL 单独从地址栏取（`AX.addressBarURL`）——两件事都不需要装扩展。
     ///
     /// 在这条规则之前 Chrome 落在 `genericChromium` 上，后果有两个：
@@ -94,27 +95,19 @@ enum AdapterRegistry {
     /// 库里可能出现用户当时其实看不见的页面内容。
     ///
     /// 无痕窗口不受影响：`PrivateBrowsing` 认标题里的 Incognito / 无痕浏览，那一支不读正文。
-    /// 开了私有属性开关就换一副样子。**做成纯函数**：`static let` 一个进程只算一次，
-    /// 自检没法在同一进程里同时验两种形态。
-    static func chromeRule(enhanced: Bool) -> AdapterRule {
-        var rule = chromeOCROnly
-        guard enhanced else { return rule }
-        // Chrome 收到 AXEnhancedUserInterface 之后会真的建网页无障碍树：正文优先走 AX
-        // （拿到的是 DOM 文本，含滚动区外、视口外的内容，比 OCR 完整得多），读空再回退 OCR。
-        // 回退时的矩形跟着 AXWebArea 走，比按点数裁顶部外壳更准——找不到才退回整窗。
-        //
-        // 这时 `readsAX` 变成 true，Chromium「读到空树 ⇒ 排一次重扫」那条路重新生效，
-        // 而这正是它当初的设计场景：Chromium 的树是**异步**建起来的，第一次多半读到空。
-        rule.regions = [
-            RegionRule(name: "web_area", kind: .body, locator: .role("AXWebArea"),
-                       read: .axSubtree, ocrFallback: true, required: true, clipToViewport: true),
-        ]
-        return rule
-    }
+    /// 开关开着时正文走 AX（DOM 文本，逐字准确、含视口外内容），读空回退 OCR；
+    /// 回退矩形跟着 AXWebArea 走，比按点数裁顶部外壳更准。这时 `readsAX` 变 true，
+    /// Chromium「读到空树 ⇒ 排一次重扫」那条路重新生效——那正是它当初的设计场景
+    /// （Chromium 的树是**异步**建起来的，第一次多半读到空）。
+    static let chromeEnhancedRegions = [
+        RegionRule(name: "web_area", kind: .body, locator: .role("AXWebArea"),
+                   read: .axSubtree, ocrFallback: true, required: true, clipToViewport: true,
+                   preferRichestMatch: true),
+    ]
 
-    static let chrome: AdapterRule = chromeRule(enhanced: AX.enhancedUserInterfaceEnabled())
-
-    private static let chromeOCROnly = AdapterRule(
+    /// **未按开关定形**。定形只发生在 `all` 那一处（`resolvingEnhanced`），
+    /// 所以这条以及自检拿到的都是基座；`rule(for:)` 返回的才是定过形的。
+    static let chrome = AdapterRule(
         id: "chrome",
         name: "Chrome 系浏览器",
         bundleIDs: ["com.google.Chrome", "com.google.Chrome.beta", "com.google.Chrome.canary",
@@ -137,7 +130,8 @@ enum AdapterRegistry {
              + "截图走窗口定向：别的窗口盖在上面时不会把它的像素记成 Chrome 的页面。"
              + "顶部外壳按点数裁（默认 80，开书签栏约 112，adapter.chrome.toolbarHeight 可校准）；"
              + "只记屏幕上显示出来的字：视频、图片、canvas 里的内容只有渲染成文字才认得到。",
-        capturesWindow: true)
+        capturesWindow: true,
+        enhancedRegions: chromeEnhancedRegions)
 
     // MARK: - 飞书（Electron）
 
@@ -163,7 +157,20 @@ enum AdapterRegistry {
              + "只记视口内已渲染的消息；不追溯未打开会话与未滚动到的历史；"
              + "图片、文件、语音、通话只有屏幕上显示的文字才可能被 OCR；"
              + "发送者与时间取自行内子元素，行结构变了就退化成整行文本。",
-        limits: AX.BFSLimits(maxNodes: 1_200, maxDepth: 14))
+        limits: AX.BFSLimits(maxNodes: 1_200, maxDepth: 14),
+        // 开关开着时飞书真的把树建起来了。实测（--ax-probe，Lark 7.x，开关开）：
+        // 窗口里有**两个** AXWebArea——`messenger`（子树 474 节点、119 个 AXStaticText /
+        // 1081 字符）与 `messenger-chat`（510 节点、60 个 / 573 字符）。而同一时刻按现有规则
+        // 扫出来是 **0 字符**：规则找的是 `AXList`，那是为"AX 一片空白"的旧世界写的判据。
+        // 取第一个会拿到空壳，所以和 Claude 桌面版一样用 `preferRichestMatch`。
+        //
+        // 会话名不用再单独 OCR 一次：飞书的窗口标题本来就带会话名
+        //（"邱军雅 洋葱学园 张怡君 …"），不像微信恒为"微信"。
+        enhancedRegions: [
+            RegionRule(name: "web_area", kind: .messageList, locator: .role("AXWebArea"),
+                       read: .axSubtree, ocrFallback: true, required: true, clipToViewport: true,
+                       preferRichestMatch: true),
+        ])
 
     // MARK: - 飞书会议（**另一个 app**，AX 是死的）
 
@@ -219,7 +226,15 @@ enum AdapterRegistry {
              + "所以直接整窗视口 OCR。能记到的是屏幕上**显示出来的字**："
              + "共享屏幕里的内容、字幕、会中聊天、参会人名、会议标题；"
              + "语音本身不记，没显示在屏幕上的也不记。",
-        limits: AX.BFSLimits(maxNodes: 200, maxDepth: 6))
+        limits: AX.BFSLimits(maxNodes: 200, maxDepth: 6),
+        // **没实测过**：写这条时手边没有正在进行的会议。逻辑上它和飞书主程序同源
+        //（同一个 Lark Framework 的 Chromium），开关开着就可能建起树来。
+        // `ocrFallback: true` 兜住：读到空就退回今天这条整窗 OCR，不会比现在更差。
+        enhancedRegions: [
+            RegionRule(name: "web_area", kind: .body, locator: .role("AXWebArea"),
+                       read: .axSubtree, ocrFallback: true, required: true, clipToViewport: true,
+                       preferRichestMatch: true),
+        ])
 
     // MARK: - 微信（原生但 AX 空）
 
@@ -352,7 +367,12 @@ enum AdapterRegistry {
     }()
 
     /// 首批规则（有序，进 README 与结果文件的规则表）。
-    static let all: [AdapterRule] = [safari, chrome, claudeDesktop, feishu, feishuMeeting, wechat]
+    /// **规则表在这里按开关定形**：`enhancedRegions` 只是声明，套用只有这一处。
+    static let all: [AdapterRule] = {
+        let enhanced = AX.enhancedUserInterfaceEnabled()
+        return [safari, chrome, claudeDesktop, feishu, feishuMeeting, wechat]
+            .map { $0.resolvingEnhanced(enhanced) }
+    }()
 
     /// bundle id → 规则；查不到就是兜底规则。
     /// 没有专属规则时兜底走哪一条，由**这里**决定，不再让每个调用点自己 derive——
@@ -386,8 +406,10 @@ enum AdapterRegistry {
 extension AdapterRule {
     /// 便利初始化：让上面的规则定义可以按"先写 notes 再写 limits"的顺序写。
     init(id: String, name: String, bundleIDs: [String], electron: Bool,
-         regions: [RegionRule], chatLayout: ChatLayout?, notes: String, limits: AX.BFSLimits) {
+         regions: [RegionRule], chatLayout: ChatLayout?, notes: String, limits: AX.BFSLimits,
+         enhancedRegions: [RegionRule]? = nil) {
         self.init(id: id, name: name, bundleIDs: bundleIDs, electron: electron,
-                  regions: regions, chatLayout: chatLayout, limits: limits, notes: notes)
+                  regions: regions, chatLayout: chatLayout, limits: limits, notes: notes,
+                  enhancedRegions: enhancedRegions)
     }
 }

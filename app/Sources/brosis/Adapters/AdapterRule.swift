@@ -225,6 +225,22 @@ struct AdapterRule: Sendable {
     /// （`SCContentFilter(desktopIndependentWindow:)`）。见 `CaptureController.capture`。
     var capturesWindow: Bool = false
 
+    /// `AXEnhancedUserInterface` 开着时改用这组区域。nil = 开关不影响这条规则。
+    ///
+    /// 存在的理由：好几条规则的形状都是"这个应用的 AX 是空的，所以走 OCR"，而那个前提
+    /// **由开关决定**——私有属性一设，Chromium 系应用（Chrome、飞书、飞书会议）就真的
+    /// 把树建起来了。与其给每条规则各写一个 `xxxRule(enhanced:)` 闭包，不如让规则自己
+    /// 声明"开着时我长这样"，由 `AdapterRegistry` 统一套用。
+    var enhancedRegions: [RegionRule]?
+
+    /// 按开关状态定形。开关关着、或这条规则没声明 `enhancedRegions` 时原样返回。
+    func resolvingEnhanced(_ enhanced: Bool) -> AdapterRule {
+        guard enhanced, let enhancedRegions else { return self }
+        var copy = self
+        copy.regions = enhancedRegions
+        return copy
+    }
+
     /// 这条规则**读不读 AX**。全部区域都声明 `.ocr` 时为 false。
     ///
     /// 用途只有一个：Chromium 系「读到空树 ⇒ 排一次重扫」那条路（`EventSkeleton.noteAXOutcome`）

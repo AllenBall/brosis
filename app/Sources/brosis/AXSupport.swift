@@ -44,6 +44,10 @@ enum AX {
     /// AX 正文字符合计 **0**，原因就是它不在这份清单里，没设过 `AXManualAccessibility`。
     /// 人工维护的清单追不上新装的应用，所以另加第二路通用判定（`bundleLooksChromium`）。
     static let chromiumFamilyBundleIDs: Set<String> = [
+        // 飞书会议是 Lark Framework 里的 Chromium 辅助进程（Lark Helper (Iron)），
+        // 它的 bundle 里没有 Contents/Frameworks，结构检测抓不到，只能进这份清单——
+        // 不进的话 `enableManualAccessibilityIfNeeded` 会提前返回，两个属性一个都不设。
+        "com.bytedance.macos.feishu.iron",
         "com.google.Chrome", "com.google.Chrome.beta", "com.google.Chrome.canary",
         "com.microsoft.edgemac", "com.brave.Browser", "com.vivaldi.Vivaldi",
         "com.operasoftware.Opera", "company.thebrowser.Browser",
@@ -219,12 +223,16 @@ enum AX {
         }
     }
 
-    // MARK: - AXEnhancedUserInterface（私有属性，默认关，用户可开）
+    // MARK: - AXEnhancedUserInterface（私有属性，**默认开**，用户可关）
 
-    /// 开关键。**默认 false**。
+    /// 开关键。**默认 true**（2026-09-10 用户在看过实测数据与核实过的危害之后定的）。
     ///
-    /// 2026-09-10 用户要求把「只用公开属性」这条项目规则改成「允许使用私有属性」，
-    /// 于是这条路存在了——但**默认仍然是关的**，理由不是洁癖，是这个属性有确切的伤害：
+    /// 为什么值得默认开：Chrome 不设这个属性就**没有 AXWebArea**，整棵树 43 个节点全是
+    /// 浏览器外壳，正文只能 OCR——而 OCR 的中文错字率高到不可用（实测同一页
+    /// 「轻松衔接初中化学」被认成「轻松衢換忉申化孕」）。设上之后走 DOM 文本：逐字准确、
+    /// 含视口外内容、且**完全不跑 Vision**（Chrome 是重度使用的应用，这一项同时省电）。
+    ///
+    /// 代价见下。它仍然是开关，任何时候可以关：
     ///
     /// Chromium 收到它就进入无障碍模式并**镜像输入**；设置它的那个客户端**突然断开**时，
     /// 把最近缓冲的按键**重放进当时的焦点输入框**。
@@ -236,14 +244,17 @@ enum AX {
     ///
     /// 所以风险窗口是**brosis 退出的那一刻**，落点是 Chromium 系应用里当时的焦点输入框。
     /// 平时开着不触发；而"退出"包括更新装新版时被杀掉——那正是 issue 说的 abrupt departure。
-    /// 常驻后台的记录器不该由升级把这个悄悄带给别人，所以它是开关、且默认关。
+    /// 常驻后台的记录器要把这件事说清楚——所以它是开关、README 里写明了症状与触发时机，
+    /// 而不是藏起来。**风险窗口只有退出那一刻**，这是它可以默认开的前提。
     ///
-    /// 打开：`defaults write com.brosis.app ax.enhancedUserInterface -bool true`（改完重启 app）
-    /// 关掉：`defaults delete com.brosis.app ax.enhancedUserInterface`
+    /// 关掉：`defaults write com.brosis.app ax.enhancedUserInterface -bool false`（改完重启 app）
+    /// 回到默认（开）：`defaults delete com.brosis.app ax.enhancedUserInterface`
     static let enhancedUserInterfaceKey = "ax.enhancedUserInterface"
 
+    /// **`object(forKey:)` 而不是 `bool(forKey:)`**：后者读不到键时返回 false，
+    /// 那样"没设过"就会被当成"用户关掉了"，默认值根本生效不了。
     static func enhancedUserInterfaceEnabled(_ defaults: UserDefaults = .standard) -> Bool {
-        defaults.bool(forKey: enhancedUserInterfaceKey)
+        defaults.object(forKey: enhancedUserInterfaceKey) as? Bool ?? true
     }
 
     /// 对 Chromium / Electron 系应用打开手动无障碍。失败不影响其他通道。
