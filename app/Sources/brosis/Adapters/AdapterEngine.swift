@@ -188,12 +188,15 @@ enum AdapterEngine {
 
             // —— 1. 定位 ——
             let located: (any AXNodeSource)?
+            // 定位到 AX 节点的三种定位器：矩形在 switch 之后统一探，`fallbackInset` 对它们一视同仁。
+            var probesRect = false
+            var probedRect: CGRect?
             switch region.locator {
             case .webArea:
                 located = pick?.root
                 result.pickedWebAreaTitle = pick?.title
                 result.anchored = pick?.anchored ?? false
-                result.rect = located.flatMap { probeFrame($0, budget: &budget) } ?? windowFrame
+                probesRect = true
             case .webAreaDescendant(let domClass):
                 located = pick?.descendants[domClass]
                 // 矩形只在裁视口 / OCR 用得上；纯 AX 的标题区域不必为它探两次 frame。
@@ -214,11 +217,20 @@ enum AdapterEngine {
             case .wholeWindow:
                 located = window
                 result.rect = windowFrame
+            case .primaryWebArea:
+                let picked = primaryWebArea(from: window, budget: &budget)
+                located = picked?.node
+                probedRect = picked?.frame           // 挑选时探过的就不再探第二次
+                probesRect = true
             default:
                 located = region.preferRichestMatch
                     ? findRichest(region.locator, from: window, budget: &budget)
                     : find(region.locator, from: window, budget: &budget)
-                result.rect = located.flatMap { probeFrame($0, budget: &budget) } ?? windowFrame
+                probesRect = true
+            }
+            if probesRect {
+                result.rect = probedRect ?? located.flatMap { probeFrame($0, budget: &budget) }
+                    ?? fallbackRect(region, windowFrame: windowFrame)
             }
             result.located = located != nil
 
@@ -370,6 +382,12 @@ enum AdapterEngine {
         return node.frame
     }
 
+    /// 定位器没命中时的区域矩形：规则给了 `fallbackInset` 就按它从窗口内缩，否则整窗。
+    private static func fallbackRect(_ region: RegionRule, windowFrame: CGRect?) -> CGRect? {
+        guard let windowFrame else { return nil }
+        return region.fallbackInset?.resolve(in: windowFrame) ?? windowFrame
+    }
+
     private static func intersect(_ a: CGRect?, _ b: CGRect?) -> CGRect? {
         guard let a else { return b }
         guard let b else { return a }
@@ -493,7 +511,7 @@ enum AdapterEngine {
             return node.domClasses.contains(domClass)
         case .wholeWindow:
             return true
-        case .rolePath, .relativeRect, .insetRect, .webArea, .webAreaDescendant:
+        case .rolePath, .relativeRect, .insetRect, .webArea, .webAreaDescendant, .primaryWebArea:
             return false
         }
     }
@@ -502,12 +520,14 @@ enum AdapterEngine {
 
     /// 窗口里的 AXWebArea（不进它们内部：要找的是它们的兄弟，不是里面的 iframe）。
     /// 探针 `--dump-webarea` 也用它——探针列出来的与引擎挑选的必须是同一批候选。
+    /// `readTitles: false` 时不读 AXTitle（每个 web area 省一条 AX 消息）——`.primaryWebArea` 用不上标题。
     static func webAreas(in window: any AXNodeSource, budget: inout Budget,
-                         maxCount: Int = 6) -> [(node: any AXNodeSource, title: String?, depth: Int)] {
+                         maxCount: Int = 6, readTitles: Bool = true)
+        -> [(node: any AXNodeSource, title: String?, depth: Int)] {
         var areas: [(node: any AXNodeSource, title: String?, depth: Int)] = []
         walk(from: window, maxDepth: budget.limits.maxDepth, budget: &budget) { node, depth in
             guard node.role == "AXWebArea" else { return .descend }
-            areas.append((node, node.title, depth))
+            areas.append((node, readTitles ? node.title : nil, depth))
             return areas.count < maxCount ? .skip : .stop
         }
         return areas
@@ -553,6 +573,37 @@ enum AdapterEngine {
                                  goodEnough: Int.max) else { return nil }
         let title = areas.first { $0.node.role == node.role && $0.title == node.title }?.title ?? node.title
         return WebAreaPickResult(webArea: node, title: title, preferred: false)
+    }
+
+    /// `.primaryWebArea`：在窗口的 AXWebArea 里挑主文档（判据见 `ElementLocator.primaryWebArea`）。
+    /// 候选与 `webAreas(in:)` 同一批（不进 web area 内部：iframe、PDF 阅读器的内层不算）。
+    /// 返回值带上挑选时探过的 frame（只有比过面积才有），调用方不必再探一次。
+    static func primaryWebArea(from window: any AXNodeSource, budget: inout Budget)
+        -> (node: any AXNodeSource, frame: CGRect?)? {
+        let areas = webAreas(in: window, budget: &budget, readTitles: false).map(\.node)
+        // 1. 有外部地址的候选时，内部页（侧边栏 / DevTools / 扩展外壳 / bundle 内 file://）出局。
+        //    URL 读不到的按外部算。
+        let external = areas.filter { !($0.url.map(AX.isInternalURL) ?? false) }
+        let pool = external.isEmpty ? areas : external
+        guard pool.count > 1 else { return pool.first.map { ($0, nil) } }
+        // 2. 面积最大；读不到 frame 的按 0。
+        var sized: [(node: any AXNodeSource, frame: CGRect?, area: Double)] = []
+        for node in pool {
+            let frame = probeFrame(node, budget: &budget)
+            sized.append((node, frame, frame.map { Double($0.width * $0.height) } ?? 0))
+        }
+        sized.sort { $0.area > $1.area }
+        let top = sized[0].area
+        // 3. 面积相近（5% 内）的才比字数，而且比完所有候选（早退会挑错，同 `pickWebArea`）。
+        let contenders = sized.filter { $0.area >= top * 0.95 }
+        guard contenders.count > 1 else { return contenders.first.map { ($0.node, $0.frame) } }
+        var best = contenders[0]
+        var bestWeight = -1
+        for candidate in contenders {
+            let weight = textWeight(of: candidate.node, budget: &budget, maxNodes: 250)
+            if weight > bestWeight { best = candidate; bestWeight = weight }
+        }
+        return (best.node, best.frame)
     }
 
     /// 从 `root` 起一趟 BFS，把 DOM class 含 `targets` 之一的节点各找出第一个；全找齐就停。

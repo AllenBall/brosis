@@ -57,16 +57,28 @@ final class EventSkeleton {
     // 连读 4 秒都只有 16 个节点，几次探测之后才涨到几千个（别人的 issue 说等 200 ms）。
     // 所以第一次读到空树时不能就此认命，隔一会儿再读一次。
     //
-    // 花销由两件事兜住：① 只对 Chromium 系应用重扫；② 一个进程只要**成功读到过文本**
+    // 花销由三件事兜住：① 只对 Chromium 系应用重扫；② 一个进程只要**成功读到过文本**
     // 就永久标记为"已热"，之后再也不重扫（树建起来就不会退回去）；
-    // ③ 每个进程最多重扫 `maxAXRetries` 次。
+    // ③ 每个键最多重扫 `maxAXRetries` 次。
+    //
+    // **规则声明 `axTreePerDocument` 的（Chrome）按"进程 + 页面"记**（2026-09-11 复查 F2，
+    // evidence 26135）：浏览器的树是按文档建的，每次导航、每次切回隐藏超过 5 分钟的标签页
+    // （Chromium 会撤掉隐藏标签页的无障碍模式）头一秒都是空树；按 pid 记冷热等于只对第一个页面
+    // 生效，之后每个新页面的空读都直接落成一次整窗 OCR。页面键不进"已热"集合（同一页面隐藏再
+    // 切回照样冷），读到正文就把重扫计数清零。
 
-    /// 曾经读到过正文的进程：树已经建好了，不必再重扫。
-    private var axWarmedPIDs = Set<pid_t>()
-    /// 已经排了重扫的进程，避免同一个进程排一堆。
-    private var pendingAXRetryPIDs = Set<pid_t>()
-    /// 每个进程已经重扫过几次。
-    private var axRetryCounts: [pid_t: Int] = [:]
+    /// 曾经读到过正文的键（pid）：树已经建好了，不必再重扫。页面键不进这里。
+    private var axWarmedKeys = Set<String>()
+    /// 已经排了重扫的键，避免同一个键排一堆。**排着的时候再读到空也不 OCR**——还在等，不是读不到。
+    private var pendingAXRetryKeys = Set<String>()
+    /// 每个键已经重扫过几次。读到正文就清零。
+    private var axRetryCounts: [String: Int] = [:]
+    /// 每个进程上一次读到正文的时刻。排了重扫之后若已经读到过（`AXLoadComplete` 往往先到），
+    /// 那次补扫就不必跑了——省一次整棵树的遍历和一条观察。
+    private var lastAXTextReadAt: [pid_t: Double] = [:]
+    /// 计数表的上限：Chrome 每个页面一个键，长时间不重启会一直涨；超了就整个清掉，
+    /// 代价只是下一次空读多排一次重扫。
+    static let maxAXRetryKeys = 512
 
     static let axRetryDelays: [Double] = [1.5, 5.0]
     static var maxAXRetries: Int { axRetryDelays.count }
@@ -301,7 +313,9 @@ final class EventSkeleton {
             kAXFocusedWindowChangedNotification,
             kAXFocusedUIElementChangedNotification,
             kAXTitleChangedNotification,
-            kAXMainWindowChangedNotification
+            kAXMainWindowChangedNotification,
+            // Chromium 对顶层文档加载完成发的通知，注册在应用元素上也收得到。见 `ObservationTrigger.loadComplete`。
+            kAXLoadCompleteNotification,
         ]
         for name in names {
             AXObserverAddNotification(created, element, name as CFString, refcon)
@@ -335,6 +349,8 @@ final class EventSkeleton {
             trigger = .focusedWindowChanged
         case kAXTitleChangedNotification:
             trigger = .titleChanged
+        case kAXLoadCompleteNotification:
+            trigger = .loadComplete
         default:
             trigger = .focusedElementChanged
         }
@@ -402,31 +418,46 @@ final class EventSkeleton {
     ///   调用方据此把这一帧的 OCR 请求撤掉——OCR 回退的前提是"AX 给不出内容"，
     ///   而不是"AX 还没建好"。等 1.5 s 后重扫；真读不到时那次自然还会排 OCR。
     ///   不这么做的话，Claude 这种高频流式应用每次冷读都要白烧一次整窗 Vision。
+    /// - Parameter page: 规则 `axTreePerDocument` 时的页面标识（URL 或标题），键变成"进程 + 页面"，
+    ///   不进"已热"集合、读到正文时清零计数；nil = 按进程记。
     @discardableResult
     private func noteAXOutcome(app: NSRunningApplication, pid: pid_t,
-                               trigger: ObservationTrigger, chars: Int) -> Bool {
+                               trigger: ObservationTrigger, chars: Int, page: String?) -> Bool {
+        let pageKey = page.map { "\(pid)|\($0)" } ?? "\(pid)"
+        let pageScoped = page != nil
         guard chars == 0 else {
-            // 读到了 → 这个进程的树已经热了，撤掉所有重扫状态。
-            axWarmedPIDs.insert(pid)
-            pendingAXRetryPIDs.remove(pid)
-            axRetryCounts[pid] = nil
+            // 读到了 → 这个键的树已经热了，撤掉所有重扫状态。
+            pendingAXRetryKeys.remove(pageKey)
+            axRetryCounts[pageKey] = nil
+            lastAXTextReadAt[pid] = Date().timeIntervalSince1970
+            if !pageScoped { axWarmedKeys.insert(pageKey) }
             return false
         }
-        guard !axWarmedPIDs.contains(pid), !pendingAXRetryPIDs.contains(pid) else { return false }
+        if !pageScoped, axWarmedKeys.contains(pageKey) { return false }
+        // 重扫还在路上：这一帧照样不 OCR（"读早了"的判定还没出结果）。
+        if pendingAXRetryKeys.contains(pageKey) { return true }
         let detection = AX.chromiumDetection(bundleID: app.bundleIdentifier,
                                              bundleURL: app.bundleURL).detection
         guard detection.isChromium else { return false }
-        let attempt = axRetryCounts[pid] ?? 0
+        let attempt = axRetryCounts[pageKey] ?? 0
         guard attempt < Self.maxAXRetries else { return false }
-        axRetryCounts[pid] = attempt + 1
-        pendingAXRetryPIDs.insert(pid)
+        if axRetryCounts.count >= Self.maxAXRetryKeys { axRetryCounts.removeAll() }
+        axRetryCounts[pageKey] = attempt + 1
+        pendingAXRetryKeys.insert(pageKey)
         let delay = Self.axRetryDelays[attempt]
-        recorder.logEvent(kind: "ax_empty_retry_scheduled",
-                          detail: "bundle=\(app.bundleIdentifier ?? "?") 第 \(attempt + 1) 次"
-                                + "，\(delay) s 后重扫")
+        let detail = "bundle=\(app.bundleIdentifier ?? "?") 第 \(attempt + 1) 次，\(delay) s 后重扫"
+        if pageScoped {
+            // 页面键一天能排几百次（每个页面两次），只进内存日志，不刷 runtime_events。
+            BrosisLog.capture.info("ax_empty_retry_scheduled \(detail, privacy: .public)")
+        } else {
+            recorder.logEvent(kind: "ax_empty_retry_scheduled", detail: detail)
+        }
+        let scheduledAt = Date().timeIntervalSince1970
         DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
             guard let self else { return }
-            self.pendingAXRetryPIDs.remove(pid)
+            self.pendingAXRetryKeys.remove(pageKey)
+            // 排了之后已经读到过正文（AXLoadComplete 通常先到）：补扫只是白跑一次整棵树。
+            guard (self.lastAXTextReadAt[pid] ?? 0) < scheduledAt else { return }
             // 应用已经退了、或者用户早就切走了就别补了：补出来的是别人的窗口。
             guard !app.isTerminated,
                   NSWorkspace.shared.frontmostApplication?.processIdentifier == pid else { return }
@@ -453,7 +484,8 @@ final class EventSkeleton {
         if permissions.accessibility && sourceState != .locked {
             // 一次调用同时拿到窗口元素与定位信息：适配规则要在同一个窗口上跑，
             // 各读各的就会多发一次 kAXFocusedWindow（访达 22% 的超时就发生在那一次）。
-            let read = AX.focusedWindowInfo(pid: pid, bundleID: app.bundleIdentifier)
+            let read = AX.focusedWindowInfo(pid: pid, bundleID: app.bundleIdentifier,
+                                            bundleURL: app.bundleURL)
             windowElement = read.element
             info = read.info
             if info.timedOut && sourceState == .ok { sourceState = .timeout }
@@ -468,6 +500,7 @@ final class EventSkeleton {
 
         // —— 第二道闸：正文读不读 ——
         let privateBrowsing = PrivateBrowsing.isPrivate(bundleID: app.bundleIdentifier,
+                                                        bundleURL: app.bundleURL,
                                                         windowTitle: info.title)
         // 传 bundleURL：采集端是**唯一**手头有它的调用方，所以由它把判定算出来并填进缓存，
         // 之后策略列表、OCR 协调器只查缓存就能拿到同一个答案。
@@ -525,8 +558,10 @@ final class EventSkeleton {
             // 排了重扫就把这一帧的 OCR 请求扔掉：现在还分不清"读不到"和"读早了"。
             // **只对真的读了 AX 的规则算**：纯 OCR 的规则（Chrome / 微信 / 飞书会议）字符数恒为 0，
             // 那不是"读早了"而是"压根没读"，当成前者就会把 OCR 请求白白撤掉。
+            // 树按文档建的规则（Chrome）按"进程 + 页面"记冷热（见 `axWarmedKeys`），别的仍按进程。
+            let page = rule.axTreePerDocument ? (info.url ?? info.title ?? "") : nil
             if rule.readsAX,
-               noteAXOutcome(app: app, pid: pid, trigger: trigger, chars: scan.totalChars) {
+               noteAXOutcome(app: app, pid: pid, trigger: trigger, chars: scan.totalChars, page: page) {
                 adapterScan?.ocrRequests = []
             }
             if scan.truncated || scan.regions.contains(where: { $0.truncated }) {

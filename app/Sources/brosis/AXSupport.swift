@@ -176,8 +176,13 @@ enum AX {
     /// 上一版写成 `isChromiumBrowser`，而唯一的调用点在八行之前就已经算出并持有
     /// `chromium` 这个局部量了——包起来只是让同一件事被算两遍，还多出一条永远走不到的
     /// 空 bundleID 分支。两个判据本来就正交（Safari、Firefox 是浏览器但不是 Chromium 系）。
+    ///
+    /// 没给 `bundleURL` 就**只查缓存、不算也不存**：读不了 plist 时算出的 false 是错的，
+    /// 缓存起来比不答更糟（同 `cachedChromiumDetection`）。采集端在 `record()` 里用带 URL 的
+    /// 那次把答案填进缓存，探针这类只有 bundle id 的调用方拿到的就是同一个答案。
     static func bundleIsBrowser(bundleID: String?, bundleURL: URL?) -> Bool {
         guard let bundleID, !bundleID.isEmpty else { return bundleHandlesWebLinks(at: bundleURL) }
+        guard bundleURL != nil else { return browserCache.peek(bundleID) ?? false }
         return browserCache.resolve(bundleID) { bundleHandlesWebLinks(at: bundleURL) }.value
     }
 
@@ -457,7 +462,7 @@ enum AX {
     /// 存在的理由很实在：M1 R2 起适配规则要在同一个窗口上再跑一次子树遍历
     /// （`AdapterEngine`），如果各读各的就会多发一次 `kAXFocusedWindow`——
     /// 而 M0 实测访达 22% 的超时正好发生在这一次调用上（m0_closeout 2.2）。
-    static func focusedWindowInfo(pid: pid_t, bundleID: String? = nil)
+    static func focusedWindowInfo(pid: pid_t, bundleID: String? = nil, bundleURL: URL? = nil)
         -> (element: AXUIElement?, info: WindowInfo) {
         let limits = bfsLimits(bundleID: bundleID)
         guard let window = focusedWindow(pid: pid) else {
@@ -469,10 +474,13 @@ enum AX {
         if url == nil {
             // Safari / Chromium 的 URL 挂在 AXWebArea 上，不在窗口上；地址栏那条是它的兜底，
             // 两者同一趟遍历里一起找（见 `urlSources`）。
-            let isBrowser = bundleID.map(PrivateBrowsing.browserBundleIDs.contains) ?? false
+            // 浏览器判定走清单 ∪ plist（Chrome 复查 F6）：结构判出来的新浏览器也要从地址栏取 URL。
+            let isBrowser = PrivateBrowsing.isBrowser(bundleID: bundleID, bundleURL: bundleURL)
             let sources = urlSources(in: window, limits: limits, includeAddressBar: isBrowser)
             url = sources.webArea ?? sources.addressBar.flatMap(normalizedAddressBarURL)
         }
+        // 地址栏里的 `chrome://…` 这类内部页也不入库（web area 那条路在 `urlSources` 里已经跳过了）。
+        if let candidate = url, isBrowserInternalURL(candidate) { url = nil }
         return (window, WindowInfo(title: title, url: url, document: document,
                                    frame: frame(window), timedOut: false))
     }
@@ -512,6 +520,24 @@ enum AX {
         url.utf8.starts(with: "file://".utf8) && url.contains(".app/Contents/")
     }
 
+    /// 浏览器自己的内部页（新标签页、设置、DevTools、PDF 阅读器外壳…）：对用户毫无意义，
+    /// 却会以 `new-tab-page` / `accessibility` 这种"host"进 sites 表（2026-09-11 Chrome 复查 F5）。
+    /// 同样不写 `observations.url`，标题照记。
+    static let browserInternalSchemes = [
+        "chrome://", "chrome-extension://", "chrome-untrusted://", "chrome-search://", "devtools://",
+        "edge://", "brave://", "vivaldi://", "opera://", "arc://", "about:", "view-source:",
+    ]
+
+    static func isBrowserInternalURL(_ url: String) -> Bool {
+        let lowered = url.lowercased()
+        return browserInternalSchemes.contains { lowered.hasPrefix($0) }
+    }
+
+    /// 两类内部地址合在一起：bundle 内的 file:// 页面，或浏览器内部页。
+    static func isInternalURL(_ url: String) -> Bool {
+        isBundleInternalURL(url) || isBrowserInternalURL(url)
+    }
+
     /// 一次遍历，同时找**网页区的 URL** 与**地址栏的值**。
     ///
     /// 合并的理由是它们本来就走同一棵树：地址栏那条只在网页区那条落空时才用得上，而
@@ -534,9 +560,10 @@ enum AX {
             case "AXWebArea":
                 // Electron 外壳 / 侧栏那种 bundle 内的 file:// 页面不是用户在看的地址，跳过它继续找
                 // 下一个 web area（Claude 桌面版第一个是 app.asar 里的 index.html，会话在第二个；
-                // 飞书两个都是 bundle 内的，于是 url 留空）。不进 web area 的子树：要找的是它的兄弟。
+                // 飞书两个都是 bundle 内的，于是 url 留空）。浏览器内部页（`chrome://` 侧边栏、
+                // `devtools://`）同理。不进 web area 的子树：要找的是它的兄弟。
                 if webArea == nil, let url = string(element, kAXURLAttribute as String),
-                   !isBundleInternalURL(url) {
+                   !isInternalURL(url) {
                     webArea = url
                 }
                 descend = false

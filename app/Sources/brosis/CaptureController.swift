@@ -405,12 +405,14 @@ final class CaptureController: NSObject, @unchecked Sendable {
     /// 多窗口时"面积最大"只是启发式——微信开着聊天主窗口和一个小的图片查看窗口时，
     /// 取的是主窗口。这与事件骨架认定的焦点窗口可能不是同一个，所以 `handleFrame`
     /// 那道 bundle id 校验仍然是必要的（它挡的是**换了应用**，不是换了窗口）。
-    static func targetWindow(in content: SCShareableContent, bundleID: String?) -> SCWindow? {
+    static func targetWindow(in content: SCShareableContent, bundleID: String?,
+                             preferredFrame: CGRect? = nil) -> SCWindow? {
         let candidates = content.windows.map {
             WindowCandidate(id: $0.windowID, bundleID: $0.owningApplication?.bundleIdentifier,
                             isOnScreen: $0.isOnScreen, layer: $0.windowLayer, frame: $0.frame)
         }
-        guard let picked = Self.pickTarget(candidates, bundleID: bundleID) else { return nil }
+        guard let picked = Self.pickTarget(candidates, bundleID: bundleID,
+                                           preferredFrame: preferredFrame) else { return nil }
         return content.windows.first { $0.windowID == picked.id }
     }
 
@@ -427,15 +429,34 @@ final class CaptureController: NSObject, @unchecked Sendable {
     /// 窗口太小就不当主窗口（输入法候选框、提示气泡都可能是 layer 0）。
     static let minTargetSide: Double = 200
 
+    /// 焦点窗口的 AX 矩形与 ScreenCaptureKit 报的窗口矩形允许差这么多点（同一套全局坐标，
+    /// 原点主屏左上、y 向下；差异来自取整与阴影）。
+    static let preferredFrameTolerance: Double = 8
+
+    /// 两个矩形四个分量里差得最多的那一个。
+    static func frameDistance(_ a: CGRect, _ b: CGRect) -> Double {
+        max(abs(a.minX - b.minX), abs(a.minY - b.minY), abs(a.width - b.width), abs(a.height - b.height))
+    }
+
     /// 挑选规则本体（纯函数）。
-    static func pickTarget(_ candidates: [WindowCandidate], bundleID: String?) -> WindowCandidate? {
+    ///
+    /// `preferredFrame`：AX 那一侧读到的**焦点窗口**矩形。有它就先按矩形认（2026-09-11 Chrome 复查
+    /// F3：两个 Chrome 窗口时 AX 读的是焦点窗口，OCR 却截了面积最大的那个，两份正文挂到一条观察上）；
+    /// 对不上任何候选（矩形过期、窗口刚关）才退回面积最大。
+    static func pickTarget(_ candidates: [WindowCandidate], bundleID: String?,
+                           preferredFrame: CGRect? = nil) -> WindowCandidate? {
         guard let bundleID, !bundleID.isEmpty else { return nil }
-        return candidates
-            .filter {
-                $0.bundleID == bundleID && $0.isOnScreen && $0.layer == 0
-                    && $0.frame.width >= minTargetSide && $0.frame.height >= minTargetSide
-            }
-            .max { $0.frame.width * $0.frame.height < $1.frame.width * $1.frame.height }
+        let eligible = candidates.filter {
+            $0.bundleID == bundleID && $0.isOnScreen && $0.layer == 0
+                && $0.frame.width >= minTargetSide && $0.frame.height >= minTargetSide
+        }
+        if let preferredFrame, !preferredFrame.isEmpty,
+           let match = eligible.first(where: {
+               frameDistance($0.frame, preferredFrame) <= preferredFrameTolerance
+           }) {
+            return match
+        }
+        return eligible.max { $0.frame.width * $0.frame.height < $1.frame.width * $1.frame.height }
     }
 
     private func capture(reason: String) async {
@@ -463,8 +484,10 @@ final class CaptureController: NSObject, @unchecked Sendable {
             // 换来的是：图像边界就是窗口边界（分栏检测不用再猜尺度）、坐标换算少一层、
             // 别的应用的画面根本不进这张图。
             let bundleID = withStateLock { frontmostBundleID }
+            // 焦点窗口的 AX 矩形来自上一次扫描的上下文；没有（私密浏览 / 只记事件）就按面积挑。
             let target = AdapterRegistry.rule(for: bundleID).capturesWindow
-                ? Self.targetWindow(in: content, bundleID: bundleID)
+                ? Self.targetWindow(in: content, bundleID: bundleID,
+                                    preferredFrame: coordinator.windowFrame(bundleID: bundleID))
                 : nil
 
             let filter: SCContentFilter

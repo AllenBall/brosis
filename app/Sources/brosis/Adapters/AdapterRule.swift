@@ -130,6 +130,11 @@ enum ElementLocator: Sendable, Equatable {
     /// 挑中的**不是** `prefer` 那个时（云文档 / 邮箱），退而把 web area 自己的 AXTitle 当文本
     /// ——那正是页标题（「主页 - 飞书云文档」「mail」）。
     case webAreaDescendant(domClass: String)
+    /// 在窗口的所有 AXWebArea 里挑**主文档**（Chrome）：有外部地址（http / file）的候选时排除
+    /// `chrome://` / `devtools://` / `chrome-extension://` 这类内部页（侧边栏、停靠的 DevTools、
+    /// PDF 阅读器外壳），剩下的按矩形面积最大挑，面积相近（5% 内）才比字数。
+    /// 「最富」单独用不稳：DevTools 的 Elements 面板永远比页面富（2026-09-11 Chrome 复查 F4）。
+    case primaryWebArea
 
     /// `.webArea` 的参数；不是它就是 nil。
     var webAreaPick: WebAreaPick? {
@@ -144,6 +149,7 @@ enum ElementLocator: Sendable, Equatable {
             return "webarea prefer=\(pick.prefer?.title ?? "-") exclude=\(pick.exclude.joined(separator: ","))"
                 + (pick.prefer?.anchorClass.map { " anchor=.\($0)" } ?? "")
         case .webAreaDescendant(let domClass): return "webarea-descendant=.\(domClass)"
+        case .primaryWebArea: return "primary-webarea"
         case .role(let r): return "role=\(r)"
         case .roleAndSubrole(let r, let s): return "role=\(r) subrole=\(s)"
         case .identifier(let id): return "identifier=\(id)"
@@ -247,6 +253,10 @@ struct RegionRule: Sendable {
     /// 2832 字符）。规则取第一个匹配，于是永远落在空壳上、读出 0 字符 →
     /// 记成 unavailable → 掉进 OCR 回退。这就是「不可用」占 85% 的主因。
     var preferRichestMatch = false
+    /// 定位器**没命中**时 OCR 回退矩形从窗口按这个内缩取，而不是整个窗口。
+    /// Chrome 的 AXWebArea 在导航后头一秒还没建出来，整窗矩形会把标签条、地址栏一起 OCR 进正文
+    /// （2026-09-11 Chrome 复查 F2，evidence 26135）。nil = 沿用整窗。
+    var fallbackInset: WindowInset?
 }
 
 /// 三栏布局量不到边界时的兜底值（点，从窗口边缘算）。
@@ -308,6 +318,12 @@ struct AdapterRule: Sendable {
     /// **窗口定向截图**：截这个应用时不截整块显示器，只截它的焦点窗口
     /// （`SCContentFilter(desktopIndependentWindow:)`）。见 `CaptureController.capture`。
     var capturesWindow: Bool = false
+
+    /// 无障碍树**按文档建**（浏览器）：每次导航、每次切回久未显示的标签页都从空树开始。
+    /// `EventSkeleton` 据此把"读到空树 ⇒ 重扫、不 OCR"的状态按"进程 + 页面"记，而不是按进程
+    /// （2026-09-11 Chrome 复查 F2）。单文档的 Electron 应用（Claude 桌面版、飞书）保持 false：
+    /// 树建好就不退，按进程记"已热"的短路对它们仍然成立。
+    var axTreePerDocument = false
 
     /// 窗口标题以这些前缀开头时**只记标题、不读正文也不 OCR**（completeness = excluded）。
     ///

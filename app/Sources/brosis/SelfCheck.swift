@@ -790,6 +790,24 @@ enum SelfCheck {
                                          windowTitle: "关于无痕浏览的笔记")
                 && !PrivateBrowsing.isPrivate(bundleID: "com.apple.Safari", windowTitle: "普通标题"),
               "只对浏览器 bundle id 生效")
+        // 2026-09-11 Chrome 复查 F1（真机复现）：Chromium 系的 kAXTitle 是无障碍标题，
+        // 无痕 / 访客只在串尾加标记，zh-CN 是「（无痕）」「（访客）」两个字加全角括号。
+        let chromiumTitleCases: [(bundle: String, title: String, expected: Bool)] = [
+            ("com.google.Chrome", "新的无痕式标签页 - Google Chrome（无痕）", true),     // 真机标题
+            ("com.google.Chrome", "New Tab - Google Chrome (Incognito)", true),
+            ("com.microsoft.edgemac", "Guest - Microsoft Edge (Guest)", true),
+            ("com.google.Chrome", "访客 - Google Chrome（访客）", true),
+            ("com.google.Chrome", "关于（无痕）模式的说明 - Google Chrome - 某人", false),   // 标记在中段
+            ("com.google.Chrome", "Incognito mode explained - Google Chrome - 某人", false),
+            ("com.apple.Notes", "笔记（无痕）", false),                                    // 非浏览器
+        ]
+        let chromiumTitleFailures = chromiumTitleCases.filter {
+            PrivateBrowsing.isPrivate(bundleID: $0.bundle, windowTitle: $0.title) != $0.expected
+        }
+        check("私密浏览（Chromium 系按标题串尾判，\(chromiumTitleCases.count) 条）",
+              chromiumTitleFailures.isEmpty,
+              chromiumTitleFailures.isEmpty ? "串尾标记见 PrivateBrowsing.titleSuffixMarkers；中段出现、非浏览器都不算"
+                                            : chromiumTitleFailures.map(\.title).joined(separator: " | "))
 
         // ---------------------------------------------------------------- 6. dHash
         let hasher = DHasher()
@@ -1082,9 +1100,9 @@ enum SelfCheck {
         // 不钉 `capturesWindow`：`resolvingEnhanced` 只动 regions，它不可能变，断言它等于断言 x == x。
         let enhancedFailures = [AdapterRegistry.chrome, AdapterRegistry.feishu].compactMap { base -> String? in
             let on = base.resolvingEnhanced(true)
-            // 飞书用的是按标题挑 web area 的定位器（`.webArea`），Chrome 仍是 `.role("AXWebArea")`。
+            // 飞书用的是按标题挑 web area 的定位器（`.webArea`），Chrome 用挑主文档的 `.primaryWebArea`。
             let readsWebArea = on.regions.contains { region in
-                region.locator.webAreaPick != nil || region.locator == .role("AXWebArea")
+                region.locator.webAreaPick != nil || region.locator == .primaryWebArea
             }
             let ok = readsWebArea
                 && on.regions.filter(\.required).allSatisfy(\.ocrFallback)
@@ -1093,6 +1111,16 @@ enum SelfCheck {
         }
         check("开关开着时 Chrome / 飞书都改读 AXWebArea、必需区域留 OCR 回退、开始读 AX",
               enhancedFailures.isEmpty, enhancedFailures.joined(separator: " "))
+        // 2026-09-11 Chrome 复查 F2c：AXWebArea 还没建出来那一秒，OCR 回退矩形按顶部外壳内缩，不是整窗。
+        let chromeShellScan = AdapterEngine.scan(rule: AdapterRegistry.chrome.resolvingEnhanced(true),
+                                                 window: AdapterVectors.chromeShellTree(),
+                                                 windowFrame: AdapterVectors.window)
+        let chromeShellRect = chromeShellScan.ocrRequests.first?.rect
+        let chromeShellExpected = AdapterRegistry.chromeShellInset().resolve(in: AdapterVectors.window)
+        check("Chrome 开关开着、web area 缺席：回退 OCR 矩形 = 顶部外壳内缩（不是整窗）",
+              chromeShellRect == chromeShellExpected,
+              chromeShellRect.map { "rect=\(Int($0.minX)),\(Int($0.minY)),\(Int($0.width)),\(Int($0.height))" }
+                ?? "没有 OCR 请求")
         // 飞书会议不给增强形态（Step 6：真实会议里设了私有属性树仍是死的）；开关关着时飞书一个区域都没有（Step 4）。
         let meetingOff = AdapterRegistry.feishuMeeting.enhancedRegions == nil
             && AdapterRegistry.feishuMeeting.regions.allSatisfy { $0.read == .ocr }
@@ -1108,9 +1136,17 @@ enum SelfCheck {
             ("file:///Users/someone/Documents/report.html", false),
             ("https://example.com/a.html", false),
             (nil, false),
+            // 2026-09-11 Chrome 复查 F5：浏览器内部页不入库（台账 sites 里出现过 new-tab-page / accessibility）。
+            ("chrome://new-tab-page/", true),
+            ("chrome://accessibility/", true),
+            ("chrome-extension://mhjfbmdgcfjbbpaeojofohoefgiehjai/index.html", true),
+            ("devtools://devtools/bundled/devtools_app.html", true),
+            ("about:blank", true),
+            ("edge://settings/", true),
+            ("https://chrome.google.com/webstore", false),
         ]
-        let urlSkipFailures = urlSkipCases.filter { ($0.0.map(AX.isBundleInternalURL) ?? false) != $0.1 }
-        check("bundle 内 file:// 地址不入库（用户自己的本地文件与 https 照记）",
+        let urlSkipFailures = urlSkipCases.filter { ($0.0.map(AX.isInternalURL) ?? false) != $0.1 }
+        check("bundle 内 file:// 与浏览器内部页地址不入库（用户自己的本地文件与 https 照记）",
               urlSkipFailures.isEmpty, urlSkipFailures.map { $0.0 ?? "nil" }.joined(separator: " "))
 
         // 飞书开关开着那副样子的形状（2026-09-11 Step 1，依据 Step 0 探针）。合成树用例钉行为，
@@ -1408,8 +1444,8 @@ enum SelfCheck {
         let pool = [tooltip, imageViewer, panel, offscreen, otherApp, mainWindow]
         var pickFailures: [String] = []
         func expectPick(_ name: String, _ candidates: [Candidate], _ bundle: String?,
-                        _ expected: CGWindowID?) {
-            let got = CaptureController.pickTarget(candidates, bundleID: bundle)
+                        _ expected: CGWindowID?, preferredFrame: CGRect? = nil) {
+            let got = CaptureController.pickTarget(candidates, bundleID: bundle, preferredFrame: preferredFrame)
             if got?.id != expected { pickFailures.append("\(name)→\(got?.id.description ?? "nil")") }
         }
         expectPick("多窗口取面积最大的主窗口", pool, wechatBundle, 1)
@@ -1418,9 +1454,14 @@ enum SelfCheck {
         expectPick("只剩图片查看窗口时就用它", [imageViewer, tooltip], wechatBundle, 2)
         expectPick("bundle id 为空 → 不定向截图（退回整屏）", pool, nil, nil)
         expectPick("这个应用一个窗口都没有 → 退回整屏", [otherApp], wechatBundle, nil)
-        check("窗口定向截图挑窗：5 条（面积最大 / 排除浮层与离屏 / 退回整屏）",
+        // 2026-09-11 Chrome 复查 F3：焦点窗口的 AX 矩形优先，对不上任何窗口时才退回面积最大。
+        expectPick("焦点矩形认小窗", pool, wechatBundle, 2,
+                   preferredFrame: CGRect(x: 202, y: 199, width: 600, height: 502))
+        expectPick("焦点矩形对不上 → 面积最大", pool, wechatBundle, 1,
+                   preferredFrame: CGRect(x: 3_000, y: 0, width: 800, height: 800))
+        check("窗口定向截图挑窗（焦点矩形优先 / 面积最大 / 排除浮层与离屏 / 退回整屏）",
               pickFailures.isEmpty,
-              pickFailures.isEmpty ? "只认在屏的普通窗口层、边长 ≥ 200 pt，取面积最大的那个"
+              pickFailures.isEmpty ? "先按焦点窗口的 AX 矩形认（容差 8 pt），再只认在屏的普通窗口层、边长 ≥ 200 pt、面积最大"
                                    : pickFailures.joined(separator: " "))
 
         // 12.11 裁剪坐标：AX 坐标 → 显示器局部 → 像素（含 2x 缩放与跨屏落空）

@@ -236,6 +236,83 @@ enum AdapterVectors {
 
     // MARK: - 规则引擎用例
 
+    // MARK: - Chrome（2026-09-11 复查 F2 / F4 / F7）
+
+    /// Chrome 顶部外壳（标签条 + 地址栏）：真机 43 节点、没有 AXWebArea 的那副样子。
+    private static func chromeShell() -> [SyntheticAXNode] {
+        [SyntheticAXNode(role: "AXGroup", frame: CGRect(x: 100, y: 60, width: 1_200, height: 80), kids: [
+            SyntheticAXNode(role: "AXTabGroup", frame: CGRect(x: 100, y: 60, width: 1_200, height: 40)),
+            SyntheticAXNode(role: "AXToolbar", frame: CGRect(x: 100, y: 100, width: 1_200, height: 40),
+                            kids: [
+                                SyntheticAXNode(role: "AXTextField", value: "example.invalid/article",
+                                                frame: CGRect(x: 300, y: 108, width: 800, height: 24)),
+                            ]),
+        ])]
+    }
+
+    /// 外壳以下的内容区；Chrome 树里的 web area 都摆在它里面。
+    private static let chromeContent = CGRect(x: 100, y: 140, width: 1_200, height: 720)
+
+    /// 外壳 + 内容区里的若干 web area 拼成一个 Chrome 窗口。
+    private static func chromeWindow(title: String, areas: [SyntheticAXNode]) -> SyntheticAXNode {
+        SyntheticAXNode(role: "AXWindow", title: title, frame: window,
+                        kids: chromeShell() + (areas.isEmpty ? [] : [
+                            SyntheticAXNode(role: "AXGroup", frame: chromeContent, kids: areas),
+                        ]))
+    }
+
+    /// 一个 web area 里从上往下排的 `count` 行可见文本（「<label> N」）。
+    private static func rows(_ label: String, count: Int, x: Double, width: Double) -> [SyntheticAXNode] {
+        (1...count).map { index in
+            SyntheticAXNode(role: "AXStaticText", value: "\(label) \(index)",
+                            frame: CGRect(x: x, y: 160 + 40 * Double(index), width: width, height: 30))
+        }
+    }
+
+    /// 导航后头一秒：只有外壳，AXWebArea 还没建出来（真机探针 t=0 的形态）。
+    static func chromeShellTree() -> SyntheticAXNode {
+        chromeWindow(title: "正在加载 - Google Chrome", areas: [])
+    }
+
+    /// 页面 + 停靠的 DevTools（`devtools://`，比页面更大也更富）+ 侧边栏（`chrome://`，比页面更富）。
+    /// 只按"最富"或"最大"都会挑到 DevTools；主文档必须是唯一带外部地址的那个。
+    static func chromeDevToolsTree() -> SyntheticAXNode {
+        let page = SyntheticAXNode(
+            role: "AXWebArea", title: "文章", url: "https://example.invalid/article",
+            frame: CGRect(x: 100, y: 140, width: 500, height: 720),
+            kids: [
+                SyntheticAXNode(role: "AXStaticText", value: "页面正文第一段",
+                                frame: CGRect(x: 120, y: 200, width: 400, height: 30)),
+                SyntheticAXNode(role: "AXStaticText", value: "视口下方之外的段落",
+                                frame: CGRect(x: 120, y: 1_400, width: 400, height: 30)),
+            ])
+        let devtools = SyntheticAXNode(
+            role: "AXWebArea", title: "DevTools", url: "devtools://devtools/bundled/devtools_app.html",
+            frame: CGRect(x: 600, y: 140, width: 700, height: 720),
+            kids: rows("DevTools 面板第", count: 6, x: 620, width: 600))
+        let sidePanel = SyntheticAXNode(
+            role: "AXWebArea", title: "侧边栏", url: "chrome://read-later.top-chrome/",
+            frame: CGRect(x: 1_000, y: 140, width: 300, height: 720),
+            kids: rows("侧边栏条目", count: 4, x: 1_010, width: 280))
+        return chromeWindow(title: "文章 - Google Chrome - 某人", areas: [page, devtools, sidePanel])
+    }
+
+    /// 分屏：两个 http 页面面积相同，字多的那个才是主文档（面积相近时比字数）。
+    static func chromeSplitTree() -> SyntheticAXNode {
+        let left = SyntheticAXNode(
+            role: "AXWebArea", title: "左", url: "https://left.invalid/",
+            frame: CGRect(x: 100, y: 140, width: 600, height: 720),
+            kids: [
+                SyntheticAXNode(role: "AXStaticText", value: "左边只有一句",
+                                frame: CGRect(x: 120, y: 200, width: 400, height: 30)),
+            ])
+        let right = SyntheticAXNode(
+            role: "AXWebArea", title: "右", url: "https://right.invalid/",
+            frame: CGRect(x: 700, y: 140, width: 600, height: 720),
+            kids: rows("右边第", count: 3, x: 720, width: 500))
+        return chromeWindow(title: "分屏 - Google Chrome", areas: [left, right])
+    }
+
     struct RuleCase: Sendable {
         var name: String
         var rule: AdapterRule
@@ -327,6 +404,38 @@ enum AdapterVectors {
                  mustContain: [],
                  mustNotContain: [],
                  expectedOCRRegions: ["chat_panel", "conversation_title"]),
+        RuleCase(name: "Chrome（开关开）web area 还没建出来：正文空、排一次回退 OCR（矩形另有自检钉住）",
+                 rule: AdapterRegistry.chrome.resolvingEnhanced(true),
+                 tree: chromeShellTree,
+                 expectedFragments: 0,
+                 expectedCompleteness: .unavailable,
+                 mustContain: [],
+                 mustNotContain: [],
+                 expectedOCRRegions: ["web_area"]),
+        RuleCase(name: "Chrome（开关关）：不读 AX，整页按顶部外壳内缩 OCR",
+                 rule: AdapterRegistry.chrome,
+                 tree: chromeShellTree,
+                 expectedFragments: 0,
+                 expectedCompleteness: .unavailable,
+                 mustContain: [],
+                 mustNotContain: [],
+                 expectedOCRRegions: ["page"]),
+        RuleCase(name: "Chrome（开关开）页面 + 停靠 DevTools + 侧边栏：只读带外部地址的主文档",
+                 rule: AdapterRegistry.chrome.resolvingEnhanced(true),
+                 tree: chromeDevToolsTree,
+                 expectedFragments: 1,
+                 expectedCompleteness: .partial,          // 视口下方还有段落
+                 mustContain: ["页面正文第一段"],
+                 mustNotContain: ["DevTools 面板", "侧边栏条目", "视口下方之外"],
+                 expectedOCRRegions: []),
+        RuleCase(name: "Chrome（开关开）分屏两个 http 页面面积相同：字多的是主文档",
+                 rule: AdapterRegistry.chrome.resolvingEnhanced(true),
+                 tree: chromeSplitTree,
+                 expectedFragments: 1,
+                 expectedCompleteness: .complete,
+                 mustContain: ["右边第 1", "右边第 3"],
+                 mustNotContain: ["左边只有一句"],
+                 expectedOCRRegions: []),
     ]
 
     // MARK: - 完整性四态

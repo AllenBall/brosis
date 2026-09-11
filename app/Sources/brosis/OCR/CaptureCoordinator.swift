@@ -128,6 +128,15 @@ final class CaptureCoordinator: @unchecked Sendable {
     private var stats = Stats()
     var currentStats: Stats { lock.withLock { stats } }
 
+    /// 上一次扫描时焦点窗口的 AX 矩形（只认同一个应用的上下文）：
+    /// 窗口定向截图用它认准焦点窗口（2026-09-11 Chrome 复查 F3）。
+    func windowFrame(bundleID: String?) -> CGRect? {
+        lock.withLock {
+            guard let context, let bundleID, context.bundleID == bundleID else { return nil }
+            return context.windowFrame
+        }
+    }
+
     init(defaults: UserDefaults = .standard) {
         // 限流器跟协调者用同一份 defaults：不传的话独立 suite 里配不了 capture.ocrMinInterval，
         // 自检就只能被产品默认的 5 s 挡住（产品路径两边都是 .standard，行为不变）。

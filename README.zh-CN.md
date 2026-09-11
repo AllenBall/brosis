@@ -212,13 +212,13 @@ brosis --dump-ocr       # OCR 识别结果逐行核对
 
 Electron 应用需要先设 `AXManualAccessibility` 才暴露无障碍树；一个窗口里往往有多个 `AXWebArea`（外壳一个、真正的应用一个、内嵌预览再一个），必须挑内容最多的那个而不是第一个。Chromium 建树是异步的，读到空树时会隔一会儿重扫。
 
-**Chrome 系浏览器**（Chrome / Edge / Brave / Vivaldi / Arc）只认私有属性 `AXEnhancedUserInterface`，不认公开的 `AXManualAccessibility`。实测 Chrome 153 的无障碍树只有 43 个节点、全是浏览器外壳、**没有 `AXWebArea`**。所以默认路径是：正文整页 OCR，URL 从地址栏的 `AXTextField` 直接读——两件事都不需要装扩展。截图走窗口定向，别的窗口盖在上面时不会把它的像素记成网页内容。
+**Chrome 系浏览器**（Chrome / Edge / Brave / Vivaldi / Arc）只认私有属性 `AXEnhancedUserInterface`，不认公开的 `AXManualAccessibility`。实测 Chrome 153 的无障碍树只有 43 个节点、全是浏览器外壳、**没有 `AXWebArea`**。所以默认路径是：正文整页 OCR，URL 从地址栏的 `AXTextField` 直接读——两件事都不需要装扩展。截图走窗口定向，别的窗口盖在上面时不会把它的像素记成网页内容；有两个窗口时按焦点窗口的矩形认，不是按面积。无痕 / 访客窗口按标题串尾识别（Chrome 的窗口 AX 标题就是无障碍标题，末尾带「（无痕）」「(Incognito)」「（访客）」「(Guest)」），命中后只记应用与时间。`chrome://`、`devtools://`、`chrome-extension://` 这类内部页不写 URL。
 
-**`AXEnhancedUserInterface` 默认开启，可以自行关闭。** 开着时 Chrome、飞书、飞书会议都会真的建起无障碍树，正文优先读 DOM 文本（逐字准确、含滚动区外的内容、且完全不跑 OCR），读空再回退 OCR。实测：Chrome 从「43 个节点全是外壳、0 字正文」变成可读；飞书读的是当前会话所在的 `messenger-chat`（会话名 + 消息，单聊行带「我 / 对方名」前缀），会话列表侧栏整块排除；切到云文档 / 邮箱就读那个模块自己的 web area，页标题即其 AXTitle；搜索 / 转发 / 名片这类 `ModalWebViewWidget` 弹窗只记标题；走到 OCR 的部分会先剥掉平铺的「用户名 组织名」水印（学不出来时可用 `defaults write com.brosis.app adapter.watermark.text "张三 某公司"` 指定）。关掉则退回整页 OCR。
+**`AXEnhancedUserInterface` 默认开启，可以自行关闭。** 开着时 Chrome、飞书、飞书会议都会真的建起无障碍树，正文优先读 DOM 文本（逐字准确、含滚动区外的内容、且完全不跑 OCR），读空再回退 OCR。实测：Chrome 从「43 个节点全是外壳、0 字正文」变成可读；飞书读的是当前会话所在的 `messenger-chat`（会话名 + 消息，单聊行带「我 / 对方名」前缀），会话列表侧栏整块排除；切到云文档 / 邮箱就读那个模块自己的 web area，页标题即其 AXTitle；搜索 / 转发 / 名片这类 `ModalWebViewWidget` 弹窗只记标题；走到 OCR 的部分会先剥掉平铺的「用户名 组织名」水印（学不出来时可用 `defaults write com.brosis.app adapter.watermark.text "张三 某公司"` 指定）。关掉则退回整页 OCR。Chrome 的树是按页面建的：导航后头一秒、切回隐藏超过 5 分钟的标签页时读到空树属正常，这时不 OCR、等 1.5 s 重扫（并订阅 Chromium 的 `AXLoadComplete`）；页面与停靠的 DevTools / 侧边栏同在一个窗口时挑带外部地址、面积最大的那个 web area。
 
 ⚠️ **打开前请知道代价**：该属性会让 Chromium 进入无障碍模式并镜像输入，设置它的客户端**突然断开**时，把最近缓冲的按键**重放进当时的焦点输入框**——复现用例是输入 `abcd`、退出客户端后变成 `abcdbcdbcd`，即**把你刚敲的内容重复一遍**（见 [screenpipe #3884](https://github.com/mediar-ai/screenpipe/issues/3884)；1Password、Alfred、TextExpander 中过同一个）。
 
-风险窗口是 **brosis 退出的那一刻**（包括更新时），落点是 Chromium 系应用里当时的焦点输入框。平时开着不触发。这就是它默认关闭、且升级不会自动打开的原因。
+风险窗口是 **brosis 退出的那一刻**（包括更新时），落点是 Chromium 系应用里当时的焦点输入框。平时开着不触发。这就是它做成开关、并把症状与触发时机写在这里的原因。
 
 ```bash
 defaults write com.brosis.app ax.enhancedUserInterface -bool false  # 关掉，需重启 app

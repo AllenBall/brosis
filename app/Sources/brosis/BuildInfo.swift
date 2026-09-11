@@ -4,7 +4,7 @@ import Foundation
 /// 版本与固定标识。bundle id 必须与 Info.plist、LaunchAgent plist 保持一致，
 /// 否则 TCC 授权会作废（报告 3.3）。
 enum BuildInfo {
-    static let version = "0.7.5"
+    static let version = "0.7.6"
     static let bundleIdentifier = "com.brosis.app"
     static let agentPlistName = "com.brosis.agent.plist"
     /// 菜单与自检里打印的阶段名。
@@ -23,6 +23,10 @@ enum ObservationTrigger: String, Sendable {
     case focusedWindowChanged = "focused_window_changed"
     case focusedElementChanged = "focused_element_changed"
     case titleChanged = "title_changed"
+    /// Chromium 对顶层文档发的 `AXLoadComplete`（页面加载完成、无障碍树已建好）。
+    /// 2026-09-11 Chrome 复查 F2：导航后头一秒 `title_changed` 连打三下都读到空树，
+    /// 这个通知才是"现在读"的准信号。新标签页不发（Chromium 有意压掉），Electron 应用也会发。
+    case loadComplete = "load_complete"
     case screenLocked = "screen_locked"
     case screenUnlocked = "screen_unlocked"
     // NSWorkspace.sessionDidResignActive/DidBecomeActive 只在**快速用户切换**时触发，
@@ -38,14 +42,15 @@ enum ObservationTrigger: String, Sendable {
     /// 收敛到 schema 的七个取值。
     ///
     /// - 应用激活 / 失活 → `app_switch`
-    /// - 焦点窗口变化、标题变化 → `window_change`
+    /// - 焦点窗口变化、标题变化、页面加载完成 → `window_change`
     /// - 焦点元素变化 → `ax_notification`
     /// - 其余（系统级事件、自检）→ `manual`。系统级事件本身**不写观察记录**，
     ///   只写运行期事件；这里给一个值只是为了枚举完备。
     var coreTrigger: CaptureTrigger {
         switch self {
         case .appActivated, .appDeactivated:            return .appSwitch
-        case .focusedWindowChanged, .titleChanged:      return .windowChange
+        case .focusedWindowChanged, .titleChanged, .loadComplete:
+                                                        return .windowChange
         case .focusedElementChanged:                    return .axNotification
         default:                                        return .manual
         }

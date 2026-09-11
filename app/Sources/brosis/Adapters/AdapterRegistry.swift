@@ -104,9 +104,20 @@ enum AdapterRegistry {
     static func webAreaRegions() -> [RegionRule] {
         // `ocrOnFrameChange: false`（Step 3）：DOM 逐字给出的区域，帧变了而文本没变只可能是
         // 图片 / 动画 / 光标，再排 OCR 只会把噪声（乃至压在上面的别的窗口）记进来。
-        [RegionRule(name: "web_area", kind: .body, locator: .role("AXWebArea"),
+        // `.primaryWebArea`（2026-09-11 复查 F4）：页面 + 停靠 DevTools / 侧边栏同在一个窗口时
+        // 按"外部地址优先、面积最大"挑，不再只比字数。`fallbackInset`（F2c）：web area 还没建出来
+        // 那一秒的回退 OCR 矩形裁掉顶部外壳，不是整窗。
+        [RegionRule(name: "web_area", kind: .body, locator: .primaryWebArea,
                     read: .axSubtree, ocrFallback: true, required: true, clipToViewport: true,
-                    ocrOnFrameChange: false, preferRichestMatch: true)]
+                    ocrOnFrameChange: false, fallbackInset: chromeShellInset())]
+    }
+
+    /// Chrome 顶部外壳（标签条 + 地址栏）的内缩矩形：开关关着时整页 OCR 的区域，
+    /// 也是开关开着、AXWebArea 还没建出来那一秒的回退矩形。
+    static func chromeShellInset() -> WindowInset {
+        WindowInset(top: resolvePoints(chromeToolbarKey, default: chromeToolbarDefault, maximum: 400),
+                    minWidth: 240, minHeight: 120,
+                    fallback: RelativeRect(x: 0, y: 0.08, width: 1.0, height: 0.92))
     }
 
     /// **未按开关定形**。定形只发生在 `all` 那一处（`resolvingEnhanced`），
@@ -120,11 +131,7 @@ enum AdapterRegistry {
         electron: false,
         regions: [
             RegionRule(name: "page", kind: .body,
-                       locator: .insetRect(WindowInset(
-                           top: resolvePoints(chromeToolbarKey,
-                                              default: chromeToolbarDefault, maximum: 400),
-                           minWidth: 240, minHeight: 120,
-                           fallback: RelativeRect(x: 0, y: 0.08, width: 1.0, height: 0.92))),
+                       locator: .insetRect(chromeShellInset()),
                        read: .ocr, ocrFallback: false, required: true, clipToViewport: true),
         ],
         chatLayout: nil,
@@ -139,8 +146,12 @@ enum AdapterRegistry {
              + "URL 从地址栏的 AXTextField 取，不装扩展、不用私有属性。"
              + "截图走窗口定向：别的窗口盖在上面时不会把它的像素记成 Chrome 的页面。"
              + "顶部外壳按点数裁（默认 80，开书签栏约 112，adapter.chrome.toolbarHeight 可校准）；"
-             + "只记屏幕上显示出来的字：视频、图片、canvas 里的内容只有渲染成文字才认得到。",
+             + "只记屏幕上显示出来的字：视频、图片、canvas 里的内容只有渲染成文字才认得到。"
+             + "树是按页面建的：导航后头一秒、切回隐藏超过 5 分钟的标签页时读到空树属正常，"
+             + "这时不 OCR、等重扫（并订阅 AXLoadComplete）；同窗口的停靠 DevTools / 侧边栏不当正文；"
+             + "无痕 / 访客窗口按标题串尾「（无痕）」「(Incognito)」识别；chrome:// 内部页不写 URL。",
         capturesWindow: true,
+        axTreePerDocument: true,
         enhancedRegions: webAreaRegions())
 
     // MARK: - 飞书（Electron）
@@ -435,10 +446,8 @@ enum AdapterRegistry {
         // 别的窗口的像素被记成这个应用的网页内容"那个**归错应用**的缺陷会原样回来，
         // 而且没有任何信号。判据只读 Info.plist，见 `AX.isChromiumBrowser`。
         //
-        // 只在拿得到 bundleURL 时判：没有 URL 就读不了 plist，而把一个错的 false
-        // 缓存起来比不答更糟（同 `cachedChromiumDetection` 的理由）。
-        if chromium, bundleURL != nil,
-           AX.bundleIsBrowser(bundleID: bundleID, bundleURL: bundleURL) {
+        // 判定只有一处（`PrivateBrowsing.isBrowser`）；没有 bundleURL 时它只查缓存、不缓存错的 false。
+        if chromium, PrivateBrowsing.isBrowser(bundleID: bundleID, bundleURL: bundleURL) {
             return resolvedChrome
         }
         // 访达等已经有 BFS 收紧值的应用：兜底规则 + 它自己的限额（`AX.bfsLimits`）。

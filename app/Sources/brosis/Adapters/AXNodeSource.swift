@@ -25,6 +25,8 @@ protocol AXNodeSource {
     var value: String? { get }
     /// `kAXDescription`。AX 树里很多可见文字挂在这里而不是 value 上。
     var descriptionText: String? { get }
+    /// `kAXURL`：AXWebArea 上是页面地址（`.primaryWebArea` 用它排除浏览器内部页）。读不到时 nil。
+    var url: String? { get }
     /// AX 坐标系里的矩形：**原点在主屏左上、y 向下、跨屏全局**（与 `CGDisplayBounds` 同一套）。
     /// 读不到时是 nil——**nil 一律按"可见"处理**，绝不因为读不到坐标就丢内容。
     var frame: CGRect? { get }
@@ -86,6 +88,7 @@ struct LiveAXNode: AXNodeSource {
     var title: String? { AX.string(element, kAXTitleAttribute as String) }
     var value: String? { AX.string(element, kAXValueAttribute as String) }
     var descriptionText: String? { AX.string(element, kAXDescriptionAttribute as String) }
+    var url: String? { AX.string(element, kAXURLAttribute as String) }
     var frame: CGRect? { AX.frame(element) }
 
     var visibleCharacterRange: NSRange? {
@@ -122,6 +125,7 @@ struct SyntheticAXNode: AXNodeSource {
     var title: String?
     var value: String?
     var descriptionText: String?
+    var url: String?
     var frame: CGRect?
     var visibleCharacterRange: NSRange?
     var domClasses: [String]
@@ -133,6 +137,7 @@ struct SyntheticAXNode: AXNodeSource {
          title: String? = nil,
          value: String? = nil,
          descriptionText: String? = nil,
+         url: String? = nil,
          frame: CGRect? = nil,
          visibleCharacterRange: NSRange? = nil,
          domClasses: [String] = [],
@@ -143,6 +148,7 @@ struct SyntheticAXNode: AXNodeSource {
         self.title = title
         self.value = value
         self.descriptionText = descriptionText
+        self.url = url
         self.frame = frame
         self.visibleCharacterRange = visibleCharacterRange
         self.domClasses = domClasses

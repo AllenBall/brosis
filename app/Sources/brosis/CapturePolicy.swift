@@ -455,28 +455,50 @@ final class BuiltinDenylist: @unchecked Sendable {
 ///    换成别的语言环境（英文是 "Private Browsing"）要另一条标记，本表只列了中英两种。
 /// 2. **网页可以改写标题**。`document.title` 是页面自己控制的，标题栏显示的是页面标题时，
 ///    无痕标记可能根本不出现在 `AXTitle` 里。
-/// 3. **Chromium 系的无痕窗口标题不一定带标记**。Chrome 的无痕窗口标题就是页面标题，
-///    "（无痕模式）"只出现在窗口边角的徽章上，AX 读不到。所以对 Chromium 系这条基本无效，
-///    真要挡住只能靠 3.12 把整个浏览器改档，或者等 M3 的域名清单。
+/// 3. **Chromium 系只在串尾加标记**（2026-09-11 复查纠正：以前写的"AX 读不到"是错的）。
+///    Chrome 的窗口 `kAXTitle` 是无障碍标题，无痕 / 访客窗口末尾带「（无痕）」「(Incognito)」
+///    「（访客）」「(Guest)」，见 `titleSuffixMarkers`；Edge / Brave 的中文串尾未查。
 enum PrivateBrowsing {
 
-    /// 标题里出现任意一条就算私密浏览。
+    /// 标题里出现任意一条就算私密浏览（Safari / Firefox 这类把标记放在标题里任意位置的浏览器）。
+    /// "Incognito" 不在这里：它是 Chrome 的叫法，只认串尾（下表），页面标题里讨论它的不误伤。
     static let titleMarkers = [
         "无痕浏览", "私密浏览", "隐私浏览", "无痕式视窗",
-        "Private Browsing", "InPrivate", "Incognito",
+        "Private Browsing", "InPrivate",
     ]
 
+    /// **串尾**出现任意一条就算私密浏览。Chromium 系（Chrome / Edge / Brave…）的窗口 `kAXTitle`
+    /// 是无障碍标题 `BrowserView::GetAccessibleWindowTitle`，无痕 / 访客窗口在**最末尾**加
+    /// `IDS_ACCESSIBLE_INCOGNITO_WINDOW_TITLE_FORMAT` = `$1 (Incognito)` / `$1 (Guest)`，
+    /// zh-CN 翻译是 `$1（无痕）` / `$1（访客）`——全角括号、只有两个字，上面那张表一条都不命中。
+    /// 2026-09-11 真机复现：无痕窗口标题「新的无痕式标签页 - Google Chrome（无痕）」被当普通窗口
+    /// 读了正文（evidence 26442 / 26448）。只判串尾：页面标题里讨论"无痕"的不会误伤。
+    static let titleSuffixMarkers = [
+        "（无痕）", "(Incognito)", "（访客）", "(Guest)",
+    ]
+
+    /// 已知浏览器清单。**它只是第一路**：结构上是浏览器的（Info.plist 把 http/https 声明成
+    /// 专用 URL 类型，见 `AX.bundleHandlesWebLinks`）同样算——否则新装的 Zen / Edge Beta / Dia
+    /// 拿到 `chrome` 规则却不做无痕判定、开关关着时也不从地址栏取 URL（Chrome 复查 F6）。
     /// 只对浏览器做这项判定：别的应用标题里出现"私密浏览"四个字大概率是在讨论它，不该被排除。
-    static let browserBundleIDs: Set<String> = [
-        "com.apple.Safari", "com.apple.SafariTechnologyPreview",
-        "com.google.Chrome", "com.google.Chrome.beta", "com.google.Chrome.canary",
-        "com.microsoft.edgemac", "com.brave.Browser", "com.vivaldi.Vivaldi",
-        "com.operasoftware.Opera", "company.thebrowser.Browser", "org.mozilla.firefox",
-    ]
+    /// 直接从规则表派生，不再手抄一份：Chromium 系 + Safari 两条规则的 bundle id，外加 Firefox。
+    static let browserBundleIDs: Set<String> =
+        Set(AdapterRegistry.chrome.bundleIDs + AdapterRegistry.safari.bundleIDs + ["org.mozilla.firefox"])
 
-    static func isPrivate(bundleID: String?, windowTitle: String?) -> Bool {
-        guard let bundleID, browserBundleIDs.contains(bundleID),
+    /// 这个应用是不是浏览器：清单 ∪ Info.plist 判定，**全项目只此一处**（规则解析、无痕判定、
+    /// 地址栏取 URL 都走它）。给了 `bundleURL` 才会读 plist（读一次按 bundle id 缓存），
+    /// 没给只查缓存（见 `AX.bundleIsBrowser`）。
+    static func isBrowser(bundleID: String?, bundleURL: URL? = nil) -> Bool {
+        guard let bundleID, !bundleID.isEmpty else { return false }
+        if browserBundleIDs.contains(bundleID) { return true }
+        return AX.bundleIsBrowser(bundleID: bundleID, bundleURL: bundleURL)
+    }
+
+    static func isPrivate(bundleID: String?, bundleURL: URL? = nil, windowTitle: String?) -> Bool {
+        guard isBrowser(bundleID: bundleID, bundleURL: bundleURL),
               let title = windowTitle, !title.isEmpty else { return false }
-        return titleMarkers.contains { title.localizedCaseInsensitiveContains($0) }
+        if titleMarkers.contains(where: { title.localizedCaseInsensitiveContains($0) }) { return true }
+        let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        return titleSuffixMarkers.contains { trimmed.hasSuffix($0) }
     }
 }
