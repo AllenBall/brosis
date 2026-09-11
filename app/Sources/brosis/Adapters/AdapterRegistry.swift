@@ -100,12 +100,13 @@ enum AdapterRegistry {
     /// Chromium「读到空树 ⇒ 排一次重扫」那条路重新生效——那正是它当初的设计场景
     /// （Chromium 的树是**异步**建起来的，第一次多半读到空）。
     /// 开关开着时那副样子的区域：读最富的那个 `AXWebArea` 的 DOM 文本，读空回退 OCR。
-    /// 三条规则（Chrome / 飞书 / 飞书会议）用的是同一副，只有 `kind` 不同——
-    /// 写成三份的话，改一次策略（比如 `preferRichestMatch` 或 `clipToViewport`）要改三处。
-    static func webAreaRegions(kind: RegionKind = .body) -> [RegionRule] {
-        [RegionRule(name: "web_area", kind: kind, locator: .role("AXWebArea"),
+    /// Chrome 开关开着那副样子（飞书改成了按标题挑 web area，飞书会议的 AX 实测是死的、不再给增强形态）。
+    static func webAreaRegions() -> [RegionRule] {
+        // `ocrOnFrameChange: false`（Step 3）：DOM 逐字给出的区域，帧变了而文本没变只可能是
+        // 图片 / 动画 / 光标，再排 OCR 只会把噪声（乃至压在上面的别的窗口）记进来。
+        [RegionRule(name: "web_area", kind: .body, locator: .role("AXWebArea"),
                     read: .axSubtree, ocrFallback: true, required: true, clipToViewport: true,
-                    preferRichestMatch: true)]
+                    ocrOnFrameChange: false, preferRichestMatch: true)]
     }
 
     /// **未按开关定形**。定形只发生在 `all` 那一处（`resolvingEnhanced`），
@@ -144,38 +145,60 @@ enum AdapterRegistry {
 
     // MARK: - 飞书（Electron）
 
-    /// 飞书：AX 树几乎为空（M0 合计 156 字符）。规则先试消息列表的 AXList/AXRow，
-    /// 读不到就对消息面板区域做视口 OCR。**不追溯未打开的会话与未滚动到的历史**（计划 3.3）。
+    /// 飞书：正文只在 `AXEnhancedUserInterface` 开着时才读得到（Lark 的 Chromium 不认
+    /// `AXManualAccessibility`，M0 实测树几乎为空）。**开关关着时只记窗口标题，不读正文也不 OCR**
+    ///（Step 4，2026-09-11）：旧的"找 AXList、找不到就整窗 OCR + 顶部比例矩形认会话名"那条路
+    /// 从没在真机上认对过——AXList 根本不存在，OCR 出来的是侧栏预览、水印（「邱某 某学园」
+    /// 被写进 `windows.title`）与压在上面的别的窗口（复查 F2 / F3 / F4 / F8）。诚实地标 unavailable，
+    /// 比往库里灌一堆错的东西好；而且默认就是开，这条路只有用户显式关掉开关时才会走。
+    /// **不追溯未打开的会话与未滚动到的历史**（计划 3.3）。
     static let feishu = AdapterRule(
         id: "feishu",
         name: "飞书 / Lark",
         bundleIDs: ["com.electron.lark", "com.larksuite.larkApp", "com.bytedance.macos.feishu"],
         electron: true,
-        regions: [
-            RegionRule(name: "message_list", kind: .messageList, locator: .role("AXList"),
-                       read: .axRows, ocrFallback: true, required: true, clipToViewport: true),
-            RegionRule(name: "conversation_title", kind: .title,
-                       locator: .relativeRect(RelativeRect(x: 0.22, y: 0.0,
-                                                           width: 0.78, height: 0.08)),
-                       read: .ocr, ocrFallback: false, required: false, clipToViewport: true,
-                       maxChars: 256),
-        ],
+        // 开关关着那副样子：没有区域 ⇒ 一个字都不读、不排 OCR、completeness = unavailable。
+        regions: [],
         chatLayout: ChatLayout(),
+        // **限额按开关开着那副样子定**（2026-09-11 探针）：`messenger-chat` 里正文在 web area 下
+        // 第 29–31 层；锚到 `.chatMessages` 之后是它下面第 14–16 层，加上找锚点那段 BFS，
+        // 40 层才稳。旧的 14 层会在 `.chatMessages` 上面就停住，读到 0 字。
+        limits: AX.BFSLimits(maxNodes: 3_000, maxDepth: 40),
         notes: "Electron（框架被改名成 Lark Framework，通用检测抓不到，靠显式清单）。"
-             + "M0 实测 AX 正文合计 156 字符 → 主路径基本是 OCR 回退。"
-             + "只记视口内已渲染的消息；不追溯未打开会话与未滚动到的历史；"
-             + "图片、文件、语音、通话只有屏幕上显示的文字才可能被 OCR；"
-             + "发送者与时间取自行内子元素，行结构变了就退化成整行文本。",
-        limits: AX.BFSLimits(maxNodes: 1_200, maxDepth: 14),
-        // 开关开着时飞书真的把树建起来了。实测（--ax-probe，Lark 7.x，开关开）：
-        // 窗口里有**两个** AXWebArea——`messenger`（子树 474 节点、119 个 AXStaticText /
-        // 1081 字符）与 `messenger-chat`（510 节点、60 个 / 573 字符）。而同一时刻按现有规则
-        // 扫出来是 **0 字符**：规则找的是 `AXList`，那是为"AX 一片空白"的旧世界写的判据。
-        // 取第一个会拿到空壳，所以和 Claude 桌面版一样用 `preferRichestMatch`。
-        //
-        // 会话名不用再单独 OCR 一次：飞书的窗口标题本来就带会话名
-        //（"邱军雅 洋葱学园 张怡君 …"），不像微信恒为"微信"。
-        enhancedRegions: webAreaRegions(kind: .messageList))
+             + "开关开着（默认）时读 messenger-chat 这个 web area 里 .chatMessages 下的当前会话，"
+             + "会话名取 .chatWindow_chatName；侧栏 messenger 整块排除；云文档 / 邮箱等其它模块"
+             + "退到那个模块自己的 web area，页标题即 web area 的 AXTitle。"
+             + "只记视口内已渲染的消息（1 pt 占位行不算）；不追溯未打开会话与未滚动到的历史；"
+             + "输入框草稿不记；单聊按行 class 加「我 / 对方名」前缀，群聊行里自带发送者名；"
+             + "图片、文件、语音、通话只有屏幕上显示的文字才可能被记；"
+             + "开关关着时只记窗口标题（恒为「飞书」），不读正文也不 OCR。",
+        // OCR 回退截整个窗口（含被遮挡部分，D31 口径），不再截显示器再裁矩形：
+        // 2026-09-11 复查 F3——压在上面的 Claude 窗口的字被记成了飞书正文。
+        capturesWindow: true,
+        titleOnlyWindowPrefixes: ["ModalWebViewWidget - "],
+        watermarkFilter: true,
+        // 2026-09-11 Step 0 探针（`tools/bench/results/feishu_step0_probe_2026-09-11.md`）定下的形态。
+        // 标题区域由引擎先读（按 kind 排，不靠写的顺序），正文读行前缀时拿它当对方名。
+        enhancedRegions: [
+            RegionRule(name: "conversation_title", kind: .title,
+                       locator: .webAreaDescendant(domClass: "chatWindow_chatName"),
+                       read: .axSubtree, ocrFallback: false, required: false,
+                       clipToViewport: false, maxChars: 128, ocrOnFrameChange: false),
+            RegionRule(name: "body", kind: .messageList,
+                       locator: .webArea(WebAreaPick(
+                           prefer: .init(title: "messenger-chat", anchorClass: "chatMessages"),
+                           exclude: ["messenger"])),
+                       read: .axSubtree, ocrFallback: true, required: true, clipToViewport: true,
+                       excludeRoles: ["AXTextArea", "AXTextField"],
+                       probeContainerFrames: false,
+                       documentOrder: true,
+                       rowLabels: RowLabels(selfClass: "message-self",
+                                            peerClass: "message-not-self",
+                                            onlyWhenAncestorClass: "p2pChat"),
+                       ocrOnFrameChange: false,
+                       // 点表情的人名（`.reaction-user`）会以独立行混进对话（0.7.2 真机 evidence 19481）。
+                       pruneClasses: ["message-reactions"]),
+        ])
 
     // MARK: - 飞书会议（**另一个 app**，AX 是死的）
 
@@ -227,15 +250,18 @@ enum AdapterRegistry {
                        read: .ocr, ocrFallback: false, required: true, clipToViewport: true),
         ],
         chatLayout: nil,
+        limits: AX.BFSLimits(maxNodes: 200, maxDepth: 6),
         notes: "独立 app（Lark Helper (Iron)），AX 树实测只有 2 个节点、0 字符、无 AXWebArea，"
              + "所以直接整窗视口 OCR。能记到的是屏幕上**显示出来的字**："
              + "共享屏幕里的内容、字幕、会中聊天、参会人名、会议标题；"
              + "语音本身不记，没显示在屏幕上的也不记。",
-        limits: AX.BFSLimits(maxNodes: 200, maxDepth: 6),
-        // **没实测过**：写这条时手边没有正在进行的会议。逻辑上它和飞书主程序同源
-        //（同一个 Lark Framework 的 Chromium），开关开着就可能建起树来。
-        // `ocrFallback: true` 兜住：读到空就退回今天这条整窗 OCR，不会比现在更差。
-        enhancedRegions: webAreaRegions())
+        // 会议窗口同样平铺水印（09-09 的 257 条整窗 OCR 每条都夹着「用户名 组织名」）。
+        watermarkFilter: true)
+        // **不给增强形态**（Step 6，2026-09-11 在真实会议里用 0.7.3 复测）：brosis 已经给
+        // `.iron` 设了 `AXEnhancedUserInterface`，树仍然只有 2 个节点（AXWindow + AXGroup）、
+        // 没有 AXWebArea，七个取样点全 0——与 09-09 只设公开属性时一模一样。这个 app 的 AX 是死的，
+        // 不是没等到。之前那副 `webAreaRegions()` 只会让规则"读 AX"，触发 Chromium 空树重扫并把
+        // 头两次扫描的 OCR 请求扔掉，白白晚几秒才开始记。
 
     // MARK: - 微信（原生但 AX 空）
 

@@ -505,6 +505,13 @@ enum AX {
     /// （Safari / Firefox 的 `AXWebArea` 底下有成百上千个节点）。
     static let addressBarMaxDepth = 5
 
+    /// 应用自己 bundle 里的页面地址（飞书 `file:///Applications/Lark.app/Contents/Frameworks/…/
+    /// webcontent/messenger/messenger/zh-CN.html`）：对用户毫无意义，`host:` / `url:` 检索用不上，
+    /// 也进不了 sites 表。用户自己打开的本地文件（`file:///Users/…/x.html`）不算。
+    static func isBundleInternalURL(_ url: String) -> Bool {
+        url.utf8.starts(with: "file://".utf8) && url.contains(".app/Contents/")
+    }
+
     /// 一次遍历，同时找**网页区的 URL** 与**地址栏的值**。
     ///
     /// 合并的理由是它们本来就走同一棵树：地址栏那条只在网页区那条落空时才用得上，而
@@ -522,9 +529,17 @@ enum AX {
             queue.removeFirst()
             visited += 1
             if visited > nodeCap || depth > limits.maxDepth { break }
+            var descend = true
             switch role(element) {
             case "AXWebArea":
-                if webArea == nil { webArea = string(element, kAXURLAttribute as String) }
+                // Electron 外壳 / 侧栏那种 bundle 内的 file:// 页面不是用户在看的地址，跳过它继续找
+                // 下一个 web area（Claude 桌面版第一个是 app.asar 里的 index.html，会话在第二个；
+                // 飞书两个都是 bundle 内的，于是 url 留空）。不进 web area 的子树：要找的是它的兄弟。
+                if webArea == nil, let url = string(element, kAXURLAttribute as String),
+                   !isBundleInternalURL(url) {
+                    webArea = url
+                }
+                descend = false
             case "AXTextField":
                 if includeAddressBar, addressBar == nil, depth <= addressBarMaxDepth,
                    let value = string(element, kAXValueAttribute as String), !value.isEmpty {
@@ -534,7 +549,7 @@ enum AX {
                 break
             }
             if webArea != nil, !includeAddressBar || addressBar != nil { break }
-            for child in children(element) { queue.append((child, depth + 1)) }
+            if descend { for child in children(element) { queue.append((child, depth + 1)) } }
         }
         return (webArea, addressBar)
     }

@@ -13,13 +13,19 @@ import Foundation
 ///
 /// 只读：不开库、不截图、不申请任何权限。没有辅助功能授权时直接说明并退出，
 /// **绝不弹 TCC 框**（用 `AXIsProcessTrusted()`，不是带 prompt 的那个变体）。
+///
+/// 第二种用法 `--ax-probe <bundle id> --dump-webarea [<AXTitle> | all]`：不做取样，
+/// 把目标应用每个窗口里的 AXWebArea 列出来，并把标题匹配的那些整棵子树逐节点打出来
+/// （见 `dumpWebAreas`）。**输出含屏幕上的真实文本**，落盘只能进不入库的目录。
 enum AXProbe {
 
     /// 取样时刻（毫秒）。0 = 设完属性立刻读，也就是采集端现在的行为。
     static let sampleDelaysMS = [0, 100, 250, 500, 1000, 2000, 4000]
 
-    static func run(bundleIDs: [String]) -> Int32 {
-        print("brosis \(BuildInfo.version) AX 树就绪时间探针（只读，不开库、不截图）")
+    static func run(bundleIDs: [String], dumpWebArea: String? = nil) -> Int32 {
+        print("brosis \(BuildInfo.version) AX 树"
+              + (dumpWebArea == nil ? "就绪时间探针" : "AXWebArea 子树转储")
+              + "（只读，不开库、不截图）")
         guard AXIsProcessTrusted() else {
             print("没有辅助功能授权，读不了任何应用的 AX 树。")
             print("在「系统设置 → 隐私与安全性 → 辅助功能」里给 brosis 打开后重跑。")
@@ -28,10 +34,15 @@ enum AXProbe {
 
         let targets = bundleIDs.isEmpty ? defaultTargets() : bundleIDs
         guard !targets.isEmpty else {
-            print("没有正在运行的目标应用。用法：brosis --ax-probe [bundle id ...]")
+            print("没有正在运行的目标应用。用法：brosis --ax-probe [bundle id ...]"
+                  + " [--dump-webarea <AXTitle>|all]")
             return 1
         }
 
+        if let filter = dumpWebArea {
+            for bundleID in targets { dumpWebAreas(bundleID: bundleID, filter: filter) }
+            return 0
+        }
         for bundleID in targets {
             probe(bundleID: bundleID)
         }
@@ -52,12 +63,18 @@ enum AXProbe {
             }
     }
 
-    private static func probe(bundleID: String) {
+    /// 正在运行的目标应用；没在运行就说一声并返回 nil。
+    private static func runningApp(bundleID: String) -> NSRunningApplication? {
         guard let app = NSWorkspace.shared.runningApplications
             .first(where: { $0.bundleIdentifier == bundleID }) else {
             print("\n## \(bundleID)：没在运行，跳过")
-            return
+            return nil
         }
+        return app
+    }
+
+    private static func probe(bundleID: String) {
+        guard let app = runningApp(bundleID: bundleID) else { return }
         let pid = app.processIdentifier
         let detection = AX.chromiumDetection(bundleID: bundleID, bundleURL: app.bundleURL).detection
         let rule = AdapterRegistry.rule(for: bundleID, bundleURL: app.bundleURL)
@@ -82,6 +99,8 @@ enum AXProbe {
             let taken = sample(pid: pid, bundleID: bundleID, rule: rule)
             let marker = delay == 0 ? "  ← 采集端现在读到的" : ""
             print("- t=\(delay) ms：\(taken.describe())\(marker)")
+            // 区域明细只打一次（t=0）：定位到没有、挑中了哪个 web area、每块读到多少字、开头长什么样。
+            if delay == 0 { for line in taken.regionLines { print("    " + line) } }
         }
 
         // 读到 0 字符时，光知道"是 0"没用——要区分两种完全不同的处境：
@@ -248,6 +267,136 @@ enum AXProbe {
         for line in lines.prefix(14) { print("  " + line) }
     }
 
+    // MARK: - `--dump-webarea`：把 AXWebArea 的整棵子树打出来（飞书 Step 0 探针）
+
+    /// `--ax-probe <bundle id> --dump-webarea [<AXTitle> | all]`：列出目标应用**每个窗口**里的
+    /// AXWebArea（标题 / URL / frame / 深度 / 子节点数），再把标题匹配的那些（`all` = 全部）
+    /// 整棵子树逐节点打出来：role/subrole、AXDOMIdentifier、AXDOMClassList、AXIdentifier、
+    /// AXTitle、AXDescription、AXValue 前 60 字、frame、选中 / 焦点状态。
+    ///
+    /// 为什么要它（2026-09-11 飞书复查，`tools/bench/results/feishu_capture_review_2026-09-11.md`）：
+    /// 飞书主窗口有两个 AXWebArea——`messenger`（会话列表侧栏）与 `messenger-chat`（当前会话）。
+    /// 规则按「最富」取，永远拿到侧栏。要改成读当前会话，得先知道 `messenger-chat` 里消息列表
+    /// 容器、会话头、输入框各自的 DOM id / class 与 frame，以及侧栏里"选中的会话"长什么样——
+    /// `dumpStructure` 只打前三层、看不到这些。
+    ///
+    /// 只读：不设任何属性、不发任何动作、不改焦点。列的是 `kAXWindowsAttribute` 给的所有窗口，
+    /// 所以转发弹窗 / 搜索窗开着时也会一起打出来。
+    private static func dumpWebAreas(bundleID: String, filter: String) {
+        guard let app = runningApp(bundleID: bundleID) else { return }
+        let pid = app.processIdentifier
+        let application = AX.applicationElement(pid: pid)
+        let focused = AX.focusedWindow(pid: pid)
+        let windows = (AX.copyAttribute(application, kAXWindowsAttribute as String)
+                       as? [AXUIElement]) ?? []
+        print("\n## \(app.localizedName ?? bundleID)（\(bundleID)）pid \(pid)"
+              + "：\(windows.count) 个窗口，过滤=\(filter)")
+        for (windowIndex, window) in windows.enumerated() {
+            let root = LiveAXNode(window)
+            let isFocused = focused.map { CFEqual($0, window) } ?? false
+            print("\n### 窗口 #\(windowIndex)「\(root.title ?? "(无标题)")」"
+                  + (root.subrole.map { " \($0)" } ?? "")
+                  + " frame=\(rectLabel(root.frame))"
+                  + (isFocused ? " ← 焦点窗口" : ""))
+            // 与引擎同一个收集器：探针列出来的就是引擎会挑的那批候选。
+            var budget = AdapterEngine.Budget(limits: AX.BFSLimits(maxNodes: 20_000, maxDepth: 60),
+                                              maxFrameProbes: 0)
+            let areas = AdapterEngine.webAreas(in: root, budget: &budget, maxCount: .max)
+            if areas.isEmpty {
+                print("- 没有 AXWebArea（遍历 \(budget.visited) 节点）")
+                // 小窗口（水印覆盖层、控制条）整棵打出来：要知道水印文字在不在 AX 里，看这里。
+                if budget.visited <= 50 { dumpSubtree(root) }
+            }
+            for (areaIndex, area) in areas.enumerated() {
+                print("- AXWebArea #\(areaIndex) 标题「\(area.title ?? "")」深度 \(area.depth)"
+                      + " 子节点 \(area.node.children.count) frame=\(rectLabel(area.node.frame))"
+                      + " URL=…\(((area.node as? LiveAXNode).flatMap { AX.string($0.element, kAXURLAttribute as String) } ?? "无").suffix(60))")
+            }
+            for (areaIndex, area) in areas.enumerated()
+            where filter == "all" || filter == (area.title ?? "") {
+                print("\n#### 子树：窗口 #\(windowIndex) AXWebArea #\(areaIndex)「\(area.title ?? "")」")
+                dumpSubtree(area.node)
+            }
+        }
+    }
+
+    private static let dumpNodeCap = 8_000
+    private static let dumpLineCap = 3_000
+
+    /// 先序深度优先，缩进表示层级，每个节点一行。
+    private static func dumpSubtree(_ root: any AXNodeSource) {
+        var stack: [(any AXNodeSource, Int)] = [(root, 0)]
+        var visited = 0, printed = 0, maxDepth = 0
+        var roleCounts: [String: Int] = [:]
+        var selected: [String] = []
+        while let (node, depth) = stack.popLast() {
+            visited += 1
+            maxDepth = max(maxDepth, depth)
+            guard visited <= dumpNodeCap else { print("  …节点超过 \(dumpNodeCap)，停"); break }
+            let role = node.role
+            roleCounts[role, default: 0] += 1
+            let isSelected = isSelected(node, role: role)
+            let line = describeNode(node, role: role, selected: isSelected)
+            if printed < dumpLineCap {
+                print(String(repeating: "  ", count: depth) + line)
+            } else if printed == dumpLineCap {
+                print("  …行数超过 \(dumpLineCap)，后面的不打了（仍在统计）")
+            }
+            printed += 1
+            if isSelected { selected.append("深 \(depth)：" + line) }
+            guard depth < 80 else { continue }
+            for child in node.children.reversed() { stack.append((child, depth + 1)) }
+        }
+        let top = roleCounts.sorted { $0.value > $1.value }.prefix(10)
+        print("  ── 共 \(visited) 节点，最深 \(maxDepth) 层；角色："
+              + top.map { "\($0.key)×\($0.value)" }.joined(separator: " "))
+        if !selected.isEmpty {
+            print("  ── 选中的节点（AXSelected，或 AXValue=1 的 AXRadioButton）：")
+            for line in selected.prefix(10) { print("     " + line) }
+        }
+    }
+
+    /// 属性读法与引擎同一份（`LiveAXNode`）：探针打出来的就是引擎看到的。
+    private static func describeNode(_ node: any AXNodeSource, role: String, selected: Bool) -> String {
+        var parts: [String] = [role]
+        if let sub = node.subrole { parts[0] += "/\(sub)" }
+        if let live = node as? LiveAXNode, let id = AX.string(live.element, "AXDOMIdentifier") {
+            parts.append("id=\(id)")
+        }
+        let classes = node.domClasses
+        if !classes.isEmpty { parts.append("class=\(classes.joined(separator: "."))") }
+        if let id = node.identifier { parts.append("axid=\(id)") }
+        if let t = node.title { parts.append("t=「\(clip(t))」") }
+        if let d = node.descriptionText { parts.append("d=「\(clip(d))」") }
+        if let v = node.value { parts.append("v=「\(clip(v))」") }
+        if let frame = node.frame { parts.append(rectLabel(frame)) }
+        if selected { parts.append("[选中]") }
+        if let live = node as? LiveAXNode,
+           (AX.copyAttribute(live.element, kAXFocusedAttribute as String) as? Bool) == true {
+            parts.append("[焦点]")
+        }
+        return parts.joined(separator: " ")
+    }
+
+    private static func isSelected(_ node: any AXNodeSource, role: String) -> Bool {
+        guard let live = node as? LiveAXNode else { return false }
+        if (AX.copyAttribute(live.element, kAXSelectedAttribute as String) as? Bool) == true { return true }
+        if role == "AXRadioButton",
+           let number = AX.copyAttribute(live.element, kAXValueAttribute as String) as? NSNumber,
+           number.intValue == 1 { return true }
+        return false
+    }
+
+    private static func clip(_ text: String, max: Int = 60) -> String {
+        let flat = text.replacingOccurrences(of: "\n", with: "⏎")
+        return flat.count > max ? String(flat.prefix(max)) + "…" : flat
+    }
+
+    private static func rectLabel(_ rect: CGRect?) -> String {
+        guard let rect else { return "?" }
+        return "[\(Int(rect.minX)),\(Int(rect.minY)) \(Int(rect.width))×\(Int(rect.height))]"
+    }
+
     private struct Sample {
         var chars = 0
         var nodes = 0
@@ -257,6 +406,8 @@ enum AXProbe {
         /// 这一次扫描排了几个 OCR 区域。**0 字符 + 0 个 OCR 请求 = 这个应用什么都不会被记下来**，
         /// 光看字符数分不出"读不到但会 OCR 补"和"读不到而且不会补"。
         var ocrRequests = 0
+        /// 每个区域一行：名字、定位、挑中的 web area、字符数、开头 60 字（只在终端上看，不落库）。
+        var regionLines: [String] = []
 
         func describe() -> String {
             if noWindow { return "拿不到焦点窗口" }
@@ -281,6 +432,12 @@ enum AXProbe {
         out.completeness = scan.completeness
         out.ocrRequests = scan.ocrRequests.count
         out.elapsedMS = Date().timeIntervalSince(started) * 1000
+        out.regionLines = scan.regions.map { region in
+            "区域 \(region.name)：定位=\(region.located ? "是" : "否")"
+                + (region.pickedWebAreaTitle.map { " webarea=「\($0)」锚=\(region.anchored ? "是" : "否")" } ?? "")
+                + " \(region.text.count) 字 可见\(region.visibleNodes)/视口外\(region.offscreenNodes)"
+                + (region.text.isEmpty ? "" : "「\(clip(region.text))」")
+        }
         return out
     }
 

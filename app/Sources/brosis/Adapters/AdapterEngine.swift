@@ -11,12 +11,20 @@ enum Viewport {
     /// - `nil` = **判定不了**（节点没有 frame，或者根本没有视口矩形）。调用方一律按**可见**处理：
     ///   宁可多存一点，也绝不因为读不到坐标就丢证据。
     /// - `true` / `false` = 相交面积大于 0 / 不相交。
-    static func isVisible(_ frame: CGRect?, in viewport: CGRect?) -> Bool? {
+    /// - `minSize`：宽或高小于它就算没渲染出来。**文本节点**传 `minVisibleSize`（2026-09-11 飞书探针：
+    ///   虚拟列表把滚出视口的消息行留在树里，frame 是 789×1、全叠在列表顶部，它们的文本节点也是 …×1，
+    ///   1 pt 与视口相交，原来的判定把它们当成了视口内正文；任何真正渲染出来的文字都不止 2 pt 高）。
+    ///   容器不传：Electron 里 1 pt 高的弹层容器（`#pp_popupContainer` 789×1）底下挂着绝对定位的可见子树。
+    static func isVisible(_ frame: CGRect?, in viewport: CGRect?, minSize: CGFloat = 0) -> Bool? {
         guard let frame, let viewport, !viewport.isEmpty else { return nil }
         // 零面积的节点（AX 里常见的占位元素）按不可见处理，免得把空节点算进"视口内"。
         guard !frame.isEmpty else { return false }
+        guard frame.width >= minSize, frame.height >= minSize else { return false }
         return !frame.intersection(viewport).isEmpty
     }
+
+    /// 文本节点宽或高小于它就算没渲染出来（见 `isVisible`）。
+    static let minVisibleSize: CGFloat = 2
 
     /// 节点整体在视口**上方**（聊天窗口里的回滚区就是这一类）。只用于统计与说明。
     static func isScrollback(_ frame: CGRect?, in viewport: CGRect?) -> Bool {
@@ -60,6 +68,10 @@ struct RegionScan: Sendable {
     var located: Bool = false
     /// 区域矩形（AX 坐标），OCR 请求与 `visible_range` 都用它。
     var rect: CGRect?
+    /// `.webArea` 定位器挑中的 web area 的 AXTitle（飞书：`messenger-chat` / 「主页 - 飞书云文档」…）。
+    var pickedWebAreaTitle: String?
+    /// 区域根锚到了 `anchorClass` 那个节点上（而不是 web area 本身）。
+    var anchored: Bool = false
 
     var isEmpty: Bool { text.isEmpty }
     /// 这个区域有没有"没读全"的迹象。
@@ -88,6 +100,11 @@ struct AdapterScan: Sendable {
     var totalChars: Int { regions.reduce(0) { $0 + $1.text.count } }
 
     var truncated: Bool { hitNodeLimit || reachedDepthLimit || hitFrameProbeLimit }
+
+    /// 第一个读到东西的标题区域的文本（会话名）。规则"第一个非空的标题区域算数"只写在这一处。
+    var conversationTitle: String? { regions.first { $0.kind == .title && !$0.isEmpty }?.text }
+    /// 用 `.webArea` 定位的那个区域（挑中了哪个 web area、锚没锚上）。
+    var pickedWebArea: RegionScan? { regions.first { $0.pickedWebAreaTitle != nil } }
 
     /// 写进 `runtime_events.detail`。
     var detail: String {
@@ -123,8 +140,8 @@ enum AdapterEngine {
         "AXScrollArea", "AXList", "AXTable", "AXOutline", "AXWebArea", "AXGroup", "AXRow",
     ]
 
-    static func shouldProbeFrame(role: String, hasText: Bool) -> Bool {
-        hasText || textRoles.contains(role) || scrollContainerRoles.contains(role)
+    static func shouldProbeFrame(role: String, hasText: Bool, probeContainers: Bool = true) -> Bool {
+        hasText || textRoles.contains(role) || (probeContainers && scrollContainerRoles.contains(role))
     }
 
     /// 一次扫描。
@@ -145,13 +162,49 @@ enum AdapterEngine {
                      coverageFailed: Bool = false) -> AdapterScan {
         var scan = AdapterScan(ruleID: rule.id)
         var budget = Budget(limits: rule.limits, maxFrameProbes: rule.maxFrameProbes)
+        let layout = rule.chatLayout ?? ChatLayout()
 
-        for region in rule.regions {
+        // 预处理：规则里有 `.webArea` 区域就先把 web area 挑出来，顺手把锚点与各 `.webAreaDescendant`
+        // 要的节点在同一趟 BFS 里找齐——挑一次、走一遍，标题与正文共用。
+        var pick: WebAreaPickResult?
+        if let region = rule.regions.first(where: { $0.locator.webAreaPick != nil }),
+           let spec = region.locator.webAreaPick {
+            let descendants = Set(rule.regions.compactMap { region -> String? in
+                if case .webAreaDescendant(let domClass) = region.locator { return domClass }
+                return nil
+            })
+            pick = pickWebArea(spec, from: window, descendantClasses: descendants,
+                               markerClass: region.rowLabels?.onlyWhenAncestorClass, budget: &budget)
+        }
+
+        // 标题区域先读（按 kind 排，不靠规则里写的顺序）：正文读行前缀时要拿会话名当对方名，
+        // 与 OCR 那条路"先定会话身份，再成文"同一口径。
+        let ordered = rule.regions.enumerated()
+            .sorted { ($0.element.kind == .title ? 0 : 1, $0.offset) < ($1.element.kind == .title ? 0 : 1, $1.offset) }
+            .map(\.element)
+
+        for region in ordered {
             var result = RegionScan(name: region.name, kind: region.kind)
 
             // —— 1. 定位 ——
             let located: (any AXNodeSource)?
             switch region.locator {
+            case .webArea:
+                located = pick?.root
+                result.pickedWebAreaTitle = pick?.title
+                result.anchored = pick?.anchored ?? false
+                result.rect = located.flatMap { probeFrame($0, budget: &budget) } ?? windowFrame
+            case .webAreaDescendant(let domClass):
+                located = pick?.descendants[domClass]
+                // 矩形只在裁视口 / OCR 用得上；纯 AX 的标题区域不必为它探两次 frame。
+                if region.needsRect { result.rect = located.flatMap { probeFrame($0, budget: &budget) } }
+                // 挑中的不是首选那个（云文档 / 邮箱）：web area 的 AXTitle 就是页标题，直接当文本；
+                // 没有矩形 ⇒ 不会为它排 OCR。
+                if located == nil, let pick, !pick.preferred,
+                   let title = pick.title?.trimmingCharacters(in: .whitespacesAndNewlines), !title.isEmpty {
+                    append(title, to: &result, region: region)
+                    result.visibleNodes += 1
+                }
             case .relativeRect(let relative):
                 located = nil
                 result.rect = windowFrame.map { relative.resolve(in: $0) }
@@ -178,8 +231,13 @@ enum AdapterEngine {
                 case .axValue:
                     readValue(node, into: &result, region: region)
                 case .axSubtree:
-                    readSubtree(node, viewport: viewport, into: &result,
-                                region: region, budget: &budget)
+                    // 行前缀只在规则要求的祖先 class（单聊标记）真的见到时启用；行本身照认。
+                    let prefixes = region.rowLabels.map { labels in
+                        labels.onlyWhenAncestorClass == nil || pick?.sawMarker == true
+                    } ?? false
+                    let peer = scan.conversationTitle.flatMap(firstLine) ?? layout.peerLabel
+                    readSubtree(node, viewport: viewport, into: &result, region: region, budget: &budget,
+                                labels: prefixes ? (me: layout.selfLabel, peer: peer) : nil)
                 case .axRows:
                     readRows(node, viewport: viewport, into: &result,
                              region: region, budget: &budget)
@@ -194,7 +252,7 @@ enum AdapterEngine {
                                                   ocrFallback: region.ocrFallback,
                                                   axEmpty: result.isEmpty,
                                                   axChanged: axChanged,
-                                                  frameChanged: frameChanged,
+                                                  frameChanged: frameChanged && region.ocrOnFrameChange,
                                                   coverageFailed: coverageFailed),
                let rect = result.rect, !rect.isEmpty {
                 scan.ocrRequests.append(OCRRequest(regionName: region.name, kind: region.kind,
@@ -266,6 +324,10 @@ enum AdapterEngine {
             ]
             if region.clippedByCharRange { item["char_range_clipped"] = true }
             if region.truncated { item["truncated"] = true }
+            if let title = region.pickedWebAreaTitle {
+                item["web_area"] = title
+                item["anchored"] = region.anchored
+            }
             if let rect = region.rect {
                 item["rect"] = [Int(rect.origin.x.rounded()), Int(rect.origin.y.rounded()),
                                 Int(rect.width.rounded()), Int(rect.height.rounded())]
@@ -317,52 +379,68 @@ enum AdapterEngine {
 
     // MARK: - 定位
 
-    /// 按 locator 在窗口子树里找第一个命中的节点（BFS，吃同一份预算）。
-    static func find(_ locator: ElementLocator, from window: any AXNodeSource,
-                     budget: inout Budget) -> (any AXNodeSource)? {
-        if case .rolePath(let path) = locator { return descend(path, from: window, budget: &budget) }
-        var queue: [(any AXNodeSource, Int)] = [(window, 0)]
+    /// `walk` 的每一步：继续往下、跳过这棵子树、或整个遍历到此为止。
+    enum Step { case descend, skip, stop }
+
+    /// 所有定位器共用的 BFS 骨架：同一份预算、同一套深度记账。
+    /// 到了 `maxDepth` 还有子节点没进就标 `reachedDepthLimit`（与 M1 起的 `find` 口径一致）。
+    static func walk(from root: any AXNodeSource, maxDepth: Int, budget: inout Budget,
+                     visit: (any AXNodeSource, Int) -> Step) {
+        var queue: [(any AXNodeSource, Int)] = [(root, 0)]
         while !queue.isEmpty {
             let (node, depth) = queue.removeFirst()
-            guard budget.visit() else { return nil }
-            if matches(locator, node) { return node }
-            if depth < budget.limits.maxDepth {
+            guard budget.visit() else { return }
+            switch visit(node, depth) {
+            case .stop: return
+            case .skip: continue
+            case .descend: break
+            }
+            if depth < maxDepth {
                 for child in node.children { queue.append((child, depth + 1)) }
             } else {
                 budget.reachedDepthLimit = true
             }
         }
-        return nil
+    }
+
+    /// 按 locator 在窗口子树里找第一个命中的节点。
+    static func find(_ locator: ElementLocator, from window: any AXNodeSource,
+                     budget: inout Budget) -> (any AXNodeSource)? {
+        if case .rolePath(let path) = locator { return descend(path, from: window, budget: &budget) }
+        var found: (any AXNodeSource)?
+        walk(from: window, maxDepth: budget.limits.maxDepth, budget: &budget) { node, _ in
+            guard matches(locator, node) else { return .descend }
+            found = node
+            return .stop
+        }
+        return found
     }
 
     /// 找**内容最多**的那个命中节点（`preferRichestMatch` 的实现）。
     ///
     /// 一个 Electron 窗口常有多个 `AXWebArea`：外壳一个、真正的应用一个、内嵌预览再一个。
     /// 取第一个就会稳定落在空壳上（实测 Claude 桌面版：外壳子树 2 个节点、0 字符）。
-    ///
-    /// 代价控制：候选最多 `maxCandidates` 个；每个候选只用 `weightBudget` 个节点粗估字数；
-    /// 一旦某个候选估出的字数超过 `goodEnough` 就不再往下比——绝大多数情况第一个有内容的
-    /// 就是要找的那个，不必把所有候选都走一遍。只有一个候选时完全不估。
+    /// 命中的节点自己就是候选，不再往它里面找同类（嵌套 iframe 另算）。
     static func findRichest(_ locator: ElementLocator, from window: any AXNodeSource,
                             budget: inout Budget,
                             maxCandidates: Int = 4, weightBudget: Int = 250,
                             goodEnough: Int = 200) -> (any AXNodeSource)? {
         var candidates: [any AXNodeSource] = []
-        var queue: [(any AXNodeSource, Int)] = [(window, 0)]
-        while !queue.isEmpty, candidates.count < maxCandidates {
-            let (node, depth) = queue.removeFirst()
-            guard budget.visit() else { break }
-            if matches(locator, node) {
-                // 命中的节点自己就是候选，不再往它里面找同类（嵌套 iframe 另算）。
-                candidates.append(node)
-                continue
-            }
-            if depth < budget.limits.maxDepth {
-                for child in node.children { queue.append((child, depth + 1)) }
-            } else {
-                budget.reachedDepthLimit = true
-            }
+        walk(from: window, maxDepth: budget.limits.maxDepth, budget: &budget) { node, _ in
+            guard matches(locator, node) else { return .descend }
+            candidates.append(node)
+            return candidates.count < maxCandidates ? .skip : .stop
         }
+        return richest(candidates, budget: &budget, weightBudget: weightBudget, goodEnough: goodEnough)
+    }
+
+    /// 候选里挑字最多的那个。只有一个候选时完全不估。
+    ///
+    /// `goodEnough`：某个候选估出的字数达到它就不再往下比。Claude 桌面版 / Chrome 用 200——
+    /// 绝大多数情况第一个有内容的就是要找的那个；`pickWebArea` 传 `Int.max`——首选缺席的场景
+    /// 候选只有一两个，早退省不了什么，却可能挑错（2026-09-11 复查 F1 的教训）。
+    private static func richest(_ candidates: [any AXNodeSource], budget: inout Budget,
+                                weightBudget: Int, goodEnough: Int) -> (any AXNodeSource)? {
         guard candidates.count > 1 else { return candidates.first }
         var best: (node: any AXNodeSource, weight: Int)?
         for candidate in candidates {
@@ -411,11 +489,97 @@ enum AdapterEngine {
             return node.role == role && node.subrole == subrole
         case .identifier(let id):
             return node.identifier == id
+        case .domClass(let domClass):
+            return node.domClasses.contains(domClass)
         case .wholeWindow:
             return true
-        case .rolePath, .relativeRect, .insetRect:
+        case .rolePath, .relativeRect, .insetRect, .webArea, .webAreaDescendant:
             return false
         }
+    }
+
+    // MARK: - 按标题挑 web area / 按 DOM class 下钻
+
+    /// 窗口里的 AXWebArea（不进它们内部：要找的是它们的兄弟，不是里面的 iframe）。
+    /// 探针 `--dump-webarea` 也用它——探针列出来的与引擎挑选的必须是同一批候选。
+    static func webAreas(in window: any AXNodeSource, budget: inout Budget,
+                         maxCount: Int = 6) -> [(node: any AXNodeSource, title: String?, depth: Int)] {
+        var areas: [(node: any AXNodeSource, title: String?, depth: Int)] = []
+        walk(from: window, maxDepth: budget.limits.maxDepth, budget: &budget) { node, depth in
+            guard node.role == "AXWebArea" else { return .descend }
+            areas.append((node, node.title, depth))
+            return areas.count < maxCount ? .skip : .stop
+        }
+        return areas
+    }
+
+    /// `pickWebArea` 的结果。
+    struct WebAreaPickResult {
+        var webArea: any AXNodeSource
+        var title: String?
+        /// 挑中的是 `prefer` 那个。
+        var preferred: Bool
+        /// 锚到的节点（`anchorClass`）；nil = 用 web area 本身当区域根。
+        var anchor: (any AXNodeSource)?
+        /// 各 `.webAreaDescendant` 区域要的节点（只在 `preferred` 时找）。
+        var descendants: [String: any AXNodeSource] = [:]
+        /// 去锚点的路上见到过 `markerClass`（飞书：`p2pChat` = 单聊）。
+        var sawMarker = false
+
+        var root: any AXNodeSource { anchor ?? webArea }
+        var anchored: Bool { anchor != nil }
+    }
+
+    /// 在窗口的 AXWebArea 里按 `WebAreaPick` 挑一个；挑中首选那个时再用一趟 BFS 把锚点与
+    /// `descendantClasses` 要的节点一起找齐。
+    static func pickWebArea(_ pick: WebAreaPick, from window: any AXNodeSource,
+                            descendantClasses: Set<String> = [], markerClass: String?,
+                            budget: inout Budget) -> WebAreaPickResult? {
+        let areas = webAreas(in: window, budget: &budget)
+            .filter { area in area.title.map { !pick.exclude.contains($0) } ?? true }
+        guard !areas.isEmpty else { return nil }
+        if let prefer = pick.prefer, let area = areas.first(where: { $0.title == prefer.title }) {
+            var result = WebAreaPickResult(webArea: area.node, title: area.title, preferred: true)
+            var targets = descendantClasses
+            if let anchorClass = prefer.anchorClass { targets.insert(anchorClass) }
+            let found = findClasses(targets, from: area.node, markerClass: markerClass, budget: &budget)
+            result.sawMarker = found.sawMarker
+            result.anchor = prefer.anchorClass.flatMap { found.nodes[$0] }
+            result.descendants = found.nodes
+            return result
+        }
+        // 没有首选时才比"谁最富"，而且比完所有候选（`goodEnough: .max`）。
+        guard let node = richest(areas.map(\.node), budget: &budget, weightBudget: 250,
+                                 goodEnough: Int.max) else { return nil }
+        let title = areas.first { $0.node.role == node.role && $0.title == node.title }?.title ?? node.title
+        return WebAreaPickResult(webArea: node, title: title, preferred: false)
+    }
+
+    /// 从 `root` 起一趟 BFS，把 DOM class 含 `targets` 之一的节点各找出第一个；全找齐就停。
+    /// 顺带记下沿途见没见过 `markerClass`。每个经过的节点读一次 `AXDOMClassList`，
+    /// 所以只给声明了 class 锚点的规则用，而且路径要短（飞书从 web area 到 `chatMessages` 约 40 个节点）。
+    static func findClasses(_ targets: Set<String>, from root: any AXNodeSource,
+                            markerClass: String? = nil, budget: inout Budget,
+                            maxDepth: Int = 24) -> (nodes: [String: any AXNodeSource], sawMarker: Bool) {
+        var nodes: [String: any AXNodeSource] = [:]
+        var sawMarker = false
+        guard !targets.isEmpty else { return (nodes, false) }
+        walk(from: root, maxDepth: maxDepth, budget: &budget) { node, _ in
+            let classes = node.domClasses
+            if let markerClass, classes.contains(markerClass) { sawMarker = true }
+            for target in targets where nodes[target] == nil && classes.contains(target) {
+                nodes[target] = node
+            }
+            return nodes.count == targets.count ? .stop : .descend
+        }
+        return (nodes, sawMarker)
+    }
+
+    /// 标题区域的文本 → 一行会话名：第一行、去首尾空白、按 `ChatTitle.maxTitleCharacters` 截；空返回 nil。
+    static func firstLine(_ title: String) -> String? {
+        let line = title.split(whereSeparator: \.isNewline).first.map(String.init) ?? title
+        let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : String(trimmed.prefix(ChatTitle.maxTitleCharacters))
     }
 
     // MARK: - 读取
@@ -433,44 +597,101 @@ enum AdapterEngine {
     /// 2. 文本节点自己再判一次，读不到 frame 就按可见处理。
     private static func readSubtree(_ root: any AXNodeSource, viewport: CGRect?,
                                     into result: inout RegionScan, region: RegionRule,
-                                    budget: inout Budget) {
-        var queue: [(any AXNodeSource, Int)] = [(root, 0)]
-        while !queue.isEmpty {
-            let (node, depth) = queue.removeFirst()
+                                    budget: inout Budget,
+                                    labels: (me: String, peer: String)?) {
+        // 待访问项：节点、相对区域根的深度、所属行（0 = 不在任何行里）、行的深度、这一行的前缀。
+        struct Item {
+            var node: any AXNodeSource
+            var depth: Int
+            var row: Int
+            var rowDepth: Int
+            var prefix: String?
+        }
+        let documentOrder = region.documentOrder
+        // 行只在先序遍历下界定得了：广度优先会把一行的文本散在各层。
+        let rowLabels = documentOrder ? region.rowLabels : nil
+        let prunes = !region.pruneClasses.isEmpty
+        var pending = [Item(node: root, depth: 0, row: 0, rowDepth: 0, prefix: nil)]
+        var nextRow = 1
+        var lastPrefixedRow = 0
+        while !pending.isEmpty {
+            let item = documentOrder ? pending.removeLast() : pending.removeFirst()
+            let node = item.node
             guard budget.visit() else { break }
             let role = node.role
-            // AXSecureTextField 永不暴露值，直接跳过整棵子树（沿用 M0 的处理）。
-            if role == "AXSecureTextField" { continue }
+            // AXSecureTextField 永不暴露值，直接跳过整棵子树（沿用 M0 的处理）；
+            // 规则排除的角色（飞书的输入框）同样整棵跳过。
+            if role == "AXSecureTextField" || region.excludeRoles.contains(role) { continue }
 
-            let carried = node.viewportText()
+            var row = item.row, rowDepth = item.rowDepth, prefix = item.prefix
+            var isRow = false
+            // class 只对 AXGroup 读、只读一次，两个用途共用：认行、按 class 剪子树。
+            // 剪子树的 class 在行里只看行下 `pruneDepthBelowRow` 层，不在行里看区域根下 `classProbeMaxDepth` 层。
+            if role == "AXGroup" {
+                let wantsRow = rowLabels != nil && row == 0 && item.depth <= region.classProbeMaxDepth
+                let wantsPrune = prunes && (row != 0
+                    ? item.depth - rowDepth <= region.pruneDepthBelowRow
+                    : item.depth <= region.classProbeMaxDepth)
+                if wantsRow || wantsPrune {
+                    let classes = node.domClasses
+                    if wantsPrune, !region.pruneClasses.isDisjoint(with: classes) { continue }
+                    if wantsRow, let rowLabels {
+                        if classes.contains(rowLabels.selfClass) {
+                            isRow = true; prefix = labels?.me
+                        } else if classes.contains(rowLabels.peerClass) {
+                            isRow = true; prefix = labels?.peer
+                        }
+                        if isRow { row = nextRow; nextRow += 1; rowDepth = item.depth }
+                    }
+                }
+            }
+
+            // 非文本节点的 value / description / title 只在"容器也要探 frame"时才有用（判它带不带正文）；
+            // 关掉容器探测的规则（飞书）省下这三次 AX 调用——一棵树里七成节点是 AXGroup。
+            let isText = textRoles.contains(role)
+            let carried = (isText || region.probeContainerFrames) ? node.viewportText() : nil
             var visible: Bool? = nil
             // 探到的矩形留着复用：回滚区统计再读一次 `node.frame` 就是**两条不计预算的
             // AX 消息**（每个视口外节点多两条），而它要的正是同一个矩形。
             var probed: CGRect? = nil
+            // 行是虚拟列表的单位：滚出视口的行以 1 pt 占位留在树里，整行不可见就整棵子树剪掉，
+            // 比在它的每个文本节点上各判一次省得多。
             if region.clipToViewport, let viewport,
-               shouldProbeFrame(role: role, hasText: carried != nil) {
+               isRow || shouldProbeFrame(role: role, hasText: carried != nil,
+                                         probeContainers: region.probeContainerFrames) {
                 probed = probeFrame(node, budget: &budget)
-                visible = Viewport.isVisible(probed, in: viewport)
+                visible = Viewport.isVisible(probed, in: viewport,
+                                             minSize: isText ? Viewport.minVisibleSize : 0)
             }
 
-            if textRoles.contains(role), let (text, clipped) = carried {
+            if isText, let (text, clipped) = carried {
                 if visible == false {
                     result.offscreenNodes += 1
                     if Viewport.isScrollback(probed, in: viewport) { result.scrollbackNodes += 1 }
                 } else {
                     if clipped { result.clippedByCharRange = true }
-                    append(text, to: &result, region: region)
+                    var line = text
+                    // 一行只在它的第一段文本前加发送者前缀。
+                    if row != 0, row != lastPrefixedRow, let prefix {
+                        line = prefix + "：" + text
+                        lastPrefixedRow = row
+                    }
+                    append(line, to: &result, region: region)
                     result.visibleNodes += 1
                 }
             } else if visible == false {
-                // 容器整个在视口外：整棵子树都不用看了。
+                // 容器（或整行）在视口外：整棵子树都不用看了。
                 result.offscreenNodes += 1
                 if Viewport.isScrollback(probed, in: viewport) { result.scrollbackNodes += 1 }
                 continue
             }
 
-            if depth < budget.limits.maxDepth {
-                for child in node.children { queue.append((child, depth + 1)) }
+            if item.depth < budget.limits.maxDepth {
+                let children = node.children
+                for child in (documentOrder ? Array(children.reversed()) : children) {
+                    pending.append(Item(node: child, depth: item.depth + 1,
+                                        row: row, rowDepth: rowDepth, prefix: prefix))
+                }
             } else if !node.children.isEmpty {
                 budget.reachedDepthLimit = true
             }

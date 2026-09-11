@@ -1077,21 +1077,97 @@ enum SelfCheck {
               "\(chromeRule.id)，窗口定向=\(chromeRule.capturesWindow) "
                 + "读AX=\(chromeRule.readsAX)（跟开关走）")
 
-        // 三条"原本假定 AX 是空的"规则跟着开关换形态。**只钉真的会变的那几件事**：
-        // 改读 AXWebArea、仍留 OCR 回退、开着时确实在读 AX。
-        // 不钉的两件：`capturesWindow`（`resolvingEnhanced` 只动 regions，它不可能变，
-        // 断言它等于断言 x == x）；以及 `!base.readsAX`——飞书的基座本来就读 AX
-        //（`message_list` 走 `.axRows`），只是找不到 `AXList`，那不是三条的共同性质。
-        let enhancedFailures = [AdapterRegistry.chrome, AdapterRegistry.feishu,
-                                AdapterRegistry.feishuMeeting].compactMap { base -> String? in
+        // Chrome 与飞书两条规则跟着开关换形态。**只钉真的会变的那几件事**：
+        // 改读 AXWebArea、必需区域留 OCR 回退、开着时确实在读 AX。
+        // 不钉 `capturesWindow`：`resolvingEnhanced` 只动 regions，它不可能变，断言它等于断言 x == x。
+        let enhancedFailures = [AdapterRegistry.chrome, AdapterRegistry.feishu].compactMap { base -> String? in
             let on = base.resolvingEnhanced(true)
-            let ok = on.regions.contains { $0.locator == .role("AXWebArea") }
-                && on.regions.allSatisfy(\.ocrFallback)
+            // 飞书用的是按标题挑 web area 的定位器（`.webArea`），Chrome 仍是 `.role("AXWebArea")`。
+            let readsWebArea = on.regions.contains { region in
+                region.locator.webAreaPick != nil || region.locator == .role("AXWebArea")
+            }
+            let ok = readsWebArea
+                && on.regions.filter(\.required).allSatisfy(\.ocrFallback)
                 && on.readsAX
             return ok ? nil : "\(base.id)（开=\(on.regions.map(\.name).joined(separator: "/"))）"
         }
-        check("开关开着时 Chrome / 飞书 / 飞书会议都改读 AXWebArea、留 OCR 回退、开始读 AX",
+        check("开关开着时 Chrome / 飞书都改读 AXWebArea、必需区域留 OCR 回退、开始读 AX",
               enhancedFailures.isEmpty, enhancedFailures.joined(separator: " "))
+        // 飞书会议不给增强形态（Step 6：真实会议里设了私有属性树仍是死的）；开关关着时飞书一个区域都没有（Step 4）。
+        let meetingOff = AdapterRegistry.feishuMeeting.enhancedRegions == nil
+            && AdapterRegistry.feishuMeeting.regions.allSatisfy { $0.read == .ocr }
+            && !AdapterRegistry.feishuMeeting.resolvingEnhanced(true).readsAX
+        let feishuBase = AdapterRegistry.feishu.resolvingEnhanced(false)
+        let feishuOff = feishuBase.regions.isEmpty && !feishuBase.declaresOCR
+        check("飞书会议只走整窗 OCR（无增强形态、不读 AX）；飞书开关关着时无区域、不 OCR",
+              meetingOff && feishuOff,
+              "meeting=\(AdapterRegistry.feishuMeeting.regions.map(\.label).joined(separator: " | "))")
+        // Step 5：Electron bundle 内的 file:// 页面地址不写 observations.url。
+        let urlSkipCases: [(String?, Bool)] = [
+            ("file:///Applications/Lark.app/Contents/Frameworks/Lark%20Framework.framework/Versions/1/Resources/webcontent/messenger/messenger/zh-CN.html", true),
+            ("file:///Users/someone/Documents/report.html", false),
+            ("https://example.com/a.html", false),
+            (nil, false),
+        ]
+        let urlSkipFailures = urlSkipCases.filter { ($0.0.map(AX.isBundleInternalURL) ?? false) != $0.1 }
+        check("bundle 内 file:// 地址不入库（用户自己的本地文件与 https 照记）",
+              urlSkipFailures.isEmpty, urlSkipFailures.map { $0.0 ?? "nil" }.joined(separator: " "))
+
+        // 飞书开关开着那副样子的形状（2026-09-11 Step 1，依据 Step 0 探针）。合成树用例钉行为，
+        // 这里钉规则本身：改坏任何一项都会回到复查里的某个缺陷。
+        let feishuOn = AdapterRegistry.feishu.resolvingEnhanced(true)
+        let feishuBody = feishuOn.regions.first { $0.name == "body" }
+        let feishuTitle = feishuOn.regions.first { $0.name == "conversation_title" }
+        let feishuPick = feishuBody?.locator.webAreaPick
+        let feishuShape = feishuOn.capturesWindow                                   // F3：不再截显示器
+            && feishuOn.limits.maxDepth >= 40                                     // F5：正文在第 29–31 层
+            && feishuPick?.prefer?.title == "messenger-chat"                       // F1：不是"最富"
+            && feishuPick?.exclude.contains("messenger") == true
+            && feishuPick?.prefer?.anchorClass == "chatMessages"
+            && feishuBody?.excludeRoles.contains("AXTextArea") == true             // F6：不记草稿
+            && feishuBody?.documentOrder == true                                   // 对话不串行
+            && feishuBody?.ocrOnFrameChange == false                               // F3：帧变不 OCR
+            && feishuBody?.rowLabels?.onlyWhenAncestorClass == "p2pChat"           // 单聊才加前缀
+            && feishuTitle?.kind == .title                                         // F2：会话名从 AX 来
+            && feishuTitle?.required == false && feishuTitle?.ocrFallback == false
+        check("飞书（开关开）：挑 messenger-chat 锚 .chatMessages、排除侧栏、≥40 层、窗口定向、"
+              + "不读输入框、文档顺序、帧变化不 OCR、单聊行前缀、会话名区域从 AX 来",
+              feishuShape,
+              "regions=\(feishuOn.regions.map(\.label).joined(separator: " | "))"
+                + " limits=\(feishuOn.limits.label) capturesWindow=\(feishuOn.capturesWindow)")
+
+        // Step 3：OCR 回退收口。① 弹窗只记标题；② 飞书 / 会议的 OCR 过水印；③ DOM 区域帧变化不 OCR；
+        // ④ 点表情人名的子树剪掉。
+        let modalTitle = "ModalWebViewWidget - search:search-command-bar:default"
+        let modalSkip = AdapterRegistry.feishu.skipsBody(windowTitle: modalTitle)
+            && !AdapterRegistry.feishu.skipsBody(windowTitle: "飞书")
+            && !AdapterRegistry.feishu.skipsBody(windowTitle: nil)
+            && EventSkeleton.completenessWithoutScan(triedToRead: false, collectText: true,
+                                                     privateBrowsing: false, readsContent: true,
+                                                     titleOnly: true) == .excluded
+        check("飞书弹窗（ModalWebViewWidget - …）只记标题：不读正文、completeness = excluded",
+              modalSkip, "prefixes=\(AdapterRegistry.feishu.titleOnlyWindowPrefixes)")
+        let chromeOn = AdapterRegistry.chrome.resolvingEnhanced(true)
+        let ocrShape = AdapterRegistry.feishu.watermarkFilter && AdapterRegistry.feishuMeeting.watermarkFilter
+            && chromeOn.regions.allSatisfy { !$0.ocrOnFrameChange }
+            && (feishuBody?.pruneClasses.contains("message-reactions") ?? false)
+        check("OCR 收口：飞书 / 会议过水印，Chrome / 飞书的 DOM 区域帧变化不 OCR，飞书剪 .message-reactions",
+              ocrShape, "chrome=\(chromeOn.regions.map(\.label).joined(separator: " | "))")
+        var learnFailures: [String] = []
+        for item in AdapterVectors.watermarkLearnCases {
+            let got = WatermarkFilter.learn(item.items)
+            if got != item.expected { learnFailures.append("\(item.name)→\(got ?? "nil")") }
+        }
+        check("水印学习 \(AdapterVectors.watermarkLearnCases.count) 条（平铺才算、短串与同列重复不算）",
+              learnFailures.isEmpty, learnFailures.joined(separator: " "))
+        var stripFailures: [String] = []
+        for item in AdapterVectors.watermarkStripCases {
+            let got = WatermarkFilter.strip(line: item.line,
+                                            watermark: WatermarkFilter.prepare(item.watermark))
+            if got != item.expected { stripFailures.append("\(item.name)→\(got ?? "nil")") }
+        }
+        check("水印剥离 \(AdapterVectors.watermarkStripCases.count) 条（整串、残片、粘连、误伤反例）",
+              stripFailures.isEmpty, stripFailures.joined(separator: " "))
 
         // 地址栏取 URL 的纯函数。Chrome 把 scheme 省掉，而 urlRef 要有 scheme 才抽得出 host。
         let urlCases: [(String, String?)] = [
@@ -1143,7 +1219,7 @@ enum SelfCheck {
         // 12.3 视口相交（含回滚区）
         var viewportFailures: [String] = []
         for item in AdapterVectors.viewportCases {
-            let got = Viewport.isVisible(item.frame, in: item.viewport)
+            let got = Viewport.isVisible(item.frame, in: item.viewport, minSize: item.minSize)
             let scrollback = Viewport.isScrollback(item.frame, in: item.viewport)
             if got != item.expected || scrollback != item.scrollback {
                 viewportFailures.append("\(item.name)→\(String(describing: got))/\(scrollback)")

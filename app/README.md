@@ -813,7 +813,7 @@ OCR 读到的写 `ocr:<规则 id>.<区域名>`；`observations.capture_method` �
 |---|---|---|---|
 | `safari` | `web_area`（AXWebArea 子树） | AX | AXWebArea 找不到时（PDF 预览、部分扩展页）退回整窗口 BFS；跨 iframe 的顺序按 AX 树顺序，不是视觉顺序 |
 | `claude_desktop` | `conversation`（AXWebArea 子树，**允许回退 OCR**） | AX → OCR | 必须先设 `AXManualAccessibility`（M0 没设时正文为 0）；代码块是等宽小字，OCR 回退时按 D24 不降采样；折叠起来的长回复只记展开的部分 |
-| `feishu` | `message_list`（AXList/AXRow，**允许回退 OCR**）、`conversation_title`（顶部 8% 相对矩形，OCR，非必需） | AX 行 → OCR | 只记视口内已渲染的消息，**不追溯未打开的会话与未滚动到的历史**；图片 / 文件 / 语音 / 通话只有屏幕上显示的文字才可能被 OCR；发送者与时间取自行内子元素，行结构变了就退化成整行文本 |
+| `feishu` | 开关开（默认）：`conversation_title`（`messenger-chat` 里 `.chatWindow_chatName`，AX，非必需）、`body`（按标题挑 web area：优先 `messenger-chat` 并锚到 `.chatMessages`，排除侧栏 `messenger`，其它模块取最富的那个；**允许回退 OCR**，窗口定向截图）；开关关：`message_list`（AXList/AXRow）+ 顶部 8% 相对矩形 OCR | AX → OCR | 只记视口内已渲染的消息（1 pt 占位行不算），**不追溯未打开的会话与未滚动到的历史**；不记输入框草稿；单聊按行 class 加「我 / 对方名」前缀，群聊行里自带发送者名；图片 / 文件 / 语音 / 通话只有屏幕上显示的文字才可能被记 |
 | `wechat` | `chat_panel`（左 22% 之后、上 8%–78% 的相对矩形，OCR）、`conversation_title`（顶部 8%，OCR，非必需） | 全 OCR | 相对矩形是按三栏布局估的，**用户改了窗口比例或开了浮层会偏**；主窗口标题恒为「微信」，会话名只能从顶部区域 OCR；语音只记 `[语音]`；支付 / 转账 / 红包与聊天一起记录，不特殊处理（D14 已定） |
 | `generic` | `window`（整窗口子树） | AX | 就是 M0 那套四角色 BFS，唯一差别是加了视口裁剪；不触发 OCR |
 

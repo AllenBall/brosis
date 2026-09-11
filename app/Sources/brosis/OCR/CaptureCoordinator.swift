@@ -87,6 +87,8 @@ final class CaptureCoordinator: @unchecked Sendable {
     /// 上一次从标题条认出来的会话身份，按 bundle id 存。
     /// 标题区域被限流挡掉的那些帧要靠它保住群聊判定与 `window_title`（M2）。
     private var lastConversationTitles: [String: ChatTitle.Resolved] = [:]
+    /// 每个应用上一次学到的水印（归一化）。这一帧重复不够学不出来时沿用，见 `WatermarkFilter`。
+    private var lastWatermarks: [String: String] = [:]
 
     let trigger: OCRTriggerGate
     let auditEvery: Int
@@ -326,7 +328,7 @@ final class CaptureCoordinator: @unchecked Sendable {
             }
             let rect = resolvedRect(request)
             do {
-                guard let result = try ViewportOCR.recognize(fullFrame: image,
+                guard var result = try ViewportOCR.recognize(fullFrame: image,
                                                              axRect: rect,
                                                              displayBounds: displayBounds,
                                                              kind: request.kind) else {
@@ -338,6 +340,20 @@ final class CaptureCoordinator: @unchecked Sendable {
                     stats.ocrRuns += 1
                     stats.ocrTotalMS += result.elapsedMS
                     stats.ocrChars += result.text.count
+                }
+                // —— 水印（Step 3）：飞书类规则的 OCR 结果先剥水印，再进归属与脱敏 ——
+                // 这一帧学到的优先，其次用户指定的，最后沿用上一次学到的；整块只剩水印
+                //（图片查看器那种）就走下面同一条"没出字"的路。
+                if rule.watermarkFilter {
+                    let watermark: String? = lock.withLock {
+                        let learned = WatermarkFilter.learn(result.lines)
+                            ?? WatermarkFilter.configured() ?? lastWatermarks[pending.bundleID]
+                        if let learned { lastWatermarks[pending.bundleID] = learned }
+                        return learned
+                    }
+                    if let watermark {
+                        result = WatermarkFilter.apply(result, watermark: WatermarkFilter.prepare(watermark))
+                    }
                 }
                 guard !result.isEmpty else {
                     lock.withLock { stats.ocrEmpty += 1 }
@@ -549,6 +565,7 @@ final class CaptureCoordinator: @unchecked Sendable {
             context = nil
             lastOCRTexts.removeAll()
             lastConversationTitles.removeAll()
+            lastWatermarks.removeAll()
             lastRegionTexts.removeAll()
             frameChangedPending.removeAll()
             coverageFailedApps.removeAll()

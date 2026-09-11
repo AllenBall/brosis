@@ -70,6 +70,41 @@ struct WindowInset: Sendable, Equatable {
     }
 }
 
+/// 在窗口的所有 `AXWebArea` 里挑一个（一个窗口多个 web area 的 Electron 应用，飞书就是）。
+///
+/// 为什么不能用「最富的那个」（2026-09-11 复查，`tools/bench/results/feishu_capture_review_2026-09-11.md` F1）：
+/// 飞书主窗口有两个 web area——`messenger`（会话列表侧栏，384 pt 宽、每个会话的名字 + 最后一条预览）
+/// 与 `messenger-chat`（当前会话）。侧栏永远更"富"，于是当前会话一条都没进库，
+/// 记下的全是别的会话的预览。web area 的 AXTitle 就是模块名，按名字挑才对。
+struct WebAreaPick: Sendable, Equatable {
+    /// 首选的那个 web area，以及选中它之后区域根往下锚到哪儿。只有首选那个才谈得上锚点：
+    /// 别的模块（云文档 / 邮箱）的 web area 结构未知，整棵读。
+    struct Preferred: Sendable, Equatable {
+        /// AXTitle 等于它（飞书：`messenger-chat`）。
+        var title: String
+        /// 在它里面找 DOM class 含这个名字的节点当**区域根**（飞书：`chatMessages`，自动把会话头与
+        /// 输入区排在外面）。找不到就退回 web area 本身。
+        var anchorClass: String?
+    }
+    var prefer: Preferred?
+    /// AXTitle 在这里面的不作候选（飞书：`messenger` = 侧栏）。剩下多个时取最富的那个——
+    /// 切到云文档 / 邮箱时树里只剩那个模块自己的 web area（Step 0 实测），自然落到它。
+    var exclude: [String] = []
+}
+
+/// 行级发送者前缀，由行节点的 DOM class 决定（飞书单聊）。
+///
+/// 飞书单聊的消息行里**没有发送者名**，只有行的 class `message-self` / `message-not-self`
+/// （Step 0 探针 §2）；群聊每行自带 `.message-info-name`，不需要前缀——所以只在祖先里
+/// 出现 `onlyWhenAncestorClass`（`p2pChat`）时启用。
+struct RowLabels: Sendable, Equatable {
+    var selfClass: String
+    var peerClass: String
+    /// 去锚点的路上见到这个 class 才**加前缀**（飞书：`p2pChat` = 单聊）；nil = 总是加。
+    /// 行本身（谁是一行）不受它影响：群聊里也要认出行，行的 frame 决定它渲没渲染。
+    var onlyWhenAncestorClass: String?
+}
+
 /// 怎么在 AX 树里找到这个区域。
 enum ElementLocator: Sendable, Equatable {
     /// 角色等于（第一个命中的节点）。
@@ -87,9 +122,28 @@ enum ElementLocator: Sendable, Equatable {
     case insetRect(WindowInset)
     /// 整个焦点窗口。
     case wholeWindow
+    /// `AXDOMClassList` 含这个名字（Chromium 应用里唯一稳定的语义锚点）。
+    case domClass(String)
+    /// 在窗口的所有 AXWebArea 里按标题挑一个（见 `WebAreaPick`）。一条规则里最多一个区域用它。
+    case webArea(WebAreaPick)
+    /// 在同一条规则里 `.webArea` 挑中的那个 web area 内，找 DOM class 含这个名字的节点。
+    /// 挑中的**不是** `prefer` 那个时（云文档 / 邮箱），退而把 web area 自己的 AXTitle 当文本
+    /// ——那正是页标题（「主页 - 飞书云文档」「mail」）。
+    case webAreaDescendant(domClass: String)
+
+    /// `.webArea` 的参数；不是它就是 nil。
+    var webAreaPick: WebAreaPick? {
+        if case .webArea(let pick) = self { return pick }
+        return nil
+    }
 
     var label: String {
         switch self {
+        case .domClass(let c): return "class=.\(c)"
+        case .webArea(let pick):
+            return "webarea prefer=\(pick.prefer?.title ?? "-") exclude=\(pick.exclude.joined(separator: ","))"
+                + (pick.prefer?.anchorClass.map { " anchor=.\($0)" } ?? "")
+        case .webAreaDescendant(let domClass): return "webarea-descendant=.\(domClass)"
         case .role(let r): return "role=\(r)"
         case .roleAndSubrole(let r, let s): return "role=\(r) subrole=\(s)"
         case .identifier(let id): return "identifier=\(id)"
@@ -147,12 +201,42 @@ struct RegionRule: Sendable {
     /// 这块区域在三栏布局里的角色。**声明了角色的区域，OCR 时矩形由 `PaneDetector`
     /// 从窗口图像现场量**，`locator` 给的那个只当量不到时的兜底（见 `PaneLayout`）。
     var pane: PaneRole?
+    /// 这些角色的节点连同子树一律不读（飞书：输入框 AXTextArea——未发送的草稿会逐键进库）。
+    var excludeRoles: Set<String> = []
+    /// 要不要给容器节点（AXGroup 等）探 frame。默认探：容器整块在视口外时能把子树一次剪掉。
+    /// 关掉的理由（飞书）：一棵 465 节点的聊天树里 356 个是 AXGroup，全探会撞上 `maxFrameProbes`
+    /// 然后停止裁视口；而它的视口外行是 1 pt 占位、并不在视口外，容器探测剪不掉任何东西。
+    var probeContainerFrames: Bool = true
+    /// 按文档顺序（先序深度优先）读，而不是默认的广度优先。聊天列表必须用它——一行消息的发送者名
+    /// 在第 8 层、正文在第 12 层，广度优先会先吐出所有人的名字再吐出所有正文，对话就串了。
+    /// 默认仍是广度优先：命中节点上限时得到的是"每层都有一点"的均匀样本。
+    var documentOrder: Bool = false
+    /// 见 `RowLabels`。只在 `documentOrder` 下生效（行的范围要靠先序遍历界定）。
+    var rowLabels: RowLabels?
+    /// 「帧变了、AX 文本没变」要不要排 OCR（3.3 第二类触发条件）。DOM 逐字给出的区域应关掉：
+    /// 文本没变而画面变了，变的只能是图片 / 动画 / 光标，OCR 只会引入噪声——2026-09-11 复查里
+    /// 飞书侧栏的 OCR 回退把压在上面的 Claude 窗口的字记成了飞书正文，走的正是这条触发。
+    var ocrOnFrameChange: Bool = true
+    /// DOM class 含这些名字的节点连同子树不读（飞书：`message-reactions`——点表情的人名会以独立行混进对话）。
+    var pruneClasses: Set<String> = []
+    /// 读 class（认行、剪子树）只到区域根下这么多层——每读一次 class 是一次 AX 调用。
+    var classProbeMaxDepth: Int = 12
+    /// 进了一行之后，剪子树的 class 只在行下这么多层内看（飞书：`.message-reactions` 在行下第 4 层）。
+    var pruneDepthBelowRow: Int = 6
+
+    /// 这个区域要不要一个矩形：裁视口、OCR 回退、声明 OCR 三者任一。都不要就不必探它的 frame。
+    var needsRect: Bool { clipToViewport || ocrFallback || read.declaresOCR }
 
     var label: String {
         "\(name) kind=\(kind.rawValue) \(locator.label) read=\(read.rawValue)"
             + " clip=\(clipToViewport ? "yes" : "no") required=\(required ? "yes" : "no")"
             + (ocrFallback ? " ocr_fallback=yes" : "")
             + (pane.map { " pane=\($0.rawValue)" } ?? "")
+            + (excludeRoles.isEmpty ? "" : " exclude=\(excludeRoles.sorted().joined(separator: ","))")
+            + (documentOrder ? " order=document" : "")
+            + (rowLabels == nil ? "" : " row_labels=yes")
+            + (ocrOnFrameChange ? "" : " ocr_on_frame_change=no")
+            + (pruneClasses.isEmpty ? "" : " prune=.\(pruneClasses.sorted().joined(separator: ",."))")
     }
 
     /// 定位器命中多个节点时，挑**内容最多**的那个，而不是第一个。
@@ -224,6 +308,24 @@ struct AdapterRule: Sendable {
     /// **窗口定向截图**：截这个应用时不截整块显示器，只截它的焦点窗口
     /// （`SCContentFilter(desktopIndependentWindow:)`）。见 `CaptureController.capture`。
     var capturesWindow: Bool = false
+
+    /// 窗口标题以这些前缀开头时**只记标题、不读正文也不 OCR**（completeness = excluded）。
+    ///
+    /// 飞书的弹窗（搜索 ⌘K、转发、用户名片）是独立的 AXDialog 窗口，标题
+    /// `ModalWebViewWidget - <模块>:<弹窗>:default`，frame 与主窗口一样大（2026-09-11 Step 0 §5.4）。
+    /// 它们的 AX 树里只有弹窗自己那个 web area（搜索历史、联系人列表），读到空就整窗 OCR，
+    /// 于是把压在下面的主窗口、侧栏、水印全记成了正文（evidence 19456）。这类窗口是过渡界面，
+    /// 用户真正在看的内容已经在主窗口那条观察里了。
+    var titleOnlyWindowPrefixes: [String] = []
+    /// OCR 结果先过水印过滤（`WatermarkFilter`）：飞书在窗口上平铺「用户名 组织名」水印，
+    /// AX 正文不含它（水印是独立覆盖窗口），但每一次 OCR 都会认出一片。
+    var watermarkFilter: Bool = false
+
+    /// 这个窗口按规则只记标题（见 `titleOnlyWindowPrefixes`）。
+    func skipsBody(windowTitle: String?) -> Bool {
+        guard let windowTitle else { return false }
+        return titleOnlyWindowPrefixes.contains { windowTitle.hasPrefix($0) }
+    }
 
     /// `AXEnhancedUserInterface` 开着时改用这组区域。nil = 开关不影响这条规则。
     ///

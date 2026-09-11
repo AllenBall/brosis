@@ -185,6 +185,7 @@ brosis --dump-ocr       # OCR 识别结果逐行核对
 ```
 
 `--ax-probe` 在排查"某个应用读不到正文"时很有用：它会打印角色分布、逐层追踪 `AXWebArea`、扫描深度与视口裁剪两个可疑参数，走的是和生产完全相同的遍历路径。
+加 `--dump-webarea [<AXTitle>|all]`（如 `brosis --ax-probe com.bytedance.macos.feishu --dump-webarea messenger-chat`）则改为把目标应用每个窗口里的 `AXWebArea` 列出来，并把指定的那棵子树逐节点打出来（角色、DOM id / class、标题、文本前 60 字、frame、选中状态）——给适配规则定位器找依据用。输出含屏幕上的真实文本，别落进会提交的目录。
 
 ### 测试与自检的分工
 
@@ -213,7 +214,7 @@ Electron 应用需要先设 `AXManualAccessibility` 才暴露无障碍树；一�
 
 **Chrome 系浏览器**（Chrome / Edge / Brave / Vivaldi / Arc）只认私有属性 `AXEnhancedUserInterface`，不认公开的 `AXManualAccessibility`。实测 Chrome 153 的无障碍树只有 43 个节点、全是浏览器外壳、**没有 `AXWebArea`**。所以默认路径是：正文整页 OCR，URL 从地址栏的 `AXTextField` 直接读——两件事都不需要装扩展。截图走窗口定向，别的窗口盖在上面时不会把它的像素记成网页内容。
 
-**`AXEnhancedUserInterface` 默认开启，可以自行关闭。** 开着时 Chrome、飞书、飞书会议都会真的建起无障碍树，正文优先读 DOM 文本（逐字准确、含滚动区外的内容、且完全不跑 OCR），读空再回退 OCR。实测：Chrome 从「43 个节点全是外壳、0 字正文」变成可读；飞书从 0 字变成两个 `AXWebArea` 合计约 1650 字符。关掉则退回整页 OCR。
+**`AXEnhancedUserInterface` 默认开启，可以自行关闭。** 开着时 Chrome、飞书、飞书会议都会真的建起无障碍树，正文优先读 DOM 文本（逐字准确、含滚动区外的内容、且完全不跑 OCR），读空再回退 OCR。实测：Chrome 从「43 个节点全是外壳、0 字正文」变成可读；飞书读的是当前会话所在的 `messenger-chat`（会话名 + 消息，单聊行带「我 / 对方名」前缀），会话列表侧栏整块排除；切到云文档 / 邮箱就读那个模块自己的 web area，页标题即其 AXTitle；搜索 / 转发 / 名片这类 `ModalWebViewWidget` 弹窗只记标题；走到 OCR 的部分会先剥掉平铺的「用户名 组织名」水印（学不出来时可用 `defaults write com.brosis.app adapter.watermark.text "张三 某公司"` 指定）。关掉则退回整页 OCR。
 
 ⚠️ **打开前请知道代价**：该属性会让 Chromium 进入无障碍模式并镜像输入，设置它的客户端**突然断开**时，把最近缓冲的按键**重放进当时的焦点输入框**——复现用例是输入 `abcd`、退出客户端后变成 `abcdbcdbcd`，即**把你刚敲的内容重复一遍**（见 [screenpipe #3884](https://github.com/mediar-ai/screenpipe/issues/3884)；1Password、Alfred、TextExpander 中过同一个）。
 

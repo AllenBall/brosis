@@ -35,6 +35,23 @@ enum ViewportOCR {
 
         var isEmpty: Bool { text.isEmpty }
 
+        /// 换一组条目，按同一套公式重建文本、按字符数加权的置信度与低置信 token
+        /// （`recognize` 与水印过滤共用，公式只写这一份）。
+        func replacingLines(_ items: [ReadingOrder.Item]) -> Result {
+            var out = self
+            out.lines = items
+            out.text = ReadingOrder.text(items)
+            var weight = 0.0, weighted = 0.0
+            for item in items {
+                let count = Double(item.text.count)
+                weight += count
+                weighted += item.confidence * count
+            }
+            out.meanConfidence = weight > 0 ? weighted / weight : 0
+            out.lowConfidenceTokens = ReadingOrder.lowConfidenceTokens(in: out.text)
+            return out
+        }
+
         /// 写进 `occurrences.note` 的**形状**（不含正文）。
         func note(rect: CGRect) -> String {
             "lowconf=\(lowConfidenceTokens.count) conf=\(String(format: "%.2f", meanConfidence)) "
@@ -127,17 +144,12 @@ enum ViewportOCR {
                                            box: observation.boundingBox,
                                            confidence: Double(candidate.confidence)))
         }
-        let text = ReadingOrder.text(items)
-        let weight = items.reduce(0.0) { $0 + Double($1.text.count) }
-        let weighted = items.reduce(0.0) { $0 + $1.confidence * Double($1.text.count) }
-        return Result(text: text,
-                      lines: items,
-                      meanConfidence: weight > 0 ? weighted / weight : 0,
-                      lowConfidenceTokens: ReadingOrder.lowConfidenceTokens(in: text),
+        return Result(text: "", lines: [], meanConfidence: 0, lowConfidenceTokens: [],
                       elapsedMS: elapsed,
                       pixelWidth: prepared.image.width,
                       pixelHeight: prepared.image.height,
                       downscaled: prepared.downscaled)
+            .replacingLines(items)
     }
 
     /// 裁 + 认，一步到位。裁不出来（区域在别的屏上、太小）返回 nil。

@@ -33,6 +33,11 @@ protocol AXNodeSource {
     var visibleCharacterRange: NSRange? { get }
     /// 子节点。真实实现每次调用都发一次 AX 消息，调用方要自己控制次数。
     var children: [any AXNodeSource] { get }
+    /// `AXDOMClassList`：Chromium 把 DOM 元素的 class 列表原样暴露出来（2026-09-11 飞书探针实测可读）。
+    /// 这是 Electron 应用里**唯一稳定的语义锚点**——飞书的 `chatMessages` / `chatWindow_chatName` /
+    /// `message-self` 都在这儿，而 AXIdentifier 只有消息 id 那种数字。读不到时是空数组。
+    /// 真实实现每次调用发一次 AX 消息，所以引擎只在规则声明了 class 锚点时才读它。
+    var domClasses: [String] { get }
 }
 
 extension AXNodeSource {
@@ -96,6 +101,13 @@ struct LiveAXNode: AXNodeSource {
     }
 
     var children: [any AXNodeSource] { AX.children(element).map { LiveAXNode($0) } }
+
+    var domClasses: [String] {
+        guard let value = AX.copyAttribute(element, "AXDOMClassList") else { return [] }
+        if let list = value as? [String] { return list }
+        if let text = value as? String, !text.isEmpty { return text.split(separator: " ").map(String.init) }
+        return []
+    }
 }
 
 // MARK: - 合成树（测试与自检）
@@ -112,6 +124,7 @@ struct SyntheticAXNode: AXNodeSource {
     var descriptionText: String?
     var frame: CGRect?
     var visibleCharacterRange: NSRange?
+    var domClasses: [String]
     var kids: [SyntheticAXNode]
 
     init(role: String,
@@ -122,6 +135,7 @@ struct SyntheticAXNode: AXNodeSource {
          descriptionText: String? = nil,
          frame: CGRect? = nil,
          visibleCharacterRange: NSRange? = nil,
+         domClasses: [String] = [],
          kids: [SyntheticAXNode] = []) {
         self.role = role
         self.subrole = subrole
@@ -131,6 +145,7 @@ struct SyntheticAXNode: AXNodeSource {
         self.descriptionText = descriptionText
         self.frame = frame
         self.visibleCharacterRange = visibleCharacterRange
+        self.domClasses = domClasses
         self.kids = kids
     }
 

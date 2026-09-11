@@ -72,6 +72,9 @@ final class EventSkeleton {
     static var maxAXRetries: Int { axRetryDelays.count }
     /// 每个 bundle id 命中 BFS 限额的次数，用来控制 `ax_bfs_limit_hit` 的写入频次。
     private var bfsLimitHits: [String: Int] = [:]
+    /// 每个进程上一次挑中的 web area 标题（`.webArea` 定位器）。变了才记一条事件——
+    /// Lark 升级把 `messenger-chat` 改名时，从审计里能看出规则落到了别的 web area 上。
+    private var lastPickedWebArea: [pid_t: String] = [:]
     /// 累计脱敏命中数，按类型分。`stop()` 时汇总写一条事件。
     private var redactionTotals: [RedactionType: Int] = [:]
     private var redactionSinceFlush = 0
@@ -368,9 +371,12 @@ final class EventSkeleton {
     ///   - readsContent: 3.12 档位允许读正文吗（「只记事件」为 false）。
     nonisolated static func completenessWithoutScan(triedToRead: Bool, collectText: Bool,
                                                     privateBrowsing: Bool,
-                                                    readsContent: Bool) -> Completeness {
+                                                    readsContent: Bool,
+                                                    titleOnly: Bool = false) -> Completeness {
         // 试过了才轮得到"读不到"。
         if triedToRead { return .unavailable }
+        // 规则声明这类窗口只记标题（飞书弹窗）：是规则层面的排除，不是读取失败。
+        if titleOnly { return .excluded }
         // 私密浏览：事件照记（不然台账凭空少一段），正文、标题、URL、文件路径一个都不存。
         if privateBrowsing { return .excluded }
         // 3.12「只记事件」：不读正文是策略排除。
@@ -463,9 +469,15 @@ final class EventSkeleton {
         // —— 第二道闸：正文读不读 ——
         let privateBrowsing = PrivateBrowsing.isPrivate(bundleID: app.bundleIdentifier,
                                                         windowTitle: info.title)
+        // 传 bundleURL：采集端是**唯一**手头有它的调用方，所以由它把判定算出来并填进缓存，
+        // 之后策略列表、OCR 协调器只查缓存就能拿到同一个答案。
+        let rule = AdapterRegistry.rule(for: app.bundleIdentifier, bundleURL: app.bundleURL)
+        // 规则声明「这类窗口只记标题」（飞书的 ModalWebViewWidget 弹窗）：不读正文、不 OCR。
+        let titleOnly = rule.skipsBody(windowTitle: info.title)
         let shouldReadText = collectText
             && gate.readsContent
             && !privateBrowsing
+            && !titleOnly
             && permissions.accessibility
             && (sourceState == .ok || sourceState == .userIdle)
 
@@ -475,9 +487,9 @@ final class EventSkeleton {
         var captureMethod: CaptureMethod = .ax
         var visibleRange: String?
         var adapterScan: AdapterScan?
-        // 传 bundleURL：采集端是**唯一**手头有它的调用方，所以由它把判定算出来并填进缓存，
-        // 之后策略列表、OCR 协调器只查缓存就能拿到同一个答案。
-        let rule = AdapterRegistry.rule(for: app.bundleIdentifier, bundleURL: app.bundleURL)
+        /// 适配规则从 AX 读到的会话名（飞书 `.chatWindow_chatName`）。有它就盖过窗口标题：
+        /// 飞书的窗口标题恒为「飞书」（2026-09-11 复查 F2），会话身份只在这儿。
+        var axConversationTitle: String?
         if shouldReadText, let windowElement {
             // 任何一次真正的遍历都重置节流时钟。
             lastElementScanAt = Date().timeIntervalSince1970
@@ -493,6 +505,14 @@ final class EventSkeleton {
                 coverageFailed: coordinator.consumeCoverageFailed(bundleID: app.bundleIdentifier))
             adapterScan = scan
             axChars = scan.totalChars
+            axConversationTitle = scan.conversationTitle.flatMap(AdapterEngine.firstLine)
+            if let picked = scan.pickedWebArea,
+               let title = picked.pickedWebAreaTitle, lastPickedWebArea[pid] != title {
+                lastPickedWebArea[pid] = title
+                recorder.logEvent(kind: "adapter_webarea_picked",
+                                  detail: "bundle=\(app.bundleIdentifier ?? "?") title=\(title)"
+                                        + " anchored=\(picked.anchored) chars=\(picked.text.count)")
+            }
             for fragment in scan.fragments where !fragment.text.isEmpty {
                 // —— 入库前脱敏（2.2 硬约束 2）：库里从一开始就没有这些明文 ——
                 let redacted = Redactor.redact(fragment.text)
@@ -515,7 +535,8 @@ final class EventSkeleton {
         } else {
             completeness = Self.completenessWithoutScan(
                 triedToRead: shouldReadText, collectText: collectText,
-                privateBrowsing: privateBrowsing, readsContent: gate.readsContent)
+                privateBrowsing: privateBrowsing, readsContent: gate.readsContent,
+                titleOnly: titleOnly)
         }
 
         // —— 元数据同样过入库前脱敏 ——
@@ -530,7 +551,8 @@ final class EventSkeleton {
         var storedURL: URLRef?
         var storedPath: String?
         if !privateBrowsing {
-            storedTitle = redactedForStorage(info.title)
+            // 会话名优先于窗口标题（与 OCR 那条路的 `resolvedTitle?.display ?? windowTitle` 同一口径）。
+            storedTitle = redactedForStorage(axConversationTitle ?? info.title)
             storedURL = Self.urlRef(info.url,
                                     storedLocator: redactedForStorage(info.url))
             storedPath = redactedForStorage(Self.filePath(info.document))

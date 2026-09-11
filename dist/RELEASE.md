@@ -181,6 +181,7 @@ DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer \
 ## 5. 发 GitHub Release
 
 tag 用 `v<版本>`（和第 4 步的 `--download-url-prefix` 一致）。
+**Release 说明一律用英文**（2026-09-11 起的约定；仓库是公开的，读者不只中文用户）。
 **两个资产都要传，一个都不能少**：
 
 - [ ] `brosis-<版本>.dmg`

@@ -38,9 +38,19 @@ if arguments.contains("--dump-ocr") {
 
 // `--ax-probe [bundle id ...]`：量 Electron 应用的 AX 树要多久才有内容。
 // 不给 bundle id 就探所有正在运行的 Chromium 系应用。
+// 再加 `--dump-webarea [<AXTitle>|all]` 就不取样，改成把 AXWebArea 的子树逐节点打出来。
 if let index = arguments.firstIndex(of: "--ax-probe") {
-    let rest = Array(arguments[(index + 1)...]).filter { !$0.hasPrefix("--") }
-    exit(AXProbe.run(bundleIDs: rest))
+    var rest = Array(arguments[(index + 1)...])
+    var dumpWebArea: String?
+    if let dumpIndex = rest.firstIndex(of: "--dump-webarea") {
+        rest.remove(at: dumpIndex)
+        if dumpIndex < rest.count, !rest[dumpIndex].hasPrefix("--") {
+            dumpWebArea = rest.remove(at: dumpIndex)
+        } else {
+            dumpWebArea = "all"
+        }
+    }
+    exit(AXProbe.run(bundleIDs: rest.filter { !$0.hasPrefix("--") }, dumpWebArea: dumpWebArea))
 }
 
 let application = NSApplication.shared
