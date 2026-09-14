@@ -1056,7 +1056,7 @@ enum SelfCheck {
         // 全部走合成 AX 树与合成布局：不启动应用、不发 AX 消息、不截屏、不要任何权限。
         // Vision 是本地推理，对自绘图像直接跑也不触发 TCC。
 
-        // 12.1 规则路由：四个应用各自命中自己的规则，别的应用落到兜底规则。
+        // 12.1 规则路由：清单里的每个应用各自命中自己的规则，别的应用落到兜底规则。
         var routingOK = true
         for rule in AdapterRegistry.all {
             for bundleID in rule.bundleIDs where AdapterRegistry.rule(for: bundleID).id != rule.id {
@@ -1094,6 +1094,20 @@ enum SelfCheck {
               chromeRule.id == AdapterRegistry.chrome.id && chromeRule.capturesWindow,
               "\(chromeRule.id)，窗口定向=\(chromeRule.capturesWindow) "
                 + "读AX=\(chromeRule.readsAX)（跟开关走）")
+
+        // Telegram（2026-09-14 复查）：命中专用规则、真的会排 OCR、窗口定向——理由与上面 Chrome、飞书会议
+        // 两条一样。具体形态（滚动条定边界、气泡内元信息、兜底点数）由 ruleCases / scrollBarLayoutCases /
+        // 气泡 fixture 钉，这里不逐字段断言注册表常量。跨规则不变量：声明"边界从滚动条来"的规则
+        // 必须有带 pane 角色的 OCR 区域，否则算出的边界没人用。
+        let telegramRule = AdapterRegistry.rule(for: "ru.keepcoder.Telegram")
+        let scrollBarRulesConsistent = AdapterRegistry.all.allSatisfy { rule in
+            rule.paneFallback?.source != .axScrollBars
+                || rule.regions.contains { $0.pane != nil && $0.read.declaresOCR }
+        }
+        check("Telegram 命中专用规则、排 OCR、窗口定向；滚动条定边界的规则都有 pane 区域",
+              telegramRule.id == AdapterRegistry.telegram.id && telegramRule.declaresOCR
+                && telegramRule.capturesWindow && scrollBarRulesConsistent,
+              "\(telegramRule.id) 区域=\(telegramRule.regions.map(\.name).joined(separator: "/"))")
 
         // Chrome 与飞书两条规则跟着开关换形态。**只钉真的会变的那几件事**：
         // 改读 AXWebArea、必需区域留 OCR 回退、开着时确实在读 AX。
@@ -1232,7 +1246,7 @@ enum SelfCheck {
               AdapterRegistry.all.map(\.id).joined(separator: " / ")
                 + "；未知应用 → \(fallbackRule.id)（\(fallbackRule.limits.label)）")
 
-        // 12.2 五条规则用例（合成树）：片段数、完整性、必含 / 必不含、OCR 请求区域。
+        // 12.2 规则用例（合成树，条数见 AdapterVectors.ruleCases）：片段数、完整性、必含 / 必不含、OCR 请求区域。
         for item in AdapterVectors.ruleCases {
             let scan = AdapterEngine.scan(rule: item.rule, window: item.tree(),
                                           windowFrame: AdapterVectors.window)
@@ -1364,15 +1378,17 @@ enum SelfCheck {
         var bubbleFailures: [String] = []
         for layout in layouts {
             let bubbles = BubbleAttribution.attribute(items: layout.items,
-                                                      layout: ChatLayout(),
+                                                      layout: layout.layout,
                                                       group: layout.group,
                                                       regionHeightPoints: layout.regionHeightPoints)
             let got = bubbles.map(\.line)
             if got != layout.expected { bubbleFailures.append("\(layout.name)→\(got)") }
         }
-        check("气泡归属：\(layouts.count) 份合成布局（单聊左右 / 群聊昵称 / 语音标签）",
-              layouts.count == 2 && bubbleFailures.isEmpty,
-              bubbleFailures.isEmpty ? "单聊左 = 对方、右 = 自己；群聊取上方昵称；语音记 [语音]"
+        // 份数按 JSON 里实际解出来的算（解析失败会是 0，照样被"≥ 4"抓住），别写死。
+        check("气泡归属：\(layouts.count) 份合成布局（单聊左右 / 群聊昵称 / 语音标签 / Telegram 气泡内元信息）",
+              layouts.count >= 4 && bubbleFailures.isEmpty,
+              bubbleFailures.isEmpty ? "单聊左 = 对方、右 = 自己；群聊取上方昵称；语音记 [语音]；"
+                                       + "Telegram 按左缘判侧、剥行尾时间与 admin 标签"
                                      : bubbleFailures.joined(separator: " "))
 
         // 12.10a 会话名与群聊判定（M2：`group` 曾被写死成 false，群聊昵称一条都认不出来）
@@ -1398,6 +1414,58 @@ enum SelfCheck {
               insetFailures.isEmpty,
               insetFailures.isEmpty ? "侧栏 / 标题条 / 输入框按点数让开，不随窗口宽度按比例伸缩"
                                     : insetFailures.joined(separator: " "))
+
+        // 12.10b′ Telegram 滚动条定边界（2026-09-14：这个应用唯一活着的 AX 元素就是两根滚动条）
+        var scrollBarFailures: [String] = []
+        for item in AdapterVectors.scrollBarLayoutCases {
+            let got = PaneLayout.fromScrollBars(item.bars, windowFrame: item.window,
+                                                fallback: AdapterVectors.telegramPaneFallback)
+            if got != item.expected {
+                scrollBarFailures.append("\(item.name)→\(got?.label ?? "nil")")
+            }
+        }
+        check("滚动条定边界：\(AdapterVectors.scrollBarLayoutCases.count) 条"
+                + "（真机双栏 / 改矮 / 单栏 / 宽窗缺侧栏 / 三根 / 贯到底 / 不合理 / 空）",
+              scrollBarFailures.isEmpty,
+              scrollBarFailures.isEmpty
+                ? "侧栏右缘 / 消息区顶 / 输入框顶从 AXScrollBar 的 frame 来；只剩一根时按窗口宽判单栏"
+                : scrollBarFailures.joined(separator: " "))
+
+        // 12.10b″ 气泡内元信息与群状态行（Telegram）
+        let metaFailures = AdapterVectors.trailingMetaCases.compactMap { item -> String? in
+            let got = BubbleAttribution.stripTrailingMeta(item.input)
+            return got == item.expected ? nil : "「\(item.input)」→「\(got)」"
+        }
+        let tagFailures = AdapterVectors.roleTagCases.compactMap { item -> String? in
+            let got = BubbleAttribution.stripRoleTag(item.input)
+            return got == item.expected ? nil : "「\(item.input)」→「\(got)」"
+        }
+        let statusFailures = AdapterVectors.groupStatusCases.compactMap { item -> String? in
+            ChatTitle.isGroupStatusLine(item.line) == item.expected ? nil : "「\(item.line)」"
+        }
+        let metaAllFailures = metaFailures + tagFailures + statusFailures
+        check("气泡内元信息与群状态行：时间 \(AdapterVectors.trailingMetaCases.count) 条 / "
+                + "角色标签 \(AdapterVectors.roleTagCases.count) 条 / 群状态行 \(AdapterVectors.groupStatusCases.count) 条",
+              metaAllFailures.isEmpty,
+              metaAllFailures.isEmpty
+                ? "行尾 14:24 / edited 剥掉；昵称行尾 admin / 管理员 剥掉；「N members / 位成员」判群，subscribers 不判"
+                : metaAllFailures.joined(separator: " "))
+
+        // 12.10b‴ 纯 OCR 规则的超时兜底：读取判定的六道门（CG 挑窗的最小边在 12.10d 的表里）
+        var gateFailures: [String] = []
+        for item in AdapterVectors.readGateCases {
+            let got = EventSkeleton.shouldReadText(
+                collectText: item.collectText, readsContent: item.readsContent,
+                privateBrowsing: item.privateBrowsing, titleOnly: item.titleOnly,
+                accessibility: item.accessibility, sourceState: item.sourceState,
+                timedOutWithFallbackFrame: item.fallbackFrame)
+            if got != item.expected { gateFailures.append(item.name) }
+        }
+        check("纯 OCR 规则超时兜底：读取判定 \(AdapterVectors.readGateCases.count) 条（六道门）",
+              gateFailures.isEmpty,
+              gateFailures.isEmpty
+                ? "超时只在纯 OCR 规则拿到 CG frame 时读；锁屏 / 安全输入 / 权限丢失不读；其余五道门各挡一次"
+                : gateFailures.joined(separator: " "))
 
         // 12.10c 分栏边界检测（M2：把写死的 340/60/180 换成从窗口图像现场量）
         var paneFailures: [String] = []
@@ -1444,8 +1512,10 @@ enum SelfCheck {
         let pool = [tooltip, imageViewer, panel, offscreen, otherApp, mainWindow]
         var pickFailures: [String] = []
         func expectPick(_ name: String, _ candidates: [Candidate], _ bundle: String?,
-                        _ expected: CGWindowID?, preferredFrame: CGRect? = nil) {
-            let got = CaptureController.pickTarget(candidates, bundleID: bundle, preferredFrame: preferredFrame)
+                        _ expected: CGWindowID?, preferredFrame: CGRect? = nil,
+                        minSide: Double = CaptureController.minTargetSide) {
+            let got = CaptureController.pickTarget(candidates, bundleID: bundle,
+                                                   preferredFrame: preferredFrame, minSide: minSide)
             if got?.id != expected { pickFailures.append("\(name)→\(got?.id.description ?? "nil")") }
         }
         expectPick("多窗口取面积最大的主窗口", pool, wechatBundle, 1)
@@ -1459,7 +1529,16 @@ enum SelfCheck {
                    preferredFrame: CGRect(x: 202, y: 199, width: 600, height: 502))
         expectPick("焦点矩形对不上 → 面积最大", pool, wechatBundle, 1,
                    preferredFrame: CGRect(x: 3_000, y: 0, width: 800, height: 800))
-        check("窗口定向截图挑窗（焦点矩形优先 / 面积最大 / 排除浮层与离屏 / 退回整屏）",
+        // 2026-09-14 Telegram 复查 F2：AX 超时兜底从 CG 窗口表挑窗，最小边 400——⌘W 关了主窗之后
+        // 剩下的小面板（300×300）不能被当成聊天窗口 OCR；截图那条路（默认 200）照样认它。
+        let smallPanel = Candidate(id: 7, bundleID: wechatBundle, isOnScreen: true, layer: 0,
+                                   frame: CGRect(x: 300, y: 300, width: 300, height: 300))
+        expectPick("超时兜底最小边 400：小面板不够大 → 不挑", [smallPanel, tooltip], wechatBundle, nil,
+                   minSide: 400)
+        expectPick("截图默认最小边 200：同一个小面板照样认", [smallPanel, tooltip], wechatBundle, 7)
+        expectPick("超时兜底最小边 400：主窗口够大 → 挑主窗口", pool + [smallPanel], wechatBundle, 1,
+                   minSide: 400)
+        check("窗口定向截图挑窗（焦点矩形优先 / 面积最大 / 排除浮层与离屏 / 退回整屏 / 超时兜底最小边）",
               pickFailures.isEmpty,
               pickFailures.isEmpty ? "先按焦点窗口的 AX 矩形认（容差 8 pt），再只认在屏的普通窗口层、边长 ≥ 200 pt、面积最大"
                                    : pickFailures.joined(separator: " "))

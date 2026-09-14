@@ -53,18 +53,23 @@ enum BubbleAttribution {
 
         struct Band {
             var text: String
-            var midX: Double
             var midY: Double
             var isSelf: Bool
         }
-        let rows: [Band] = bands.map { band in
-            let text = band.map(\.text).joined(separator: " ")
+        let rows: [Band] = bands.compactMap { band in
+            let raw = band.map(\.text).joined(separator: " ")
+            // 气泡里带时间 / edited 的（Telegram）：先剥掉，剥空的行（单独一个时间）不算气泡。
+            let text = layout.inlineMetaInBubble ? stripTrailingMeta(raw) : raw
+            guard !text.isEmpty else { return nil }
             let minX = band.map { Double($0.box.minX) }.min() ?? 0
             let maxX = band.map { Double($0.box.maxX) }.max() ?? 0
             let midY = band.map { Double($0.box.midY) }.reduce(0, +) / Double(band.count)
             let midX = (minX + maxX) / 2
-            return Band(text: text, midX: midX, midY: midY,
-                        isSelf: midX > layout.selfSideThreshold)
+            // 气泡里带元信息时按左缘判：右下角的时间会把行带中点拉到右边。
+            let isSelf = layout.inlineMetaInBubble
+                ? minX > layout.leftEdgeSelfThreshold
+                : midX > layout.selfSideThreshold
+            return Band(text: text, midY: midY, isSelf: isSelf)
         }
 
         var out: [ChatBubble] = []
@@ -73,11 +78,13 @@ enum BubbleAttribution {
         while index < rows.count {
             let row = rows[index]
             // 群聊：够短 + 与下一行紧贴 + 同侧 → 这是下一条气泡的昵称，不入库成正文。
-            if group, !row.isSelf, row.text.count <= maxNicknameCharacters,
-               index + 1 < rows.count {
+            // Telegram 的昵称行右边还挂着「admin」这类角色标签（同一行），先剥掉再量长度。
+            if group, !row.isSelf, index + 1 < rows.count,
+               case let nickname = (layout.inlineMetaInBubble ? stripRoleTag(row.text) : row.text),
+               nickname.count <= maxNicknameCharacters {
                 let next = rows[index + 1]
                 if !next.isSelf, row.midY - next.midY <= gap, row.midY > next.midY {
-                    currentNickname = row.text.trimmingCharacters(in: .whitespaces)
+                    currentNickname = nickname.trimmingCharacters(in: .whitespaces)
                     index += 1
                     continue
                 }
@@ -101,6 +108,47 @@ enum BubbleAttribution {
     static func text(_ bubbles: [ChatBubble]) -> String {
         bubbles.map(\.line).joined(separator: "\n")
     }
+
+    // MARK: - 气泡内元信息（Telegram，`ChatLayout.inlineMetaInBubble`）
+
+    /// 行尾的「edited」标记。
+    static let trailingMetaTokens: Set<String> = ["edited", "已编辑"]
+    /// 昵称行尾的角色标签（Telegram 群聊气泡内首行：「发送者名 …… admin」）。
+    static let roleTags: Set<String> = ["admin", "owner", "creator", "管理员", "群主", "创建者"]
+
+    /// 形如 `14:24` / `9:05` 的时间。Telegram 的语音条也显示成 `0:07`，与它同形，所以语音在这条规则下
+    /// 认不成 `[语音]`（写在规则的 notes 里）。
+    static func isClockToken(_ token: String) -> Bool {
+        let parts = token.split(separator: ":", omittingEmptySubsequences: false)
+        guard parts.count == 2, (1...2).contains(parts[0].count), parts[1].count == 2 else { return false }
+        return parts.allSatisfy { $0.allSatisfy(\.isNumber) }
+    }
+
+    /// 从行尾往前弹掉满足 `drop` 的词（按空格分词）。两个剥离函数共用这一个循环。
+    static func droppingTrailingTokens(_ text: String, while drop: (String) -> Bool) -> String {
+        var tokens = text.split(separator: " ")
+        while let last = tokens.last, drop(String(last)) { tokens.removeLast() }
+        return tokens.joined(separator: " ")
+    }
+
+    /// 剥掉行尾的时间与「edited」（可能连着几个：`… edited 14:52`）。整行只剩这些时返回空串。
+    /// 代价：正文本身以「14:30」这类词结尾时会被剥掉一个词，规则 notes 里写明。
+    static func stripTrailingMeta(_ text: String) -> String {
+        droppingTrailingTokens(text) { token in
+            let lowered = token.lowercased()
+            return isClockToken(lowered) || trailingMetaTokens.contains(lowered)
+        }
+    }
+
+    /// 剥掉昵称行尾的角色标签。中文标签可能紧贴名字没有空格（`张三管理员`），按后缀再剥一次，
+    /// 但至少给名字留一个字。
+    static func stripRoleTag(_ text: String) -> String {
+        var joined = droppingTrailingTokens(text) { roleTags.contains($0.lowercased()) }
+        if let tag = roleTags.first(where: { joined.hasSuffix($0) && joined.count > $0.count }) {
+            joined.removeLast(tag.count)
+        }
+        return joined.trimmingCharacters(in: .whitespaces)
+    }
 }
 
 // MARK: - 合成布局（测试与自检的输入）
@@ -119,10 +167,14 @@ struct BubbleLayoutFixture: Codable, Sendable {
     }
     var name: String
     var group: Bool
+    /// 气泡里带时间 / 标签（Telegram）：用 `ChatLayout(inlineMetaInBubble: true)` 跑。不写 = 微信那套。
+    var inlineMeta: Bool?
     var regionHeightPoints: Double
     var lines: [Line]
     /// 期望的归属结果，每条 `发送者：正文`。
     var expected: [String]
+
+    var layout: ChatLayout { ChatLayout(inlineMetaInBubble: inlineMeta ?? false) }
 
     var items: [ReadingOrder.Item] {
         lines.map {
@@ -202,7 +254,23 @@ enum ChatTitle {
         let line = lines.first { memberCount(in: $0) != nil } ?? lines[0]
         let count = memberCount(in: line)
         guard let display = cleaned(line, droppingMemberCount: count != nil) else { return nil }
-        return Resolved(display: display, isGroup: count != nil)
+        // Telegram 的群信号在**第二行**（「5,107 members, 338 online」），会话名本身没有人数后缀。
+        let statusSaysGroup = lines.dropFirst().contains(where: isGroupStatusLine)
+        return Resolved(display: display, isGroup: count != nil || statusSaysGroup)
+    }
+
+    /// Telegram 会话头第二行的群信号：数字（可带千分位）后面紧跟「members / 位成员」。
+    ///
+    /// 频道（`subscribers` / `订阅者`）、单聊（`online` / `last seen …`）、机器人（`bot`）**不算群**：
+    /// 频道没有逐条发送者名，按群处理只会把短消息误认成昵称。`member` 单数也认（「1 member」）。
+    static let groupStatusKeywords = ["member", "位成员", "名成员", "个成员"]
+
+    static func isGroupStatusLine(_ line: String) -> Bool {
+        let text = line.trimmingCharacters(in: .whitespaces).lowercased()
+        let rest = text.drop { $0.isNumber || $0 == "," }
+        guard text[..<rest.startIndex].contains(where: \.isNumber) else { return false }
+        let keywordPart = rest.trimmingCharacters(in: .whitespaces)
+        return groupStatusKeywords.contains { keywordPart.hasPrefix($0) }
     }
 
     /// 一个标量能不能当会话名的开头 / 结尾。

@@ -10,6 +10,7 @@ import Foundation
 /// | Claude 桌面版（Electron） | **0 字符 / 74 条观察** | 先设 `AXManualAccessibility` 再读 AXWebArea；读不到就视口 OCR |
 /// | 飞书（Electron） | 12/17 条"有正文"，但合计只有 **156 字符** | 消息列表按 AXList/AXRow 读；读不到就对消息面板 OCR |
 /// | 微信 | 0 字符、6 条里 2 条超时 | AX 直接放弃，聊天面板 + 顶部会话名都走视口 OCR |
+/// | Telegram（原生） | 窗口 138–207 个子节点整体拷贝失败，按下标只拿回滚动条与按钮，0 文本节点（2026-09-14） | 同微信走视口 OCR；分栏边界从两根 AXScrollBar 的 frame 算 |
 ///
 /// 兜底规则 `generic` 就是 M0 那套全窗口 BFS（四个文本角色、1500 节点 / 12 层），
 /// 差别只有一处：**加了视口裁剪**（计划 3.3「只入库视口内实际显示的内容」）。
@@ -359,6 +360,76 @@ enum AdapterRegistry {
                                     default: wechatComposerDefault, maximum: 500)),
         capturesWindow: true)
 
+    // MARK: - Telegram（原生，AX 对内容是死的）
+
+    /// Telegram for macOS 会话列表宽（点）。默认 300（2026-09-14 实测侧栏滚动条右缘 301）。
+    /// **与微信不同，这只是最后的兜底**：正常路径是从两根 AXScrollBar 的 frame 现场算
+    /// （`PaneSource.axScrollBars`），字号、拖栏、置顶条、单栏都跟着变。
+    /// `defaults write com.brosis.app adapter.telegram.sidebarWidth -float 340`
+    static let telegramSidebarKey = "adapter.telegram.sidebarWidth"
+    static let telegramSidebarDefault: Double = 300
+    /// 顶部标题条高（点）：窗口工具条 66，会话头（会话名 + 状态行）就在里面。
+    static let telegramTitleBarKey = "adapter.telegram.titleBarHeight"
+    static let telegramTitleBarDefault: Double = 66
+    /// 底部输入框高（点）。单行 45，多行会长高——兜底值不跟，滚动条那条路跟。
+    static let telegramComposerKey = "adapter.telegram.composerHeight"
+    static let telegramComposerDefault: Double = 45
+
+    /// Telegram for macOS（`ru.keepcoder.Telegram`，原生 TGUIKit）：AX 树对内容是**死的**
+    /// （`tools/bench/results/telegram_capture_review_2026-09-14.md`）：窗口报 138–207 个子节点，
+    /// 整体拷贝报 `kAXErrorFailure`，按下标只拿回两根 AXScrollBar、工具条、三个窗口按钮，0 个文本节点；
+    /// `AXManualAccessibility` 不支持、`AXEnhancedUserInterface` 无效、命中测试 notImplemented，
+    /// 七个取样点全 0——不是读早了。所以与微信同型：聊天面板 + 顶栏会话名两块视口 OCR。
+    ///
+    /// 比微信多做的三件事：① 分栏边界先从那两根滚动条的 frame 算（唯一活着的元素，恰好给出侧栏右边界、
+    /// 消息区顶、输入框顶）；② 气泡里带时间与「admin」标签，按行带左缘判左右、入库前剥掉行尾元信息；
+    /// ③ 窗口标题恒为「Telegram @ 账号名」，AX 观察用上一次认出的会话名当标题。
+    /// Telegram Desktop（Qt，`org.telegram.desktop`）没探过，布局也不同，**不列进来**。
+    /// 三个点数只算一次，两块区域与兜底共用；来源标 `.axScrollBars`（见 `PaneFallback.Source`）。
+    static let telegramPanes = PaneFallback(
+        sidebar: resolvePoints(telegramSidebarKey, default: telegramSidebarDefault, maximum: 900),
+        titleBar: resolvePoints(telegramTitleBarKey, default: telegramTitleBarDefault, maximum: 200),
+        composer: resolvePoints(telegramComposerKey, default: telegramComposerDefault, maximum: 500),
+        source: .axScrollBars)
+
+    static let telegram = AdapterRule(
+        id: "telegram",
+        name: "Telegram",
+        bundleIDs: ["ru.keepcoder.Telegram"],
+        electron: false,
+        regions: [
+            RegionRule(name: "chat_panel", kind: .messageList,
+                       locator: .insetRect(WindowInset(
+                           left: telegramPanes.sidebar, top: telegramPanes.titleBar,
+                           bottom: telegramPanes.composer, minWidth: 240, minHeight: 120,
+                           fallback: RelativeRect(x: 0.30, y: 0.08, width: 0.70, height: 0.84))),
+                       read: .ocr, ocrFallback: false, required: true, clipToViewport: true,
+                       pane: .chatPanel),
+            RegionRule(name: "conversation_title", kind: .title,
+                       locator: .insetRect(WindowInset(
+                           left: telegramPanes.sidebar,
+                           right: 120,     // 右边让开搜索与更多两个按钮
+                           maxHeight: telegramPanes.titleBar, minWidth: 240, minHeight: 24,
+                           fallback: RelativeRect(x: 0.30, y: 0.0, width: 0.58, height: 0.08))),
+                       read: .ocr, ocrFallback: false, required: false, clipToViewport: true,
+                       maxChars: 256, pane: .conversationTitle),
+        ],
+        chatLayout: ChatLayout(inlineMetaInBubble: true),
+        limits: AX.BFSLimits(maxNodes: 300, maxDepth: 6),
+        notes: "原生应用但 AX 树对内容是死的（窗口子节点整体拷贝失败，按下标只拿回滚动条与按钮），"
+             + "所以 AX 一路都不走，聊天面板与顶栏会话名都走视口 OCR；截图走窗口定向。"
+             + "分栏边界从两根 AXScrollBar 的 frame 现场算（字号、拖栏、置顶条、单栏都跟着变），"
+             + "算不出才用点数兜底（侧栏 300 / 标题条 66 / 输入框 45，adapter.telegram.* 可校准），"
+             + "兜底时置顶消息条会进正文。只记屏幕上显示的文字：不追溯未打开的会话与未滚动到的历史；"
+             + "气泡模式左 = 对方、右 = 自己（按行带左缘判），经典模式全部靠左、归属不可靠；"
+             + "群聊取气泡内首行的发送者名（去掉 admin 这类标签），是不是群聊看会话头第二行「N members」，"
+             + "频道不当群聊；入库前剥掉行尾的时间与 edited，正文本身以「14:30」这类词结尾时会连带剥掉；"
+             + "语音只显示成时长「0:07」，认不成 [语音]；回复引用会和正文混在一起；"
+             + "AX 读焦点窗口超时时用 CG 窗口 frame 照常 OCR（source_state 照记 timeout）。"
+             + "Telegram Desktop（Qt）没有适配。",
+        paneFallback: telegramPanes,
+        capturesWindow: true)
+
     // MARK: - 兜底
 
     /// 没有专门规则的应用：M0 那套全窗口 BFS，加上视口裁剪。
@@ -412,7 +483,7 @@ enum AdapterRegistry {
     /// **规则表在这里按开关定形**：`enhancedRegions` 只是声明，套用只有这一处。
     static let all: [AdapterRule] = {
         let enhanced = AX.enhancedUserInterfaceEnabled()
-        return [safari, chrome, claudeDesktop, feishu, feishuMeeting, wechat]
+        return [safari, chrome, claudeDesktop, feishu, feishuMeeting, wechat, telegram]
             .map { $0.resolvingEnhanced(enhanced) }
     }()
 

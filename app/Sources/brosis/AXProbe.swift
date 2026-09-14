@@ -108,7 +108,38 @@ enum AXProbe {
         //   b. AXWebArea 在，但底下没有文本节点 ⇒ 打开了，只是内容没暴露。
         // 这两种要做的事不一样，所以把实际的角色分布打出来。
         dumpStructure(pid: pid)
+        if detection == .notChromium { dumpNativeChildren(pid: pid, rule: rule) }
         depthSweep(pid: pid, bundleID: bundleID, rule: rule)
+    }
+
+    /// 原生应用：窗口 `AXChildren` 到底是"空"还是"拷贝失败"，按下标能拷回来什么，滚动条推出的边界。
+    ///
+    /// 2026-09-14 Telegram 复查：`dumpStructure` 只打出"1 节点"，分不出两种处境——窗口计数 138 个子节点
+    /// 而整体拷贝报 `kAXErrorFailure`，按下标只拿回滚动条和按钮。这一段把这三个数直接打出来。
+    private static func dumpNativeChildren(pid: pid_t, rule: AdapterRule) {
+        guard let window = AX.focusedWindow(pid: pid) else { return }
+        var value: CFTypeRef?
+        let wholeError = AXUIElementCopyAttributeValue(window, kAXChildrenAttribute as CFString, &value)
+        let wholeCount = (value as? [AXUIElement])?.count ?? 0
+        var count: CFIndex = -1
+        let countError = AXUIElementGetAttributeValueCount(window, kAXChildrenAttribute as CFString, &count)
+        print("- 窗口 AXChildren：整体拷贝 \(describe(wholeError))（\(wholeCount) 个）"
+              + "；GetAttributeValueCount \(describe(countError)) → \(count)")
+        let probe = AX.ScrollBarProbe.scan(window: window)
+        let frame = AX.frame(window)
+        let bars = probe.frames.map { rect in
+            rectLabel(frame.map { rect.offsetBy(dx: -$0.minX, dy: -$0.minY) } ?? rect)
+        }
+        let relative = bars.isEmpty ? "" : "；相对窗口 " + bars.joined(separator: " ")
+        let head = "- 按下标找滚动条（先头 \(AX.ScrollBarProbe.headCount) 个再从尾往前，"
+                 + "封顶 \(Int(AX.ScrollBarProbe.budgetSeconds * 1000)) ms）："
+        guard let frame, let paneFallback = rule.paneFallback else {
+            print(head + probe.label + relative + "；规则没有 paneFallback（或窗口无 frame），不算边界")
+            return
+        }
+        // 与采集端同一条流水线（探针结果 → 边界 → 日志）。
+        let (_, trace) = PaneLayout.fromScrollBarProbe(probe, windowFrame: frame, fallback: paneFallback)
+        print(head + trace + relative + "；规则来源 \(paneFallback.source.rawValue)")
     }
 
     /// 深度 / 节点上限扫描。
@@ -392,10 +423,7 @@ enum AXProbe {
         return flat.count > max ? String(flat.prefix(max)) + "…" : flat
     }
 
-    private static func rectLabel(_ rect: CGRect?) -> String {
-        guard let rect else { return "?" }
-        return "[\(Int(rect.minX)),\(Int(rect.minY)) \(Int(rect.width))×\(Int(rect.height))]"
-    }
+    private static func rectLabel(_ rect: CGRect?) -> String { rect?.axLabel ?? "?" }
 
     private struct Sample {
         var chars = 0

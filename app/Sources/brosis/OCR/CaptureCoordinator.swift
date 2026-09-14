@@ -62,6 +62,9 @@ final class CaptureCoordinator: @unchecked Sendable {
         var regionTexts: [String: String]
         var ocrRequests: [OCRRequest]
         var chatLayout: ChatLayout?
+        /// 扫描那一刻从 AX 滚动条算出的分栏边界（`AdapterRule.PaneSource.axScrollBars`）。
+        /// 只能在主线程的 AX 扫描里算：截图这一侧跑在 utility 队列，不发 AX 消息。
+        var paneLayout: PaneLayout? = nil
         var completeness: Completeness
         /// 这条观察是用什么方法采的（`capture_audit.method` 照抄它，不再靠 completeness 猜）。
         var captureMethod: CaptureMethod = .ax
@@ -154,6 +157,12 @@ final class CaptureCoordinator: @unchecked Sendable {
     /// 上一次这个应用各区域读到的文本（新鲜度判定）。
     func previousRegionTexts(bundleID: String?) -> [String: String] {
         lock.withLock { lastRegionTexts[bundleID ?? "(unknown)"] ?? [:] }
+    }
+
+    /// 上一次从标题条认出的会话身份。窗口标题恒定的规则（`windowTitleIsConstant`）
+    /// 在 AX 那条路上用它当 `windows.title`，别再把「Telegram @ 账号名」写成一行。
+    func lastConversationTitle(bundleID: String?) -> ChatTitle.Resolved? {
+        lock.withLock { lastConversationTitles[bundleID ?? "(unknown)"] }
     }
 
     /// 有没有"帧变化超阈值但还没被 AX 消费"的帧。**读一次消费一次**：
@@ -292,15 +301,24 @@ final class CaptureCoordinator: @unchecked Sendable {
         let rule = AdapterRegistry.rule(for: pending.bundleID)
         if let windowFrame = pending.windowFrame,
            let paneFallback = rule.paneFallback,
-           pending.ocrRequests.contains(where: { $0.pane != nil }),
-           let windowImage = ViewportOCR.crop(image, axRect: windowFrame,
-                                              displayBounds: displayBounds)?.image {
-            let layout = PaneDetector.detect(
-                window: windowImage, windowSize: windowFrame.size,
-                fallback: paneFallback.layout(windowHeight: Double(windowFrame.height)))
-            paneLayout = layout
-            paneRects[.chatPanel] = layout.rect(for: .chatPanel, in: windowFrame)
-            paneRects[.conversationTitle] = layout.rect(for: .conversationTitle, in: windowFrame)
+           pending.ocrRequests.needsPaneLayout {
+            let fallback = paneFallback.layout(windowHeight: Double(windowFrame.height))
+            switch paneFallback.source {
+            case .axScrollBars:
+                // 边界在主线程的 AX 扫描里已经算好（Telegram）。这里**不**跑图像检测：
+                // 图案壁纸会骗过"贯穿性"判据，单栏窗口更会被它切掉一半。没算出来就整组兜底。
+                paneLayout = pending.paneLayout ?? fallback
+            case .imageDetector:
+                if let windowImage = ViewportOCR.crop(image, axRect: windowFrame,
+                                                      displayBounds: displayBounds)?.image {
+                    paneLayout = PaneDetector.detect(window: windowImage, windowSize: windowFrame.size,
+                                                     fallback: fallback)
+                }
+            }
+            if let layout = paneLayout {
+                paneRects[.chatPanel] = layout.rect(for: .chatPanel, in: windowFrame)
+                paneRects[.conversationTitle] = layout.rect(for: .conversationTitle, in: windowFrame)
+            }
         }
 
         /// 这块区域最终用哪个矩形：量出来的优先，其次规则给的。

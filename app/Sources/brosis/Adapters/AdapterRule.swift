@@ -268,6 +268,20 @@ struct PaneFallback: Sendable, Equatable {
     var titleBar: Double
     var composer: Double
 
+    /// 三条边界平时从哪儿来；这三个点数只是量不到时的兜底。
+    enum Source: String, Sendable {
+        /// 从这一帧的窗口图像现场量（`PaneDetector`，微信）。
+        case imageDetector = "image_detector"
+        /// 从窗口的两根 `AXScrollBar` 的 frame 算（Telegram，2026-09-14 复查）：
+        /// 它的 AX 树对内容是死的，唯一活着的元素恰好是会话列表与消息区的滚动条，
+        /// 侧栏右边界、消息区顶、输入框顶就是它们的 frame，字号 / 拖栏 / 置顶条都跟着变。
+        /// 这种规则**不走** `PaneDetector`：图案壁纸会骗过"贯穿性"判据，
+        /// 而且检测器要求侧栏 > 0，单栏窗口必退回兜底再切掉一半。
+        case axScrollBars = "ax_scroll_bars"
+    }
+    /// 挂在兜底上而不是规则上：有来源就一定有兜底，两个消费者不必各查一遍。
+    var source: Source = .imageDetector
+
     func layout(windowHeight: Double) -> PaneLayout {
         PaneLayout(sidebarRight: sidebar, titleBottom: titleBar,
                    composerTop: windowHeight - composer, source: .defaults)
@@ -286,6 +300,15 @@ struct ChatLayout: Sendable {
     var selfLabel: String = "我"
     /// 读不到昵称时对方的显示名。
     var peerLabel: String = "对方"
+    /// 气泡**里面**带元信息（Telegram）：右下角时间「14:24」、右上角「admin」标签、「edited」。
+    /// OCR 聚行时它们会并进正文那一行，于是行带的中点右移，一条短消息会被判成"自己发的"。
+    /// 开着时：① 左右按行带的**左缘**判（`leftEdgeSelfThreshold`），不按中点；
+    /// ② 入库前剥掉行尾的时间 / edited，昵称候选行再剥掉角色标签（见 `BubbleAttribution.stripTrailingMeta`）。
+    /// 微信关着：它的时间是单独居中的一行，没有这个问题。
+    var inlineMetaInBubble: Bool = false
+    /// `inlineMetaInBubble` 时，行带左缘在区域宽度的这个比例右侧才算"自己发的"。
+    /// Telegram 收到的气泡左缘在 0.04–0.10（头像列之后），自己发的靠右对齐、左缘 ≥ 0.3。
+    var leftEdgeSelfThreshold: Double = 0.30
 }
 
 // MARK: - 规则

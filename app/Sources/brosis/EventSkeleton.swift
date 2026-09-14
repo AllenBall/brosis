@@ -410,6 +410,54 @@ final class EventSkeleton {
         return .unavailable
     }
 
+    // MARK: - 分栏边界从 AX 滚动条算（Telegram）
+
+    /// 每个进程上一次找到的 AXScrollBar 元素：下次先只重读它们的 frame，读不到再按下标重找。
+    private var scrollBarElements: [pid_t: [AXUIElement]] = [:]
+    /// 上一次算出的边界，按进程存，带当时的窗口 frame 与时刻。
+    private var scrollBarLayouts: [pid_t: (frame: CGRect, layout: PaneLayout?, at: TimeInterval)] = [:]
+    /// 窗口 frame 没变时，这么久之内不再发 AX 消息重算。OCR 本身每区域 5 s 限流，边界比它更新没有意义；
+    /// 而 Telegram 两块区域都声明 OCR、每次扫描 `ocrRequests` 都非空，不缓存就是每条观察 6 次以上跨进程调用。
+    static let scrollBarLayoutMaxAge: TimeInterval = OCRTriggerGate.minIntervalDefault
+
+    private func scrollBarPaneLayout(rule: AdapterRule, bundleID: String?, pid: pid_t,
+                                     window: AXUIElement, frame: CGRect) -> PaneLayout? {
+        guard let paneFallback = rule.paneFallback, paneFallback.source == .axScrollBars else { return nil }
+        let now = Date().timeIntervalSince1970
+        if let cached = scrollBarLayouts[pid], cached.frame == frame,
+           now - cached.at < Self.scrollBarLayoutMaxAge {
+            return cached.layout
+        }
+        let probe = AX.ScrollBarProbe.frames(window: window, windowFrame: frame,
+                                             cached: scrollBarElements[pid] ?? [])
+        if scrollBarElements.count > 64 { scrollBarElements.removeAll() }
+        // 扫到的比缓存少（超预算、或这次没找全）时留着旧元素：下次重读 frame 就够，别从零扫。
+        if probe.bars.count >= (scrollBarElements[pid]?.count ?? 0) { scrollBarElements[pid] = probe.elements }
+        let (layout, trace) = PaneLayout.fromScrollBarProbe(probe, windowFrame: frame, fallback: paneFallback)
+        scrollBarLayouts[pid] = (frame, layout, now)
+        let text = "滚动条定边界：\(bundleID ?? "?") \(trace)"
+        BrosisLog.capture.info("\(text, privacy: .public)")
+        return layout
+    }
+
+    /// 这一轮要不要读正文（纯函数，自检覆盖）。
+    ///
+    /// 前五道门与 M1 一样：触发原因要读、策略档允许、不是私密浏览、不是只记标题的窗口、有辅助功能权限。
+    /// 第六道看 `sourceState`：正常 / 空闲读；**超时只在"纯 OCR 规则拿到了 CG 窗口 frame"时读**
+    /// （2026-09-14 Telegram 复查 F2）——它们不读 AX，要的只是矩形；读 AX 的规则超时就是读不到。
+    /// 锁屏 / 安全输入 / 权限丢失一律不读。
+    nonisolated static func shouldReadText(collectText: Bool, readsContent: Bool,
+                                           privateBrowsing: Bool, titleOnly: Bool,
+                                           accessibility: Bool, sourceState: SourceState,
+                                           timedOutWithFallbackFrame: Bool) -> Bool {
+        guard collectText, readsContent, !privateBrowsing, !titleOnly, accessibility else { return false }
+        switch sourceState {
+        case .ok, .userIdle: return true
+        case .timeout: return timedOutWithFallbackFrame
+        case .locked, .secureInput, .permissionLost: return false
+        }
+    }
+
     /// 记下这次 AX 读到没读到东西；读到空树且这个应用是 Chromium 系时排一次重扫。
     ///
     /// 重扫**会写一条新的观察**，这是有意的：它是一次真正的新采样，
@@ -491,6 +539,44 @@ final class EventSkeleton {
             if info.timedOut && sourceState == .ok { sourceState = .timeout }
         }
 
+        // 传 bundleURL：采集端是**唯一**手头有它的调用方，所以由它把判定算出来并填进缓存，
+        // 之后策略列表、OCR 协调器只查缓存就能拿到同一个答案。
+        let rule = AdapterRegistry.rule(for: app.bundleIdentifier, bundleURL: app.bundleURL)
+
+        // —— 第二道闸：正文读不读 ——（放在这里，超时兜底要先过同一道门）
+        let privateBrowsing = PrivateBrowsing.isPrivate(bundleID: app.bundleIdentifier,
+                                                        bundleURL: app.bundleURL,
+                                                        windowTitle: info.title)
+        // 规则声明「这类窗口只记标题」（飞书的 ModalWebViewWidget 弹窗）：不读正文、不 OCR。
+        let titleOnly = rule.skipsBody(windowTitle: info.title)
+        func wouldReadText(withFallbackFrame: Bool) -> Bool {
+            Self.shouldReadText(collectText: collectText, readsContent: gate.readsContent,
+                                privateBrowsing: privateBrowsing, titleOnly: titleOnly,
+                                accessibility: permissions.accessibility, sourceState: sourceState,
+                                timedOutWithFallbackFrame: withFallbackFrame)
+        }
+
+        // —— 纯 OCR 规则的超时兜底（2026-09-14 Telegram 复查 F2）——
+        //
+        // `focusedWindowInfo` 读不到焦点窗口（0.5 s 超时，或用户刚 ⌘W 关了窗）时，下面的扫描不跑，
+        // 而 OCR 请求正是扫描里生成的：Telegram 43% 的观察、微信 M0 里 2/6 的观察就这样一个字都没记。
+        // 微信 / Telegram 这类规则**根本不读 AX**，它们要的只是窗口矩形——从 CG 窗口表拿一个
+        // （不要权限），用一个只有 frame 的合成窗口节点跑同一条扫描路。`sourceState` 照记超时（诚实），
+        // 正文来源由 `capture_method = ocr` 说明。看的是 `info.timedOut` 而不是 sourceState：
+        // 用户空闲时 sourceState 停在 `.userIdle`，超时不会改它。挑窗先按上一次扫描的焦点窗口矩形认。
+        var fallbackFrame: CGRect?
+        if windowElement == nil, info.timedOut, !rule.readsAX, rule.declaresOCR,
+           wouldReadText(withFallbackFrame: true),
+           let frame = CaptureController.onScreenWindowFrame(
+               pid: pid, bundleID: app.bundleIdentifier,
+               preferredFrame: coordinator.windowFrame(bundleID: app.bundleIdentifier)) {
+            fallbackFrame = frame
+            info.frame = frame
+            let text = "AX 超时，用 CG 窗口 frame 排 OCR：\(app.bundleIdentifier ?? "?") frame=\(frame.axLabel)"
+            BrosisLog.capture.info("\(text, privacy: .public)")
+        }
+        let shouldReadText = wouldReadText(withFallbackFrame: fallbackFrame != nil)
+
         let displayID = DisplayResolver.displayID(forWindowFrame: info.frame)
 
         // 同一 (app, 窗口标题, url, trigger) 在同一秒内重复时只写一条。
@@ -498,32 +584,22 @@ final class EventSkeleton {
         if fingerprint == lastFingerprint { return }
         lastFingerprint = fingerprint
 
-        // —— 第二道闸：正文读不读 ——
-        let privateBrowsing = PrivateBrowsing.isPrivate(bundleID: app.bundleIdentifier,
-                                                        bundleURL: app.bundleURL,
-                                                        windowTitle: info.title)
-        // 传 bundleURL：采集端是**唯一**手头有它的调用方，所以由它把判定算出来并填进缓存，
-        // 之后策略列表、OCR 协调器只查缓存就能拿到同一个答案。
-        let rule = AdapterRegistry.rule(for: app.bundleIdentifier, bundleURL: app.bundleURL)
-        // 规则声明「这类窗口只记标题」（飞书的 ModalWebViewWidget 弹窗）：不读正文、不 OCR。
-        let titleOnly = rule.skipsBody(windowTitle: info.title)
-        let shouldReadText = collectText
-            && gate.readsContent
-            && !privateBrowsing
-            && !titleOnly
-            && permissions.accessibility
-            && (sourceState == .ok || sourceState == .userIdle)
-
         var fragments: [TextFragment] = []
         var completeness: Completeness
         var axChars = 0
         var captureMethod: CaptureMethod = .ax
         var visibleRange: String?
         var adapterScan: AdapterScan?
+        /// 从 AX 滚动条算出的分栏边界（Telegram）。截图那一侧只能拿现成的，不发 AX 消息。
+        var paneLayout: PaneLayout?
         /// 适配规则从 AX 读到的会话名（飞书 `.chatWindow_chatName`）。有它就盖过窗口标题：
         /// 飞书的窗口标题恒为「飞书」（2026-09-11 复查 F2），会话身份只在这儿。
         var axConversationTitle: String?
-        if shouldReadText, let windowElement {
+        // 扫描的窗口节点：真的 AX 窗口，或超时兜底时只有 frame 的合成窗口
+        //（`.insetRect` 区域只用 windowFrame 算矩形，不碰节点）。
+        let scanWindow: (any AXNodeSource)? = windowElement.map { LiveAXNode($0) as any AXNodeSource }
+            ?? fallbackFrame.map { SyntheticAXNode(role: "AXWindow", frame: $0) as any AXNodeSource }
+        if shouldReadText, let scanWindow {
             // 任何一次真正的遍历都重置节流时钟。
             lastElementScanAt = Date().timeIntervalSince1970
             // —— M1 R2 / T8：正文读取走适配规则，不再是"全窗口四个角色 BFS" ——
@@ -531,7 +607,7 @@ final class EventSkeleton {
             // 规则本身、上一次同区域读到的文本（AX 值有没有变）、帧门控与覆盖检查的结论。
             let scan = AdapterEngine.scan(
                 rule: rule,
-                window: LiveAXNode(windowElement),
+                window: scanWindow,
                 windowFrame: info.frame,
                 previousRegionTexts: coordinator.previousRegionTexts(bundleID: app.bundleIdentifier),
                 frameChanged: coordinator.consumeFrameChanged(bundleID: app.bundleIdentifier),
@@ -567,6 +643,11 @@ final class EventSkeleton {
             if scan.truncated || scan.regions.contains(where: { $0.truncated }) {
                 noteAdapterLimitHit(bundleID: app.bundleIdentifier, scan: scan)
             }
+            // 分栏边界从 AX 滚动条算（Telegram）：只在真有 AX 窗口时，合成窗口没有子节点。
+            if let windowElement, let frame = info.frame, scan.needsPaneLayout {
+                paneLayout = scrollBarPaneLayout(rule: rule, bundleID: app.bundleIdentifier,
+                                                 pid: pid, window: windowElement, frame: frame)
+            }
         } else {
             completeness = Self.completenessWithoutScan(
                 triedToRead: shouldReadText, collectText: collectText,
@@ -586,8 +667,14 @@ final class EventSkeleton {
         var storedURL: URLRef?
         var storedPath: String?
         if !privateBrowsing {
-            // 会话名优先于窗口标题（与 OCR 那条路的 `resolvedTitle?.display ?? windowTitle` 同一口径）。
-            storedTitle = redactedForStorage(axConversationTitle ?? info.title)
+            // 会话名优先于窗口标题（与 OCR 那条路的 `resolvedTitle?.display ?? windowTitle` 同一口径）：
+            // 先用这次 AX 读到的（飞书），再用协调者上一次从标题条 OCR 认出的（微信 / Telegram——它们的
+            // 窗口标题恒为「微信」「Telegram @ 账号名」，不该一遍遍写成 `windows.title`），都没有才退回窗口标题。
+            // 缓存只由 `.title` 区域的 OCR 写入，没有那种区域的规则在这里拿到的永远是 nil。
+            storedTitle = redactedForStorage(
+                axConversationTitle
+                    ?? coordinator.lastConversationTitle(bundleID: app.bundleIdentifier)?.display
+                    ?? info.title)
             storedURL = Self.urlRef(info.url,
                                     storedLocator: redactedForStorage(info.url))
             storedPath = redactedForStorage(Self.filePath(info.document))
@@ -631,6 +718,7 @@ final class EventSkeleton {
         if rule.declaresOCR {
             let text = "扫描：\(app.bundleIdentifier ?? "?") 规则 \(rule.id)，"
                      + "读正文=\(shouldReadText) 拿到窗口=\(windowElement != nil) "
+                     + "兜底frame=\(fallbackFrame != nil) "
                      + "AX字符=\(axChars) OCR请求=\(adapterScan?.ocrRequests.count ?? -1) "
                      + "触发=\(trigger.rawValue)"
             BrosisLog.capture.info("\(text, privacy: .public)")
@@ -653,6 +741,7 @@ final class EventSkeleton {
                 regionTexts: adapterScan.regionTexts,
                 ocrRequests: adapterScan.ocrRequests,
                 chatLayout: rule.chatLayout,
+                paneLayout: paneLayout,
                 completeness: completeness,
                 captureMethod: captureMethod,
                 at: Date().timeIntervalSince1970))

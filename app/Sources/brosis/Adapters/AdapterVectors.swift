@@ -234,6 +234,20 @@ enum AdapterVectors {
                         kids: [SyntheticAXNode(role: "AXSplitGroup", frame: window)])
     }
 
+    /// Telegram（2026-09-14 复查）：窗口能拷回来的只有两根滚动条、工具条与窗口按钮，**没有任何文本节点**。
+    /// 规则声明聊天面板与会话名都走 OCR。滚动条 frame 按真机比例放进合成窗口（1200×800）。
+    static func telegramTree() -> SyntheticAXNode {
+        SyntheticAXNode(role: "AXWindow", title: "Telegram @ 账号", frame: window, kids: [
+            SyntheticAXNode(role: "AXToolbar", frame: CGRect(x: 100, y: 60, width: 1_200, height: 66)),
+            SyntheticAXNode(role: "AXScrollBar",
+                            frame: CGRect(x: 100 + 282, y: 60 + 97, width: 19, height: 640)),
+            SyntheticAXNode(role: "AXScrollBar",
+                            frame: CGRect(x: 100 + 1_181, y: 60 + 101, width: 19, height: 654)),
+            SyntheticAXNode(role: "AXButton", subrole: "AXCloseButton",
+                            frame: CGRect(x: 118, y: 78, width: 16, height: 16)),
+        ])
+    }
+
     // MARK: - 规则引擎用例
 
     // MARK: - Chrome（2026-09-11 复查 F2 / F4 / F7）
@@ -399,6 +413,14 @@ enum AdapterVectors {
         RuleCase(name: "微信：AX 全空 → 聊天面板与会话名都走 OCR",
                  rule: AdapterRegistry.wechat,
                  tree: wechatTree,
+                 expectedFragments: 0,
+                 expectedCompleteness: .unavailable,
+                 mustContain: [],
+                 mustNotContain: [],
+                 expectedOCRRegions: ["chat_panel", "conversation_title"]),
+        RuleCase(name: "Telegram：AX 只有滚动条与按钮、没有文本 → 聊天面板与会话名都走 OCR",
+                 rule: AdapterRegistry.telegram,
+                 tree: telegramTree,
                  expectedFragments: 0,
                  expectedCompleteness: .unavailable,
                  mustContain: [],
@@ -599,6 +621,44 @@ enum AdapterVectors {
           "李四：确认了，飞书和微信都在里面",
           "我：我这边同步一下"
         ]
+      },
+      {
+        "name": "Telegram 群聊：昵称行带 admin 标签、正文行尾带时间，都在气泡里；按左缘判侧",
+        "group": true,
+        "inlineMeta": true,
+        "regionHeightPoints": 722,
+        "lines": [
+          { "text": "张三", "x": 0.16, "y": 0.900, "w": 0.10, "h": 0.030 },
+          { "text": "admin", "x": 0.80, "y": 0.900, "w": 0.08, "h": 0.030 },
+          { "text": "请选择正确的答案", "x": 0.16, "y": 0.860, "w": 0.30, "h": 0.035 },
+          { "text": "14:24", "x": 0.82, "y": 0.860, "w": 0.07, "h": 0.030 },
+          { "text": "李四", "x": 0.16, "y": 0.760, "w": 0.10, "h": 0.030 },
+          { "text": "现在要认证了 14:46", "x": 0.16, "y": 0.720, "w": 0.34, "h": 0.035 },
+          { "text": "好的 14:52", "x": 0.70, "y": 0.600, "w": 0.24, "h": 0.035 }
+        ],
+        "expected": [
+          "张三：请选择正确的答案",
+          "李四：现在要认证了",
+          "我：好的"
+        ]
+      },
+      {
+        "name": "Telegram 单聊：左侧短消息带时间不算「我」；单独一行时间不算气泡",
+        "group": false,
+        "inlineMeta": true,
+        "regionHeightPoints": 722,
+        "lines": [
+          { "text": "签到", "x": 0.06, "y": 0.800, "w": 0.06, "h": 0.035 },
+          { "text": "15:56", "x": 0.14, "y": 0.800, "w": 0.07, "h": 0.030 },
+          { "text": "这一条比较长所以时间在下一行", "x": 0.06, "y": 0.660, "w": 0.60, "h": 0.035 },
+          { "text": "15:58", "x": 0.60, "y": 0.620, "w": 0.07, "h": 0.030 },
+          { "text": "收到 edited 16:01", "x": 0.72, "y": 0.500, "w": 0.22, "h": 0.035 }
+        ],
+        "expected": [
+          "对方：签到",
+          "对方：这一条比较长所以时间在下一行",
+          "我：收到"
+        ]
       }
     ]
     """
@@ -715,6 +775,25 @@ enum AdapterVectors {
         ChatTitleCase(name: "反例：空文本",
                       raw: "   \n  ",
                       expected: nil),
+        // —— Telegram（2026-09-14）：群信号在会话头第二行，会话名本身没有人数后缀 ——
+        ChatTitleCase(name: "Telegram 群：第二行「N members, M online」",
+                      raw: "某某官方社区\n5,107 members, 338 online",
+                      expected: ChatTitle.Resolved(display: "某某官方社区", isGroup: true)),
+        ChatTitleCase(name: "Telegram 群：单数「1 member」也算",
+                      raw: "测试群\n1 member",
+                      expected: ChatTitle.Resolved(display: "测试群", isGroup: true)),
+        ChatTitleCase(name: "Telegram 群：中文界面「N 位成员」",
+                      raw: "某某官方社区\n5,107 位成员，338 人在线",
+                      expected: ChatTitle.Resolved(display: "某某官方社区", isGroup: true)),
+        ChatTitleCase(name: "Telegram 频道：「N subscribers」不算群（没有逐条发送者）",
+                      raw: "某某资讯频道\n12,345 subscribers",
+                      expected: ChatTitle.Resolved(display: "某某资讯频道", isGroup: false)),
+        ChatTitleCase(name: "Telegram 单聊：「last seen recently」不算群",
+                      raw: "某某\nlast seen recently",
+                      expected: ChatTitle.Resolved(display: "某某", isGroup: false)),
+        ChatTitleCase(name: "Telegram 群：标题矩形连置顶条一起框进来，display 仍是第一行",
+                      raw: "某某官方社区\n5,107 members, 338 online\nPinned message\n重要提醒：谨防冒充",
+                      expected: ChatTitle.Resolved(display: "某某官方社区", isGroup: true)),
     ]
 
     // MARK: - 水印过滤（Step 3）
@@ -812,5 +891,149 @@ enum AdapterVectors {
             inset: WindowInset(left: 340, top: 60, bottom: 180,
                                fallback: RelativeRect(x: 0.22, y: 0.08, width: 0.78, height: 0.70)),
             expected: CGRect(x: 110, y: 32, width: 390, height: 280)),
+        WindowInsetCase(
+            name: "Telegram 聊天面板兜底：让开侧栏 300 / 标题条 66 / 输入框 45（1010×868 真机窗口）",
+            window: telegramProbeWindow,
+            inset: WindowInset(left: 300, top: 66, bottom: 45, minWidth: 240, minHeight: 120,
+                               fallback: RelativeRect(x: 0.30, y: 0.08, width: 0.70, height: 0.84)),
+            expected: CGRect(x: 2966, y: 359, width: 710, height: 757)),
+        WindowInsetCase(
+            name: "Telegram 会话名兜底：顶部 66 那一条，让开侧栏与右侧两个按钮",
+            window: telegramProbeWindow,
+            inset: WindowInset(left: 300, right: 120, maxHeight: 66, minWidth: 240, minHeight: 24,
+                               fallback: RelativeRect(x: 0.30, y: 0, width: 0.58, height: 0.08)),
+            expected: CGRect(x: 2966, y: 293, width: 590, height: 66)),
+    ]
+
+    // MARK: - Telegram：滚动条定边界、气泡内元信息、超时兜底（2026-09-14）
+
+    /// Telegram 真机窗口（2026-09-14 复查 §2.4）。
+    static let telegramProbeWindow = CGRect(x: 2666, y: 293, width: 1010, height: 868)
+    /// 规则里的点数兜底（侧栏 300 / 标题条 66 / 输入框 45）落到这个窗口上。
+    static let telegramPaneFallback = PaneFallback(sidebar: 300, titleBar: 66, composer: 45)
+        .layout(windowHeight: telegramProbeWindow.height)
+
+    struct ScrollBarLayoutCase: Sendable {
+        var name: String
+        /// 滚动条 frame（AX 坐标，绝对）。
+        var bars: [CGRect]
+        var window: CGRect
+        /// nil = 算不出，协调者退回兜底。
+        var expected: PaneLayout?
+    }
+
+    /// 前三条是真机数字（§2.5）：双栏 1010×868、改矮 984×700、折成单栏 600×834。
+    static let scrollBarLayoutCases: [ScrollBarLayoutCase] = [
+        ScrollBarLayoutCase(
+            name: "真机双栏：侧栏 [282,97 19×714] + 消息区 [992,101 19×722] → 301 / 101 / 823",
+            bars: [CGRect(x: 2948, y: 390, width: 19, height: 714),
+                   CGRect(x: 3658, y: 394, width: 19, height: 722)],
+            window: telegramProbeWindow,
+            expected: PaneLayout(sidebarRight: 301, titleBottom: 101, composerTop: 823, source: .ax)),
+        ScrollBarLayoutCase(
+            name: "真机改矮 984×700：消息区 [966,101 19×554] → composerTop 655",
+            bars: [CGRect(x: 2948, y: 390, width: 19, height: 546),
+                   CGRect(x: 3632, y: 394, width: 19, height: 554)],
+            window: CGRect(x: 2666, y: 293, width: 984, height: 700),
+            expected: PaneLayout(sidebarRight: 301, titleBottom: 101, composerTop: 655, source: .ax)),
+        ScrollBarLayoutCase(
+            name: "真机单栏 600×834：只有消息区 [582,101 19×698] → 侧栏 0",
+            bars: [CGRect(x: 3046 + 582, y: 64 + 101, width: 19, height: 698)],
+            window: CGRect(x: 3046, y: 64, width: 600, height: 834),
+            expected: PaneLayout(sidebarRight: 0, titleBottom: 101, composerTop: 799, source: .ax)),
+        ScrollBarLayoutCase(
+            name: "宽窗口只有消息区那根（侧栏列表短到没滚动条）→ 侧栏用兜底、partial",
+            bars: [CGRect(x: 3658, y: 394, width: 19, height: 722)],
+            window: telegramProbeWindow,
+            expected: PaneLayout(sidebarRight: 300, titleBottom: 101, composerTop: 823, source: .partial)),
+        ScrollBarLayoutCase(
+            name: "只有侧栏那根 → 算不出",
+            bars: [CGRect(x: 2948, y: 390, width: 19, height: 714)],
+            window: telegramProbeWindow,
+            expected: nil),
+        ScrollBarLayoutCase(
+            name: "三根：右侧群信息面板贯到窗口底的那根被排除，消息区仍认对",
+            bars: [CGRect(x: 2948, y: 390, width: 19, height: 714),
+                   CGRect(x: 3400, y: 394, width: 19, height: 722),
+                   CGRect(x: 3658, y: 359, width: 19, height: 802)],
+            window: telegramProbeWindow,
+            expected: PaneLayout(sidebarRight: 301, titleBottom: 101, composerTop: 823, source: .ax)),
+        ScrollBarLayoutCase(
+            name: "消息区贯到窗口底（下面没有输入框）→ 算不出",
+            bars: [CGRect(x: 2948, y: 390, width: 19, height: 714),
+                   CGRect(x: 3658, y: 359, width: 19, height: 802)],
+            window: telegramProbeWindow,
+            expected: nil),
+        ScrollBarLayoutCase(
+            name: "消息区顶在 400（不像标题条下面）→ 算不出",
+            bars: [CGRect(x: 2948, y: 390, width: 19, height: 714),
+                   CGRect(x: 3658, y: 693, width: 19, height: 400)],
+            window: telegramProbeWindow,
+            expected: nil),
+        ScrollBarLayoutCase(name: "一根都没有 → 算不出", bars: [], window: telegramProbeWindow, expected: nil),
+    ]
+
+    /// 行尾时间 / edited 剥离（`BubbleAttribution.stripTrailingMeta`）。
+    static let trailingMetaCases: [(input: String, expected: String)] = [
+        ("有办法不封号 15:50", "有办法不封号"),
+        ("可以的 edited 14:52", "可以的"),
+        ("14:24", ""),
+        ("0:07", ""),                                   // 语音时长同形，也被剥掉（notes 里写明）
+        ("会议改到 14:30 见", "会议改到 14:30 见"),         // 不在行尾不剥
+        ("Group Help admin", "Group Help admin"),       // 角色标签不归这个函数
+        ("版本 1:2", "版本 1:2"),                        // 分钟不是两位数，不算时间
+    ]
+
+    /// 昵称行尾角色标签剥离（`BubbleAttribution.stripRoleTag`）。
+    static let roleTagCases: [(input: String, expected: String)] = [
+        ("Group Help admin", "Group Help"),
+        ("张三 管理员", "张三"),
+        ("张三管理员", "张三"),
+        ("李四 owner", "李四"),
+        ("王五", "王五"),
+        ("Administrator", "Administrator"),              // 不是整词，不剥
+    ]
+
+    /// 会话头第二行的群信号（`ChatTitle.isGroupStatusLine`）。
+    static let groupStatusCases: [(line: String, expected: Bool)] = [
+        ("5,107 members, 338 online", true),
+        ("1 member", true),
+        ("5,107 位成员，338 人在线", true),
+        ("12,345 subscribers", false),
+        ("online", false),
+        ("last seen recently", false),
+        ("bot", false),
+        ("338 online", false),
+        ("members", false),                             // 没有数字
+    ]
+
+    struct ReadGateCase: Sendable {
+        var name: String
+        var collectText = true
+        var readsContent = true
+        var privateBrowsing = false
+        var titleOnly = false
+        var accessibility = true
+        var sourceState: SourceState = .ok
+        var fallbackFrame = false
+        var expected: Bool
+    }
+
+    /// `EventSkeleton.shouldReadText` 的六道门：前五道各挡一次，第六道（sourceState）逐态。
+    static let readGateCases: [ReadGateCase] = [
+        ReadGateCase(name: "失活事件（collectText=false）→ 不读", collectText: false, expected: false),
+        ReadGateCase(name: "「只记事件」档 → 不读", readsContent: false, expected: false),
+        ReadGateCase(name: "私密浏览 → 不读", privateBrowsing: true, expected: false),
+        ReadGateCase(name: "只记标题的窗口 → 不读", titleOnly: true, expected: false),
+        ReadGateCase(name: "没有辅助功能权限 → 不读", accessibility: false, expected: false),
+        ReadGateCase(name: "正常 → 读", sourceState: .ok, fallbackFrame: false, expected: true),
+        ReadGateCase(name: "空闲 → 读", sourceState: .userIdle, fallbackFrame: false, expected: true),
+        ReadGateCase(name: "超时、没有兜底 frame（读 AX 的规则）→ 不读",
+                     sourceState: .timeout, fallbackFrame: false, expected: false),
+        ReadGateCase(name: "超时、纯 OCR 规则拿到 CG frame → 读",
+                     sourceState: .timeout, fallbackFrame: true, expected: true),
+        ReadGateCase(name: "锁屏 → 不读（哪怕有 frame）", sourceState: .locked, fallbackFrame: true, expected: false),
+        ReadGateCase(name: "安全输入 → 不读", sourceState: .secureInput, fallbackFrame: true, expected: false),
+        ReadGateCase(name: "权限丢失 → 不读", sourceState: .permissionLost, fallbackFrame: true, expected: false),
     ]
 }

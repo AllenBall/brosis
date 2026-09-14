@@ -24,6 +24,8 @@ struct PaneLayout: Sendable, Equatable {
         case partial
         /// 一条都没量出来（或量出来的组合不合理），整组用兜底值。
         case defaults
+        /// 三条都从 AX 滚动条的 frame 来（`PaneLayout.fromScrollBars`）。
+        case ax
     }
 
     /// 某个角色在窗口里的矩形（AX 坐标）。
@@ -42,6 +44,87 @@ struct PaneLayout: Sendable, Equatable {
     var label: String {
         String(format: "sidebar=%.0f title=%.0f composer=%.0f", sidebarRight, titleBottom, composerTop)
             + " source=\(source.rawValue)"
+    }
+}
+
+// MARK: - 从 AX 滚动条算边界（Telegram）
+
+extension PaneLayout {
+
+    /// 窗口比这窄时 Telegram 折成单栏（会话列表整个收起）。实测 600 宽已折、1010 宽双栏，
+    /// 真实折栏点没量到，取中间值。只在"只找到消息区那根滚动条"时用来区分
+    /// "真单栏"与"侧栏列表短到没有滚动条"。
+    static let singleColumnMaxWidth: Double = 720
+    /// 消息区滚动条右缘距窗口右缘的容差（点）。实测贴边（1010 宽时 992 + 19 = 1011）。
+    static let scrollBarEdgeTolerance: Double = 24
+    static let sidebarRightRange: ClosedRange<Double> = 200...600
+    static let titleBottomRange: ClosedRange<Double> = 40...260
+    static let minMessageHeight: Double = 120
+    /// 消息区下面必有输入框：滚动条贯到窗口底的那根不是消息区（右侧群信息面板就是这样）。
+    static let minComposerHeight: Double = 30
+
+    /// 滚动条右缘贴着窗口右缘（容差 `scrollBarEdgeTolerance`）。`AX.ScrollBarProbe` 判"缓存够不够"时同用。
+    static func atRightEdge(_ bar: CGRect, of window: CGRect) -> Bool {
+        abs(bar.maxX - window.maxX) <= scrollBarEdgeTolerance
+    }
+
+    /// 三条边界从窗口里的 `AXScrollBar` frame 算（纯函数，自检覆盖）。
+    ///
+    /// 2026-09-14 Telegram 实测：侧栏滚动条 `[282,97 19×714]`、消息区滚动条 `[992,101 19×722]`
+    /// （相对 1010×868 的窗口）⇒ 侧栏右边界 301、消息区顶 101（置顶条之下）、输入框顶 823。
+    /// 改矮、改窄、布局瞬态三种情况都跟着 frame 走；窄到折成单栏时侧栏那根消失。
+    ///
+    /// - 消息区 = 右半边里贴着窗口右缘优先、再按高度，第一根过得了"上有标题条、下有输入框"那关的；
+    ///   侧栏 = 在窗口中线左侧、又在消息区左侧的那些里**最靠右**的一根（文件夹侧栏自己的滚动条更靠左）。
+    /// - 两根都有 → `.ax`；只有消息区那根：窗口窄于 `singleColumnMaxWidth` → 单栏（侧栏 0，`.ax`），
+    ///   更宽 → 侧栏用兜底值、`.partial`（列表短到没有滚动条时**不能**判成单栏，
+    ///   否则整个侧栏进聊天面板——M2 微信那个老毛病）。
+    /// - 只有侧栏那根、一根没有、或数值不合理 → nil，调用方退回兜底。
+    static func fromScrollBars(_ absoluteBars: [CGRect], windowFrame window: CGRect,
+                               fallback: PaneLayout) -> PaneLayout? {
+        guard window.width > 0, window.height > 0, !absoluteBars.isEmpty else { return nil }
+        // 先全部换成窗口局部坐标（原点窗口左上），后面只比相对值。
+        let bars = absoluteBars.map { $0.offsetBy(dx: -window.minX, dy: -window.minY) }
+        let local = CGRect(origin: .zero, size: window.size)
+        func atEdge(_ bar: CGRect) -> Bool { atRightEdge(bar, of: local) }
+        // 消息区候选：右半边的滚动条，贴右缘的优先、再按高度。右侧群信息面板那根贯到窗口底，
+        // 过不了"下面必有输入框"这一关，自然轮到真正的消息区那根（它这时不贴右缘）。
+        let message = bars
+            .filter { $0.midX > local.midX }
+            .sorted { a, b in atEdge(a) != atEdge(b) ? atEdge(a) : a.height > b.height }
+            .first { bar in
+                titleBottomRange.contains(bar.minY)
+                    && bar.height >= minMessageHeight
+                    && bar.maxY <= local.height - minComposerHeight
+            }
+        guard let message else { return nil }
+        let sidebar = bars
+            .filter { $0.maxX < local.midX && $0.maxX <= message.minX }
+            .max { $0.maxX < $1.maxX }
+        let sidebarRight: Double
+        let source: Source
+        if let sidebar {
+            guard sidebarRightRange.contains(sidebar.maxX) else { return nil }
+            sidebarRight = sidebar.maxX
+            source = .ax
+        } else if atEdge(message), local.width < singleColumnMaxWidth {
+            sidebarRight = 0
+            source = .ax
+        } else {
+            sidebarRight = fallback.sidebarRight
+            source = .partial
+        }
+        return PaneLayout(sidebarRight: sidebarRight, titleBottom: message.minY,
+                          composerTop: message.maxY, source: source)
+    }
+
+    /// 探针结果 → 边界 + 一行日志。采集端（`EventSkeleton`）与 `--ax-probe` 同用这一份，
+    /// 预算或兜底口径改了不会两边不一致。
+    static func fromScrollBarProbe(_ probe: AX.ScrollBarProbe.Result, windowFrame: CGRect,
+                                   fallback: PaneFallback) -> (layout: PaneLayout?, trace: String) {
+        let layout = fromScrollBars(probe.frames, windowFrame: windowFrame,
+                                    fallback: fallback.layout(windowHeight: windowFrame.height))
+        return (layout, "\(probe.label) → \(layout?.label ?? "算不出，退回兜底")")
     }
 }
 

@@ -700,3 +700,121 @@ enum AX {
                         charLimitHit: charLimitHit)
     }
 }
+
+// MARK: - 按下标找滚动条（Telegram：树对内容是死的，只有滚动条活着）
+
+extension CGRect {
+    /// `[x,y w×h]`，探针输出与日志同用。
+    var axLabel: String { "[\(Int(minX)),\(Int(minY)) \(Int(width))×\(Int(height))]" }
+}
+
+extension AX {
+
+    /// 一次跨进程调用拿角色 + frame（`AXUIElementCopyMultipleAttributeValues`）。
+    /// 逐个读是三次（role、position、size），按下标找滚动条时每个下标都要问，省下三分之二。
+    /// 缺属性的位置回来的是错误型 AXValue，`AXValueGetValue` 会失败 → frame 为 nil。
+    static func roleAndFrame(_ element: AXUIElement) -> (role: String, frame: CGRect?)? {
+        let names = [kAXRoleAttribute, kAXPositionAttribute, kAXSizeAttribute] as CFArray
+        var values: CFArray?
+        guard AXUIElementCopyMultipleAttributeValues(element, names, [], &values) == .success,
+              let array = values as? [AnyObject], array.count == 3 else { return nil }
+        let role = array[0] as? String ?? ""
+        var origin = CGPoint.zero
+        var size = CGSize.zero
+        guard CFGetTypeID(array[1]) == AXValueGetTypeID(), CFGetTypeID(array[2]) == AXValueGetTypeID(),
+              AXValueGetValue(array[1] as! AXValue, .cgPoint, &origin),
+              AXValueGetValue(array[2] as! AXValue, .cgSize, &size) else { return (role, nil) }
+        return (role, CGRect(origin: origin, size: size))
+    }
+
+    /// 按下标逐个拷贝窗口子节点，找 `AXScrollBar`。
+    ///
+    /// 为什么不用 `AX.children`（整数组拷贝）：Telegram for macOS 的窗口报 138–207 个子节点，整体拷贝报
+    /// `kAXErrorFailure`（TGUIKit 自绘视图不实现无障碍，数组序列化整个失败），只有
+    /// `AXUIElementCopyAttributeValues(…, index, 1, …)` 按下标拷才拿得回能拷的那 6 个——两根滚动条、
+    /// 工具条、三个窗口按钮（2026-09-14 复查 §2.2）。下标**不稳定**：同一窗口三次计数 138 / 207 / 156，
+    /// 可拷元素一次在 #0–5、一次在 #151 / #202–206。所以先扫头 `headCount` 个、再从尾往前，找齐两根就停。
+    /// 只对声明了 `PaneFallback.Source.axScrollBars` 的规则跑：整体失败时退到逐个拷贝对别的应用是纯开销。
+    ///
+    /// 成本是按**墙钟**封顶的，不只按次数：每个下标一次跨进程调用，各挂着消息超时，
+    /// 300 次乘 0.5 s 是主线程冻结几分钟。遇 `.cannotComplete` 立即停；窗口与拷回来的每个子元素都单独设
+    /// 0.1 s 超时（超时只对设过的那个元素生效，见文件头注释）。实测双栏 65 次 34 ms。
+    enum ScrollBarProbe {
+        static let headCount = 8
+        static let maxAttempts = 300
+        static let budgetSeconds: TimeInterval = 0.10
+        static let elementTimeout: Float = 0.1
+        static let wanted = 2
+
+        struct Result {
+            /// 找到的滚动条：元素（调用方按 pid 缓存，下次只重读 frame）与当时的 frame。
+            var bars: [(element: AXUIElement, frame: CGRect)] = []
+            var childCount = 0
+            var attempts = 0
+            var elapsedMS: Double = 0
+            var rescanned = false
+
+            var frames: [CGRect] { bars.map(\.frame) }
+            var elements: [AXUIElement] { bars.map(\.element) }
+
+            var label: String {
+                "bars=\(bars.count) children=\(childCount) attempts=\(attempts) "
+                    + "\(String(format: "%.0f", elapsedMS))ms\(rescanned ? " rescan" : " cached")"
+            }
+        }
+
+        /// 先重读缓存元素的 frame（每个一次调用）；两根都在、或窗口窄到单栏且消息区那根在，就不扫；否则重扫。
+        static func frames(window: AXUIElement, windowFrame: CGRect,
+                           cached: [AXUIElement]) -> Result {
+            let started = Date()
+            var result = Result()
+            for element in cached {
+                result.attempts += 1
+                AXUIElementSetMessagingTimeout(element, elementTimeout)
+                guard let frame = roleAndFrame(element)?.frame, frame.intersects(windowFrame) else { continue }
+                result.bars.append((element, frame))
+            }
+            let messageBarPresent = result.bars.contains { PaneLayout.atRightEdge($0.frame, of: windowFrame) }
+            let enough = result.bars.count >= wanted
+                || (messageBarPresent && windowFrame.width < PaneLayout.singleColumnMaxWidth)
+            if enough {
+                result.elapsedMS = Date().timeIntervalSince(started) * 1000
+                return result
+            }
+            var scanned = scan(window: window)
+            scanned.attempts += result.attempts
+            return scanned
+        }
+
+        static func scan(window: AXUIElement) -> Result {
+            let started = Date()
+            var result = Result()
+            result.rescanned = true
+            var count: CFIndex = 0
+            guard AXUIElementGetAttributeValueCount(window, kAXChildrenAttribute as CFString, &count) == .success,
+                  count > 0 else { return result }
+            result.childCount = Int(count)
+            AXUIElementSetMessagingTimeout(window, elementTimeout)
+            let total = Int(count)
+            var order = Array(0..<min(headCount, total))
+            if total > headCount { order += (headCount..<total).reversed() }
+            for index in order {
+                guard result.attempts < maxAttempts,
+                      Date().timeIntervalSince(started) < budgetSeconds else { break }
+                result.attempts += 1
+                var values: CFArray?
+                let error = AXUIElementCopyAttributeValues(window, kAXChildrenAttribute as CFString,
+                                                           index, 1, &values)
+                if error == .cannotComplete { break }
+                guard error == .success, let element = (values as? [AXUIElement])?.first else { continue }
+                AXUIElementSetMessagingTimeout(element, elementTimeout)
+                guard let read = roleAndFrame(element), read.role == "AXScrollBar",
+                      let frame = read.frame else { continue }
+                result.bars.append((element, frame))
+                if result.bars.count >= wanted { break }
+            }
+            result.elapsedMS = Date().timeIntervalSince(started) * 1000
+            return result
+        }
+    }
+}

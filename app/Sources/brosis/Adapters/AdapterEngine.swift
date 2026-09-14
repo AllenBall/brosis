@@ -105,6 +105,8 @@ struct AdapterScan: Sendable {
     var conversationTitle: String? { regions.first { $0.kind == .title && !$0.isEmpty }?.text }
     /// 用 `.webArea` 定位的那个区域（挑中了哪个 web area、锚没锚上）。
     var pickedWebArea: RegionScan? { regions.first { $0.pickedWebAreaTitle != nil } }
+    /// 有没有声明了三栏角色的 OCR 区域：有才需要分栏边界（滚动条探测 / 图像检测）。
+    var needsPaneLayout: Bool { ocrRequests.needsPaneLayout }
 
     /// 写进 `runtime_events.detail`。
     var detail: String {
@@ -805,4 +807,9 @@ enum AdapterEngine {
             result.text += separator + text
         }
     }
+}
+
+extension Array where Element == OCRRequest {
+    /// 有没有声明了三栏角色的区域。事件骨架（要不要探滚动条）与协调者（要不要量边界）同一判据。
+    var needsPaneLayout: Bool { contains { $0.pane != nil } }
 }

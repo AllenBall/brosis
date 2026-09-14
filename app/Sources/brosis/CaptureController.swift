@@ -416,6 +416,29 @@ final class CaptureController: NSObject, @unchecked Sendable {
         return content.windows.first { $0.windowID == picked.id }
     }
 
+    /// AX 拿不到焦点窗口（超时、或窗口刚关）时，纯 OCR 规则从 CG 窗口表找"该 OCR 的那个窗口"
+    ///（2026-09-14 Telegram 复查 F2：它 43% 的观察、微信 M0 里 2/6 的观察就这样一个字都没记）。
+    ///
+    /// 不需要任何权限（没有录屏权限时只是拿不到窗口名，frame 照给）。挑法与截图那边同一份 `pickTarget`：
+    /// 先按上一次扫描的焦点窗口矩形认（`preferredFrame`），对不上再取 layer 0、在屏、面积最大的；
+    /// 最小边 400 而不是截图的 200——`focusedWindowInfo` 的超时里混着「用户 ⌘W 关了主窗、进程仍在前台」，
+    /// 这时剩下的媒体查看器 / 小面板不能被当成聊天窗口 OCR。主线程一次约 1 ms。
+    static func onScreenWindowFrame(pid: pid_t, bundleID: String?, preferredFrame: CGRect?,
+                                    minSide: Double = 400) -> CGRect? {
+        guard let bundleID,
+              let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements],
+                                                    kCGNullWindowID) as? [[String: Any]] else { return nil }
+        let candidates = list.compactMap { info -> WindowCandidate? in
+            guard let owner = info[kCGWindowOwnerPID as String] as? Int, owner == Int(pid),
+                  let number = info[kCGWindowNumber as String] as? Int,
+                  let bounds = info[kCGWindowBounds as String] as? NSDictionary,
+                  let frame = CGRect(dictionaryRepresentation: bounds) else { return nil }
+            return WindowCandidate(id: CGWindowID(number), bundleID: bundleID, isOnScreen: true,
+                                   layer: info[kCGWindowLayer as String] as? Int ?? 0, frame: frame)
+        }
+        return pickTarget(candidates, bundleID: bundleID, preferredFrame: preferredFrame, minSide: minSide)?.frame
+    }
+
     /// `SCWindow` 里挑窗口真正要用的那几个字段。抽出来是为了让挑选规则能脱离
     /// ScreenCaptureKit 单独测——`SCShareableContent` 造不出来。
     struct WindowCandidate: Sendable, Equatable {
@@ -443,12 +466,14 @@ final class CaptureController: NSObject, @unchecked Sendable {
     /// `preferredFrame`：AX 那一侧读到的**焦点窗口**矩形。有它就先按矩形认（2026-09-11 Chrome 复查
     /// F3：两个 Chrome 窗口时 AX 读的是焦点窗口，OCR 却截了面积最大的那个，两份正文挂到一条观察上）；
     /// 对不上任何候选（矩形过期、窗口刚关）才退回面积最大。
+    /// - Parameter minSide: 窗口最小边（点）。截图默认 `minTargetSide`；`onScreenWindowFrame` 用 400。
     static func pickTarget(_ candidates: [WindowCandidate], bundleID: String?,
-                           preferredFrame: CGRect? = nil) -> WindowCandidate? {
+                           preferredFrame: CGRect? = nil,
+                           minSide: Double = minTargetSide) -> WindowCandidate? {
         guard let bundleID, !bundleID.isEmpty else { return nil }
         let eligible = candidates.filter {
             $0.bundleID == bundleID && $0.isOnScreen && $0.layer == 0
-                && $0.frame.width >= minTargetSide && $0.frame.height >= minTargetSide
+                && $0.frame.width >= minSide && $0.frame.height >= minSide
         }
         if let preferredFrame, !preferredFrame.isEmpty,
            let match = eligible.first(where: {
