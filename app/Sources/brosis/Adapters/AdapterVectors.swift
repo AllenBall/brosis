@@ -248,6 +248,70 @@ enum AdapterVectors {
         ])
     }
 
+    // MARK: - ChatGPT / Codex 桌面版（2026-09-15 复查，层数按真机探针造）
+
+    /// Chromium 外壳：窗口 → RootView → NonClientView → NativeFrameViewMac → ChromeNodeClientView → View
+    /// → ContentsContainerView（第 6 层）。网页树没建时它就是叶子；建了以后 AXWebArea 挂在它下面（第 7 层）。
+    private static func chatgptShell(contents: [SyntheticAXNode]) -> SyntheticAXNode {
+        var node = SyntheticAXNode(role: "AXGroup", frame: window, domClasses: ["ContentsContainerView"],
+                                   kids: contents)
+        for cls in ["View", "ChromeNodeClientView", "NativeFrameViewMac", "NonClientView", "RootView"] {
+            node = SyntheticAXNode(role: "AXGroup", frame: window, domClasses: [cls], kids: [node])
+        }
+        return SyntheticAXNode(role: "AXWindow", subrole: "AXStandardWindow", title: "ChatGPT", frame: window,
+                               kids: [node,
+                                      SyntheticAXNode(role: "AXButton", subrole: "AXCloseButton",
+                                                      frame: CGRect(x: 115, y: 75, width: 16, height: 16))])
+    }
+
+    /// 树没建起来（激活后 0–4000 ms、隐藏 5 分钟后切回来）：只有外壳，`ContentsContainerView` 没有子节点。
+    static func chatgptShellTree() -> SyntheticAXNode { chatgptShell(contents: []) }
+
+    /// 树建好之后：唯一的 AXWebArea 整窗大（`app://`，标题「ChatGPT」= 窗口标题），往下再包三层，
+    /// 才到侧栏（会话列表，含一条「展开显示」折叠起来的 0 pt 高项）与主区 `<main>`（AXLandmarkMain）。
+    /// 主区里三行正文（一行滚出视口）、一个项目选择器、输入区（AXTextArea 草稿 + 模型 / 权限标签，
+    /// class 是 CSS Modules 的「名字 + hash」）。正文在窗口下第 17 层：12 层限额一个字都读不到。
+    static func chatgptTree() -> SyntheticAXNode {
+        func g(_ kids: [SyntheticAXNode], classes: [String] = [], frame: CGRect? = nil) -> SyntheticAXNode {
+            SyntheticAXNode(role: "AXGroup", frame: frame, domClasses: classes, kids: kids)
+        }
+        func text(_ value: String, x: Double, y: Double, width: Double = 400, height: Double = 16) -> SyntheticAXNode {
+            SyntheticAXNode(role: "AXStaticText", value: value,
+                            frame: CGRect(x: x, y: y, width: width, height: height))
+        }
+        /// 真机上主区文本在 `<main>` 下第 5–6 层，这里用四层 AXGroup 垫到同样的深度。
+        func deep(_ leaf: SyntheticAXNode, levels: Int = 4) -> SyntheticAXNode {
+            (0..<levels).reduce(leaf) { node, _ in g([node]) }
+        }
+        let sidebar = CGRect(x: 100, y: 60, width: 276, height: 800)
+        let main = CGRect(x: 376, y: 60, width: 924, height: 800)
+        // 只造规则真会读的 class（两个 CSS Modules 前缀）；Tailwind 工具类没人读，不放。
+        let nav = g([
+            deep(text("别的会话甲", x: 140, y: 400, width: 200)),
+            deep(text("别的会话乙", x: 140, y: 432, width: 200)),
+            // 「展开显示」折叠起来的项：AXStaticText 还在树里，frame 高 0（真机 [241,905 259×0]）。
+            deep(text("折叠的会话", x: 140, y: 900, width: 259, height: 0)),
+        ], frame: sidebar)
+        let messages = g([
+            deep(text("用户：帮我算糖果", x: 500, y: 200, width: 600, height: 34)),
+            deep(text("助手：最少 21 个", x: 500, y: 260, width: 600, height: 34)),
+            deep(text("更早的一轮（已滚出视口）", x: 500, y: 1_400, width: 600, height: 34)),
+        ], frame: main)
+        let projectSelector = g([g([text("Downloads", x: 570, y: 762, width: 67)])],
+                                classes: ["_ActiveProjectSelectorTrigger_2r9xk_1"],
+                                frame: CGRect(x: 560, y: 760, width: 120, height: 20))
+        let composer = g([
+            g([SyntheticAXNode(role: "AXTextArea", value: "草稿还没发出去",
+                               frame: CGRect(x: 520, y: 790, width: 700, height: 44))]),
+            g([g([text("完全访问", x: 560, y: 840, width: 52)])]),
+        ], classes: ["_ComposerLayoutBody_1qpwu_2"], frame: CGRect(x: 500, y: 780, width: 736, height: 80))
+        let landmark = SyntheticAXNode(role: "AXGroup", subrole: "AXLandmarkMain", frame: main,
+                                       kids: [messages, g([projectSelector, composer])])
+        let webArea = SyntheticAXNode(role: "AXWebArea", title: "ChatGPT", url: "app://-/index.html",
+                                      frame: window, kids: [g([g([g([nav, landmark])])])])
+        return chatgptShell(contents: [webArea])
+    }
+
     // MARK: - 规则引擎用例
 
     // MARK: - Chrome（2026-09-11 复查 F2 / F4 / F7）
@@ -426,6 +490,31 @@ enum AdapterVectors {
                  mustContain: [],
                  mustNotContain: [],
                  expectedOCRRegions: ["chat_panel", "conversation_title"]),
+        RuleCase(name: "ChatGPT：树建好 → 只读 <main>，侧栏 / 折叠项 / 草稿 / 选择器标签不进库",
+                 rule: AdapterRegistry.chatgpt,
+                 tree: chatgptTree,
+                 expectedFragments: 1,
+                 expectedCompleteness: .partial,          // 一轮滚出视口
+                 mustContain: ["用户：帮我算糖果", "助手：最少 21 个"],
+                 mustNotContain: ["别的会话甲", "折叠的会话", "草稿还没发", "完全访问", "Downloads",
+                                  "更早的一轮", "ChatGPT"],
+                 expectedOCRRegions: []),
+        RuleCase(name: "ChatGPT：树没建（只有 Chromium 外壳）→ 正文空、排一次回退 OCR（矩形另有自检钉住）",
+                 rule: AdapterRegistry.chatgpt,
+                 tree: chatgptShellTree,
+                 expectedFragments: 0,
+                 expectedCompleteness: .unavailable,
+                 mustContain: [],
+                 mustNotContain: [],
+                 expectedOCRRegions: ["main"]),
+        RuleCase(name: "通用 Chromium 规则读 ChatGPT 那棵树：30 层读得到正文，web area 自己的标题不算正文",
+                 rule: AdapterRegistry.genericChromium,
+                 tree: chatgptTree,
+                 expectedFragments: 1,
+                 expectedCompleteness: .partial,
+                 mustContain: ["用户：帮我算糖果", "别的会话甲"],   // 没有 landmark 锚点，侧栏照读
+                 mustNotContain: ["ChatGPT", "折叠的会话"],
+                 expectedOCRRegions: []),
         RuleCase(name: "Chrome（开关开）web area 还没建出来：正文空、排一次回退 OCR（矩形另有自检钉住）",
                  rule: AdapterRegistry.chrome.resolvingEnhanced(true),
                  tree: chromeShellTree,

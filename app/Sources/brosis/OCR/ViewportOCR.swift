@@ -11,6 +11,7 @@ import Vision
 /// |---|---|---|
 /// | 识别级别 | `.accurate` | D24：fast 不支持 zh-Hans，中文 CER 24–50% |
 /// | 语言 | `zh-Hans`, `en-US` | E8 |
+/// | 自动检测语言 | **开** | 2026-09-15 macOS 27 实测：纯 Latin 区域（代码样张）严格召回 0.67 → 1.00、更快；中文与混排逐字不变 |
 /// | 语言纠错 | **关** | D24：accurate 下输出逐字节相同，fast 下更慢且无改善 |
 /// | 分辨率 | 正文类 1x；代码 / 等宽小字**不降采样** | D24 |
 /// | 阅读顺序 | 按 `boundingBox` 行聚类重建 | D24 / `ReadingOrder` |
@@ -132,6 +133,13 @@ enum ViewportOCR {
         request.recognitionLevel = .accurate                 // D24
         request.recognitionLanguages = languages
         request.usesLanguageCorrection = false               // D24
+        // macOS 27 起 Vision **只按第一种语言选模型**（`["en-US", "zh-Hans"]` 与 `["en-US"]` 结果逐字相同），
+        // 而 zh-Hans 模型认 Latin 变差了（`l` → `L`、路径里 `/` → `l`、CamelCase 中间插空格）。
+        // 开了自动检测，纯 Latin 的区域（代码、终端、英文页）会切到 Latin 模型：自检代码样张严格召回
+        // 0.67 / 0.83 → 1.00 / 1.00 且更快；含中文的区域仍走 zh-Hans 模型，输出与不开时逐字相同。
+        // 混排行里的 Latin 没有参数能救回来（revision 1–3、纠错开关、语言顺序、缩放都试过，
+        // 见 tools/bench/results/chatgpt_capture_review_2026-09-15.md §8）。
+        request.automaticallyDetectsLanguage = true
         let handler = VNImageRequestHandler(cgImage: prepared.image, options: [:])
         let started = DispatchTime.now().uptimeNanoseconds
         try handler.perform([request])

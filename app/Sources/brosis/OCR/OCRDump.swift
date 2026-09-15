@@ -13,26 +13,19 @@ enum OCRDump {
         for outcome in OCRSelfTest.run() {
             print("\n## \(outcome.sampleID)@\(outcome.scaleLabel) "
                   + "\(outcome.pixelWidth)×\(outcome.pixelHeight)")
-            print("- 无标点标识符召回 严格 \(String(format: "%.3f", outcome.identifierRecall))")
-            print("- 带标点标识符召回 NFKC 折叠后 "
-                  + "\(String(format: "%.3f", outcome.foldedIdentifierRecall))"
-                  + " / 严格 \(String(format: "%.3f", outcome.punctuatedStrictRecall))")
+            print("- 标识符召回 NFKC 折叠后 \(String(format: "%.3f", outcome.recall))"
+                  + " / 严格 \(String(format: "%.3f", outcome.strictRecall))")
             print("- CER \(String(format: "%.4f", outcome.cer))"
                   + "、中文行 CER \(String(format: "%.4f", outcome.chineseCER))"
                   + "、置信度 \(String(format: "%.3f", outcome.meanConfidence))"
                   + "、\(Int(outcome.elapsedMS)) ms")
-            if !outcome.missingIdentifiers.isEmpty {
-                print("- 严格未召回（无标点组）："
-                      + outcome.missingIdentifiers.joined(separator: " / "))
+            if !outcome.missing.isEmpty {
+                print("- 折叠后仍未召回：" + outcome.missing.joined(separator: " / "))
             }
-            // 带标点组的逐字节未召回**总是**打出来（这正是本轮要说明的那件事：
-            // 差的是全角括号 / 冒号，不是认错了字）。
-            if !outcome.punctuatedStrictMissing.isEmpty {
-                print("- 严格未召回（带标点组，逐字节）："
-                      + outcome.punctuatedStrictMissing.joined(separator: " / "))
-            }
-            if !outcome.foldedMissingIdentifiers.isEmpty {
-                print("- 折叠后仍未召回：" + outcome.foldedMissingIdentifiers.joined(separator: " / "))
+            // 逐字节未召回**总是**打出来（这正是本轮要说明的那件事：差的是全角括号 / 冒号 /
+            // 大小写 / 空格，还是真认错了字）。
+            if !outcome.strictMissing.isEmpty {
+                print("- 严格（逐字节）未召回：" + outcome.strictMissing.joined(separator: " / "))
             }
             print("```")
             print(outcome.recognizedText)

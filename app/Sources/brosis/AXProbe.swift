@@ -48,6 +48,8 @@ enum AXProbe {
         }
         print("\n读法：t=0 那一列就是采集端现在拿到的东西。它是 0、而后面某一列不是 0，")
         print("就说明「不可用」里有一部分纯粹是读得太早，不是这个应用给不出文本。")
+        print("「设 AXManualAccessibility 之前」是 0 而戳树之后某一列不是 0，说明树是戳出来的，")
+        print("采集端空读时会戳（`ax_empty_retry_scheduled` 事件里带 `戳树 hit=…`）。")
         print("0 字符**且** OCR 请求 0 个，才是「这个应用什么都记不下来」。")
         return 0
     }
@@ -93,6 +95,13 @@ enum AXProbe {
         // 纯 Chromium（Chrome / Edge / CEF）不认，那边只吃 AXEnhancedUserInterface，
         // 而后者会把缓冲的按键在断开时重放进焦点输入框，我们**不用**它。
         print("- 设 AXManualAccessibility：\(describe(error))")
+
+        // 采集端读到空树时做的同一件事（`EventSkeleton.noteAXOutcome` → `AX.pokeWebContents`）：
+        // 树要戳才建的应用（ChatGPT），不戳的话下面七个取样点等多久都是空，探针会把它错报成"AX 死了"。
+        if before.chars == 0, let frame = before.windowFrame {
+            print("- 戳树（窗口中心命中测试 + 读 AXRole，采集端空读时也这么做）："
+                  + AX.pokeWebContents(pid: pid, windowFrame: frame))
+        }
 
         for delay in sampleDelaysMS {
             if delay > 0 { Thread.sleep(forTimeInterval: Double(delay) / 1000) }
@@ -436,6 +445,8 @@ enum AXProbe {
         var ocrRequests = 0
         /// 每个区域一行：名字、定位、挑中的 web area、字符数、开头 60 字（只在终端上看，不落库）。
         var regionLines: [String] = []
+        /// 这次读到的焦点窗口矩形（戳树用；别为它再发一次 kAXFocusedWindow）。
+        var windowFrame: CGRect?
 
         func describe() -> String {
             if noWindow { return "拿不到焦点窗口" }
@@ -455,6 +466,7 @@ enum AXProbe {
         let scan = AdapterEngine.scan(rule: rule, window: LiveAXNode(window),
                                       windowFrame: read.info.frame)
         var out = Sample()
+        out.windowFrame = read.info.frame
         out.chars = scan.totalChars
         out.nodes = scan.visitedNodes
         out.completeness = scan.completeness

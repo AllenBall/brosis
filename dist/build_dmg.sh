@@ -56,7 +56,7 @@ step "1. 版本号"
 VERSION="$(sed -n 's/^[[:space:]]*static let version = "\([^"]*\)".*/\1/p' \
             "$APP_SRC/Sources/brosis/BuildInfo.swift" | head -1)"
 [ -n "$VERSION" ] || fail "从 app/Sources/brosis/BuildInfo.swift 读不到 version"
-echo "版本号：$VERSION（来自 BuildInfo.swift）"
+echo "版本号：${VERSION}（来自 BuildInfo.swift）"
 
 OUT="$DIST_ROOT/$VERSION"
 DMG="$OUT/$APP_NAME-$VERSION.dmg"
@@ -68,10 +68,10 @@ step "2. 取签名好的 $APP_NAME.app"
 if [ -n "$PREBUILT_APP" ]; then
   APP="$PREBUILT_APP"
   [ -d "$APP" ] || fail "--app 指的目录不存在：$APP"
-  echo "复用现成的：$APP（没有重新构建）"
+  echo "复用现成的：${APP}（没有重新构建）"
 else
   APP="$SCRATCH/$APP_NAME.app"
-  echo "调 app/build_app.sh（SCRATCH=$SCRATCH）"
+  echo "调 app/build_app.sh（SCRATCH=${SCRATCH}）"
   SCRATCH="$SCRATCH" "$APP_SRC/build_app.sh"
 fi
 [ -d "$APP" ] || fail "找不到 $APP"
@@ -95,7 +95,7 @@ fi
 IDENTITY="${IDENTITY:-$(security find-identity -v -p codesigning 2>/dev/null \
             | grep -o '"Developer ID Application: [^"]*"' | head -1 | tr -d '"')}"
 [ -n "$IDENTITY" ] || fail "钥匙串里没有 Developer ID Application 身份，签不了 DMG"
-echo ".app 版本 $VERSION，签名有效，Team ID $TEAM_ID，时间戳 $([ "$HAS_TIMESTAMP" = 1 ] && echo 有 || echo 无)"
+echo ".app 版本 ${VERSION}，签名有效，Team ID ${TEAM_ID}，时间戳 $([ "$HAS_TIMESTAMP" = 1 ] && echo 有 || echo 无)"
 
 # ---------------------------------------------------------------- 3. 公证前置检查
 # 放在做 DMG 之前：缺凭据就早点失败，不要白花几十秒压完再报错。
@@ -142,7 +142,7 @@ hdiutil create -srcfolder "$STAGE" -volname "$VOLNAME" \
                -fs HFS+ -format UDZO -imagekey zlib-level=9 \
                -quiet -ov "$DMG"
 DMG_BYTES="$(stat -f%z "$DMG")"
-echo "DMG：$DMG（$DMG_BYTES 字节，卷名「$VOLNAME」）"
+echo "DMG：${DMG}（$DMG_BYTES 字节，卷名「${VOLNAME}」）"
 
 # ---------------------------------------------------------------- 5. 签 DMG
 step "5. codesign 签 DMG"
@@ -194,7 +194,7 @@ if [ "$INNER_PUBKEY" = "__SUPublicEDKey__" ]; then
 else
   PUBKEY_STATE="已配置（sha256 前 8 位 $(printf '%s' "$INNER_PUBKEY" | shasum -a 256 | cut -c1-8)）"
 fi
-echo "DMG 里：$APP_NAME $INNER_VERSION，Sparkle $INNER_SPARKLE，更新源 $INNER_FEED，公钥 $PUBKEY_STATE"
+echo "DMG 里：$APP_NAME ${INNER_VERSION}，Sparkle ${INNER_SPARKLE}，更新源 ${INNER_FEED}，公钥 $PUBKEY_STATE"
 DMG_MOUNTED_APP_BYTES="$(du -sk "$INNER" | cut -f1)"
 hdiutil detach "$MNT" -quiet
 trap - EXIT

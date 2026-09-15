@@ -26,7 +26,7 @@ SCRATCH="${SCRATCH:-$HOME/Library/Caches/brosis-build/app}"
 SRC="$SCRATCH/checkouts/mlx-swift/Source/Cmlx/mlx-generated/metal"
 WORK="$SCRATCH/metal-air"
 
-[ -d "$SRC" ] || { echo "找不到 metal 源码目录：$SRC（先跑一次 swift build 让 SwiftPM 检出依赖）" >&2; exit 1; }
+[ -d "$SRC" ] || { echo "找不到 metal 源码目录：${SRC}（先跑一次 swift build 让 SwiftPM 检出依赖）" >&2; exit 1; }
 
 mkdir -p "$WORK"
 # CMake 里 build_kernel_base 用的就是这组 flag（mlx/backend/metal/kernels/CMakeLists.txt）
@@ -43,7 +43,7 @@ while IFS= read -r m; do
   AIRS+=("$air")
 done < <(find "$SRC" -name "*.metal" | sort)
 
-echo "  metallib -> $OUT（$(printf '%s ' "${#AIRS[@]}")个 air）"
+echo "  metallib -> ${OUT}（$(printf '%s ' "${#AIRS[@]}")个 air）"
 mkdir -p "$(dirname "$OUT")"
 xcrun -sdk macosx metallib "${AIRS[@]}" -o "$OUT"
 ls -l "$OUT"

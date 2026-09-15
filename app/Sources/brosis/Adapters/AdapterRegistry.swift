@@ -11,8 +11,9 @@ import Foundation
 /// | 飞书（Electron） | 12/17 条"有正文"，但合计只有 **156 字符** | 消息列表按 AXList/AXRow 读；读不到就对消息面板 OCR |
 /// | 微信 | 0 字符、6 条里 2 条超时 | AX 直接放弃，聊天面板 + 顶部会话名都走视口 OCR |
 /// | Telegram（原生） | 窗口 138–207 个子节点整体拷贝失败，按下标只拿回滚动条与按钮，0 文本节点（2026-09-14） | 同微信走视口 OCR；分栏边界从两根 AXScrollBar 的 frame 算 |
+/// | ChatGPT / Codex 桌面版（Chromium 152，非 Electron） | 树要**戳一下才建**（`AX.pokeWebContents`）；建好后 web area 在第 7 层、正文在第 17–21 层，12 层限额一个字都读不到（2026-09-15） | 读 `AXLandmarkMain`（主区，自动排除侧栏），限额 3000 / 30 |
 ///
-/// 兜底规则 `generic` 就是 M0 那套全窗口 BFS（四个文本角色、1500 节点 / 12 层），
+/// 兜底规则 `generic` 就是 M0 那套全窗口 BFS（`AX.textRoles`、1500 节点 / 12 层），
 /// 差别只有一处：**加了视口裁剪**（计划 3.3「只入库视口内实际显示的内容」）。
 enum AdapterRegistry {
 
@@ -430,6 +431,60 @@ enum AdapterRegistry {
         paneFallback: telegramPanes,
         capturesWindow: true)
 
+    // MARK: - ChatGPT / Codex 桌面版（Chromium，非 Electron，树要戳才建）
+
+    /// ChatGPT 侧栏（会话列表 + 项目 + 导航）宽（点）。默认 276（2026-09-15 实测 `AXLandmarkMain` 左缘）。
+    /// **只在 AX 树完全没建起来、回退 OCR 时用**：树在时主区矩形直接从 landmark 的 frame 来，
+    /// 侧栏收起 / 拖宽都跟着走。侧栏收起而树又没建时这个兜底会把主区左边切掉一条，接受。
+    /// `defaults write com.brosis.app adapter.chatgpt.sidebarWidth -float 300`
+    static let chatgptSidebarKey = "adapter.chatgpt.sidebarWidth"
+    static let chatgptSidebarDefault: Double = 276
+
+    /// ChatGPT.app（`com.openai.codex`，26.9 起是 Codex Framework = Chromium 152，**不是 Electron**）
+    /// （`tools/bench/results/chatgpt_capture_review_2026-09-15.md`）。三件事决定了这条规则的形状：
+    ///
+    /// 1. **树要戳才建**（机制与做法见 `AX.pokeWebContents`）：读到空树时采集端先戳再重扫，戳不起来才 OCR。
+    /// 2. **深**：唯一的 AXWebArea 在窗口下第 7 层（整窗大、`app://-/index.html`），正文在第 17–21 层，
+    ///    通用规则的 12 层限额只读到 web area 标题——限额 3000 / 30（Claude 桌面版同款）。
+    /// 3. **一个 web area 装着侧栏 + 主区 + 输入框**：锚 web area 等于整窗读 / 整窗 OCR，侧栏里十几条
+    ///    别的会话的标题会逐行混进正文（evidence 31656 / 43096）。锚 `<main>`（`AXGroup` subrole
+    ///    `AXLandmarkMain`，标准 landmark、侧栏收起也跟着走）；输入框按角色排除；输入区里的模型 /
+    ///    权限 / 项目选择器按 CSS Modules 前缀剪掉（都在 `<main>` 下 8 层内，class 只探到那儿）。
+    ///    Tailwind 工具类不能当锚点。
+    ///
+    /// 会话视图的消息行结构、会话名区域**没测**（复查 F7，要打开一个会话再转一次树），所以正文按文档顺序
+    /// 整块读，不做行前缀与标题区域；窗口标题恒为「ChatGPT」。
+    static let chatgpt = AdapterRule(
+        id: "chatgpt",
+        name: "ChatGPT / Codex 桌面版",
+        bundleIDs: ["com.openai.codex"],
+        electron: false,        // 不认 AXManualAccessibility；Chromium 判定靠 Helpers 结构，与这个标志无关
+        regions: [
+            RegionRule(name: "main", kind: .body,
+                       locator: .roleAndSubrole("AXGroup", "AXLandmarkMain"),
+                       read: .axSubtree, ocrFallback: true, required: true, clipToViewport: true,
+                       excludeRoles: ["AXTextArea", "AXTextField"],
+                       documentOrder: true,        // 一行消息的作者 / 正文在不同层，广度优先会串
+                       ocrOnFrameChange: false,    // DOM 逐字给出，帧变了文本没变只会是动画 / 光标
+                       pruneClasses: ["_ComposerLayoutBody_", "_ActiveProjectSelectorTrigger_"],
+                       classProbeMaxDepth: 8,
+                       fallbackInset: WindowInset(
+                           left: resolvePoints(chatgptSidebarKey, default: chatgptSidebarDefault, maximum: 900),
+                           minWidth: 240, minHeight: 120,
+                           fallback: RelativeRect(x: 0.19, y: 0, width: 0.81, height: 1))),
+        ],
+        chatLayout: nil,
+        limits: AX.BFSLimits(maxNodes: 3_000, maxDepth: 30),
+        notes: "Chromium 内核（Codex Framework），不是 Electron：无障碍树要戳一下才建（见 AX.pokeWebContents），"
+             + "读到空树时先戳再重扫，隐藏 5 分钟后树会被撤掉、切回来重新戳；戳不起来才整块视口 OCR。"
+             + "只读 <main> 主区（AXLandmarkMain）：侧栏的会话列表 / 项目 / 导航不进正文；"
+             + "输入框草稿不记，输入区的模型 / 权限 / 项目选择器按 CSS Modules 前缀剪掉；"
+             + "截图走窗口定向。AX 树没建时回退 OCR 的矩形按侧栏宽内缩"
+             + "（默认 276，adapter.chatgpt.sidebarWidth 可校准），侧栏收起时会切掉主区左边一条。"
+             + "只记视口内已渲染的内容：侧栏「展开显示」折叠的 0 pt 项、未滚动到的历史都不记。"
+             + "窗口标题恒为「ChatGPT」，会话名与消息行结构（谁说的、代码块）尚未适配。",
+        capturesWindow: true)
+
     // MARK: - 兜底
 
     /// 没有专门规则的应用：M0 那套全窗口 BFS，加上视口裁剪。
@@ -444,7 +499,7 @@ enum AdapterRegistry {
         ],
         chatLayout: nil,
         limits: AX.defaultBFSLimits,
-        notes: "M0 的四个文本角色（AXTextArea / AXTextField / AXStaticText / AXWebArea）全窗口 BFS，"
+        notes: "文本角色（AXTextArea / AXTextField / AXStaticText / AXHeading）全窗口 BFS，"
              + "限额 1500 节点 / 12 层；不触发 OCR。与 M0 的唯一差别是加了视口裁剪。")
 
     /// Chromium 系但没有专属规则时用它：与通用规则唯一的差别是**开了 OCR 回退**。
@@ -468,7 +523,14 @@ enum AdapterRegistry {
             copy.ocrFallback = true
             return copy
         }
-        rule.notes = "与通用规则同一条 BFS，区别只在 AX 读不到时会排一次视口 OCR。"
+        // **深度按 Chromium 的 DOM 定，不是原生应用的**（2026-09-15 ChatGPT 复查 F1）：12 层是给原生窗口
+        // 估的；Chromium 应用的 AXWebArea 本身就在第 7 层、正文在第 17 层以下，12 层一个字都读不到，
+        // 现象与"AX 是死的"一模一样。40 层与飞书同款：ZCode 实测 30 层读 291 字仍被截断，40 层 1890 字
+        // （`--ax-probe dev.zcode.app`，0.7.8），而且裁视口后只走了 451 个节点。**节点上限不动**：
+        // 主线程开销由它管，翻倍就是让 VS Code / Slack 这类没有专属规则的应用每次扫描慢一倍。
+        rule.limits = AX.BFSLimits(maxNodes: AX.maxNodes, maxDepth: 40)
+        rule.notes = "与通用规则同一条 BFS（深度放到 40 层：Chromium 的正文都在 17 层以下），"
+                   + "区别只在 AX 读不到时会排一次视口 OCR。"
                    + "真正拦在 Vision 前面的只有三道：有没有截到帧、OCRTriggerGate 的"
                    + "每区域 5 秒限流、以及'画面没变且该区域已 OCR 过就跳过'。"
                    + "**没有** per-OCR 的接电 / 温度 / 预算判定——别再照抄这句话。"
@@ -483,7 +545,7 @@ enum AdapterRegistry {
     /// **规则表在这里按开关定形**：`enhancedRegions` 只是声明，套用只有这一处。
     static let all: [AdapterRule] = {
         let enhanced = AX.enhancedUserInterfaceEnabled()
-        return [safari, chrome, claudeDesktop, feishu, feishuMeeting, wechat, telegram]
+        return [safari, chrome, claudeDesktop, chatgpt, feishu, feishuMeeting, wechat, telegram]
             .map { $0.resolvingEnhanced(enhanced) }
     }()
 
@@ -521,9 +583,11 @@ enum AdapterRegistry {
         if chromium, PrivateBrowsing.isBrowser(bundleID: bundleID, bundleURL: bundleURL) {
             return resolvedChrome
         }
-        // 访达等已经有 BFS 收紧值的应用：兜底规则 + 它自己的限额（`AX.bfsLimits`）。
+        // 访达等已经有 BFS 收紧值的应用：兜底规则 + 它自己的限额。**只在表里有它时覆盖**——
+        // 原来无条件写 `AX.bfsLimits(bundleID:)`，没列进表的应用拿到的是默认 1500 / 12，
+        // 把 `genericChromium` 自己的 3000 / 30 又盖了回去（2026-09-15 ChatGPT 复查 F1）。
         var fallback = base
-        fallback.limits = AX.bfsLimits(bundleID: bundleID)
+        if let tightened = AX.bfsLimitsByBundleID[bundleID] { fallback.limits = tightened }
         return fallback
     }
 }

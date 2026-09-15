@@ -78,6 +78,14 @@ step "0b. 界面文案漏翻检查"
 env PYTHONDONTWRITEBYTECODE=1 python3 "$APP_SRC/Support/check_ui_strings.py" "$APP_SRC/Sources/brosis" \
   || fail "界面上还有没包 L() 的中文字面量（见上），英文界面会露中文。"
 
+# ------------------------------------------------- 0c. shell 脚本里 $VAR 紧跟中文标点
+# macOS 27 的 /bin/bash 3.2 会把全角括号的首字节吃进变量名（2026-09-15），必须写 ${VAR}。
+step "0c. shell 脚本变量花括号检查"
+env PYTHONDONTWRITEBYTECODE=1 python3 "$APP_SRC/Support/check_shell_braces.py" \
+  "$APP_SRC/build_app.sh" "$APP_SRC/Support/build_metallib.sh" "$APP_SRC/Support/ensure_metal_toolchain.sh" \
+  "$APP_SRC/../dist/build_dmg.sh" "$APP_SRC/../dist/make_appcast.sh" \
+  || fail "shell 脚本里有 \$VAR 紧跟中文标点（见上），bash 3.2 会把标点吃进变量名。"
+
 # ---------------------------------------------------------------- 0. 签名身份
 if [ "${SKIP_SIGN:-0}" != "1" ]; then
   step "0. 确认签名身份"
@@ -85,34 +93,34 @@ if [ "${SKIP_SIGN:-0}" != "1" ]; then
     security find-identity -v -p codesigning || true
     fail "钥匙串里没有 Developer ID Application 的 codesigning 身份。请先导入证书，或用 IDENTITY=... 指定。"
   fi
-  echo "签名身份：$IDENTITY（Team ID ${TEAM_ID:-?}）"
+  echo "签名身份：${IDENTITY}（Team ID ${TEAM_ID:-?}）"
 fi
 
 # ---------------------------------------------------------------- 1. swift build
-step "1. swift build（$CONFIG，scratch=$SCRATCH）"
+step "1. swift build（${CONFIG}，scratch=${SCRATCH}）"
 swift build --package-path "$APP_SRC" --scratch-path "$SCRATCH" -c "$CONFIG"
 BIN_DIR="$(swift build --package-path "$APP_SRC" --scratch-path "$SCRATCH" -c "$CONFIG" --show-bin-path)"
 BIN="$BIN_DIR/$APP_NAME"
 [ -x "$BIN" ] || fail "找不到可执行文件 $BIN"
-echo "二进制：$BIN（$(stat -f%z "$BIN") 字节）"
+echo "二进制：${BIN}（$(stat -f%z "$BIN") 字节）"
 
 # ---------------------------------------------------------------- 1b. brosis-mcp
 # 计划 3.6 的薄 MCP（stdio）。它只链接 BrosisIPC——不持钥、不开库，
 # 经 <数据目录>/ipc.sock 问 brosis.app 里的存储服务要数据。
-step "1b. swift build brosis-mcp（core 包，scratch=$CORE_SCRATCH）"
+step "1b. swift build brosis-mcp（core 包，scratch=${CORE_SCRATCH}）"
 swift build --package-path "$CORE_SRC" --scratch-path "$CORE_SCRATCH" -c "$CONFIG" \
             --product brosis-mcp
 CORE_BIN_DIR="$(swift build --package-path "$CORE_SRC" --scratch-path "$CORE_SCRATCH" \
                             -c "$CONFIG" --show-bin-path)"
 MCP_BIN="$CORE_BIN_DIR/brosis-mcp"
 [ -x "$MCP_BIN" ] || fail "找不到可执行文件 $MCP_BIN"
-echo "MCP 二进制：$MCP_BIN（$(stat -f%z "$MCP_BIN") 字节）"
+echo "MCP 二进制：${MCP_BIN}（$(stat -f%z "$MCP_BIN") 字节）"
 
 # ---------------------------------------------------------------- 1c. brosis-embed + metallib
 # brosis-embed 与主程序在同一个包里，上面那次 swift build 已经把它编出来了。
 EMBED_BIN="$BIN_DIR/brosis-embed"
 [ -x "$EMBED_BIN" ] || fail "找不到可执行文件 $EMBED_BIN"
-echo "嵌入工具：$EMBED_BIN（$(stat -f%z "$EMBED_BIN") 字节）"
+echo "嵌入工具：${EMBED_BIN}（$(stat -f%z "$EMBED_BIN") 字节）"
 
 step "1d. 准备 mlx.metallib"
 METALLIB=""
@@ -125,7 +133,7 @@ elif xcrun -sdk macosx metal --version > /dev/null 2>&1; then
 else
   fail "拿不到 mlx.metallib：metal 编译器在第 0a 步还在、这会儿没了？"  # 0a 已经挡过一次
 fi
-echo "metallib：$METALLIB（$(stat -f%z "$METALLIB") 字节）来源：$METALLIB_SOURCE"
+echo "metallib：${METALLIB}（$(stat -f%z "$METALLIB") 字节）来源：$METALLIB_SOURCE"
 
 # ---------------------------------------------------------------- 2. 组装 .app
 step "2. 组装 $APP_BUNDLE"
@@ -159,7 +167,7 @@ cp "$APP_SRC/Support/Info.plist" "$APP_BUNDLE/Contents/Info.plist"
 # Contents/MacOS，找不到框架，所以补一条 @executable_path/../Frameworks。
 # 不用 Package.swift 的 .unsafeFlags：带 unsafeFlags 的清单不能被别的包按版本引用。
 SPARKLE_SRC="$BIN_DIR/Sparkle.framework"
-[ -d "$SPARKLE_SRC" ] || fail "找不到 $SPARKLE_SRC（SwiftPM 没有解出 Sparkle 的 binaryTarget？）"
+[ -d "$SPARKLE_SRC" ] || fail "找不到 ${SPARKLE_SRC}（SwiftPM 没有解出 Sparkle 的 binaryTarget？）"
 mkdir -p "$APP_BUNDLE/Contents/Frameworks"
 # 用 ditto 而不是 cp -R：框架是版本化 bundle，符号链接与扩展属性都要原样保留。
 ditto "$SPARKLE_SRC" "$APP_BUNDLE/Contents/Frameworks/Sparkle.framework"
@@ -184,9 +192,9 @@ VERSION="$(sed -n 's/^[[:space:]]*static let version = "\([^"]*\)".*/\1/p' \
                         -c "Set :CFBundleVersion $VERSION" "$APP_BUNDLE/Contents/Info.plist"
 for key in CFBundleShortVersionString CFBundleVersion; do
   got="$(/usr/libexec/PlistBuddy -c "Print :$key" "$APP_BUNDLE/Contents/Info.plist")"
-  [ "$got" = "$VERSION" ] || fail "Info.plist 的 $key = $got，应为 $VERSION"
+  [ "$got" = "$VERSION" ] || fail "Info.plist 的 $key = ${got}，应为 $VERSION"
 done
-echo "版本号：$VERSION（来自 BuildInfo.swift，已写进 CFBundleShortVersionString / CFBundleVersion）"
+echo "版本号：${VERSION}（来自 BuildInfo.swift，已写进 CFBundleShortVersionString / CFBundleVersion）"
 
 # ---- Sparkle 更新公钥。占位符 -> 真公钥；没有公钥文件就**保留占位符并告警**。
 # 保留占位符不是"退化成不验签"：占位符不是合法 base64，Updater.swift 的
@@ -204,9 +212,9 @@ if [ -n "$SPARKLE_PUBKEY" ]; then
   # 32 字节 base64 = 44 个字符（末尾一个 '='）。长度不对就直接失败，
   # 免得签出一个"看着像 key"的东西。
   n="$(printf '%s' "$SPARKLE_PUBKEY" | base64 -d 2>/dev/null | wc -c | tr -d ' ')"
-  [ "$n" = "32" ] || fail "Sparkle 公钥不是 32 字节（解出 ${n:-0} 字节，来源 $SPARKLE_PUBKEY_SRC）"
+  [ "$n" = "32" ] || fail "Sparkle 公钥不是 32 字节（解出 ${n:-0} 字节，来源 ${SPARKLE_PUBKEY_SRC}）"
   /usr/libexec/PlistBuddy -c "Set :SUPublicEDKey $SPARKLE_PUBKEY" "$APP_BUNDLE/Contents/Info.plist"
-  echo "Sparkle 更新公钥：已写入（来源 $SPARKLE_PUBKEY_SRC）"
+  echo "Sparkle 更新公钥：已写入（来源 ${SPARKLE_PUBKEY_SRC}）"
 else
   got="$(/usr/libexec/PlistBuddy -c 'Print :SUPublicEDKey' "$APP_BUNDLE/Contents/Info.plist")"
   [ "$got" = "$SPARKLE_PUBKEY_PLACEHOLDER" ] \
@@ -236,7 +244,7 @@ done
 # 「默认不联网」这条要在构建期就锁死：两个自动开关必须是 false，源必须是 https。
 for key in SUEnableAutomaticChecks SUAutomaticallyUpdate; do
   got="$(/usr/libexec/PlistBuddy -c "Print :$key" "$APP_BUNDLE/Contents/Info.plist")"
-  [ "$got" = "false" ] || fail "Info.plist 的 $key = $got，必须为 false（默认不自动联网）"
+  [ "$got" = "false" ] || fail "Info.plist 的 $key = ${got}，必须为 false（默认不自动联网）"
 done
 case "$(/usr/libexec/PlistBuddy -c 'Print :SUFeedURL' "$APP_BUNDLE/Contents/Info.plist")" in
   https://*) ;;
@@ -271,10 +279,10 @@ RENDERED_ENT="$SCRATCH/brosis.entitlements"
 if [ -f "$PROFILE" ]; then
   cp "$PROFILE" "$APP_BUNDLE/Contents/embedded.provisionprofile"
   sed "s/__TEAM_ID__/$TEAM_ID/g" "$APP_SRC/Support/brosis.entitlements" > "$RENDERED_ENT"
-  echo "内嵌描述文件：$PROFILE（受限权利按 Team ID $TEAM_ID 渲染）"
+  echo "内嵌描述文件：${PROFILE}（受限权利按 Team ID $TEAM_ID 渲染）"
 else
   sed '/<!-- BEGIN restricted -->/,/<!-- END restricted -->/d' "$APP_SRC/Support/brosis.entitlements" > "$RENDERED_ENT"
-  echo "注意：没有描述文件（$PROFILE），未签 application-identifier / keychain-access-groups；密钥将走登录钥匙串。"
+  echo "注意：没有描述文件（${PROFILE}），未签 application-identifier / keychain-access-groups；密钥将走登录钥匙串。"
 fi
 plutil -lint "$RENDERED_ENT" > /dev/null
 SIGN_ARGS=(--force --sign "$IDENTITY"
@@ -371,7 +379,7 @@ codesign --verify --strict --verbose=2 "$APP_BUNDLE/Contents/MacOS/brosis-embed"
 MCP_TEAM="$(codesign -dv "$APP_BUNDLE/Contents/MacOS/brosis-mcp" 2>&1 | sed -n 's/^TeamIdentifier=//p')"
 APP_TEAM="$(codesign -dv "$APP_BUNDLE" 2>&1 | sed -n 's/^TeamIdentifier=//p')"
 [ -n "$MCP_TEAM" ] && [ "$MCP_TEAM" = "$APP_TEAM" ] \
-  || fail "brosis-mcp 与 brosis.app 的 Team ID 不一致（$MCP_TEAM vs $APP_TEAM）：IPC 对端校验会拒"
+  || fail "brosis-mcp 与 brosis.app 的 Team ID 不一致（$MCP_TEAM vs ${APP_TEAM}）：IPC 对端校验会拒"
 echo "brosis-mcp 与主程序同一个 Team ID，IPC 对端校验能过"
 
 # Sparkle 里每一个 Mach-O 都必须是**我们**签的（同一个 Team ID）：
@@ -384,7 +392,7 @@ while IFS= read -r macho; do
   file "$macho" | grep -q 'Mach-O' || continue
   t="$(codesign -dv "$macho" 2>&1 | sed -n 's/^TeamIdentifier=//p')"
   [ "$t" = "$APP_TEAM" ] \
-    || fail "$(basename "$macho") 的 Team ID 是 ${t:-<none>}，应为 $APP_TEAM（漏签或签错身份）"
+    || fail "$(basename "$macho") 的 Team ID 是 ${t:-<none>}，应为 ${APP_TEAM}（漏签或签错身份）"
   sparkle_checked=$((sparkle_checked + 1))
 done < <(find "$SPARKLE_FW/Versions" -type f -perm +111)
 [ "$sparkle_checked" -ge 5 ] || fail "Sparkle 里只找到 $sparkle_checked 个 Mach-O（预期 ≥ 5）"
@@ -470,7 +478,7 @@ if [ -d "$GATE_DIR" ]; then
       tail -20 "$SCRATCH/gate_embed_selftest.json" | sed 's/^/    /'
     fi
   else
-    echo "  本机没有模型目录（$GATE_MODELS），跳过 selftest"
+    echo "  本机没有模型目录（${GATE_MODELS}），跳过 selftest"
   fi
 
   gate_restore
@@ -478,7 +486,7 @@ if [ -d "$GATE_DIR" ]; then
   [ -z "$gate_fail" ] || fail "改名构建目录后 $gate_fail 失败：.app 还在依赖构建目录（Bundle.module）。日志在 $SCRATCH/gate_*"
   echo "离开构建目录也能跑：自检与 brosis-embed 都过"
 else
-  fail "找不到构建目录 $GATE_DIR，闸门没法跑（SCRATCH 的布局变了？）"
+  fail "找不到构建目录 ${GATE_DIR}，闸门没法跑（SCRATCH 的布局变了？）"
 fi
 
 step "5. codesign -dv --verbose=4"

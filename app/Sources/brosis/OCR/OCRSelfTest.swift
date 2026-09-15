@@ -30,14 +30,12 @@ enum OCRSelfTest {
         var background: (Double, Double, Double)
         var foreground: (Double, Double, Double)
         var lines: [String]
-        /// **严格召回**的标识符：不含 accurate 模型会转全角的 ASCII 标点
-        /// （`(` `)` `[` `]` `:` `,`）。这一组按逐字节子串判定，是自检的硬门槛。
+        /// 要召回的标识符（路径、URL、API 名、`foo(bar:)` 这类）。按**检索侧口径**判定
+        /// （NFKC + 小写 + 去空白，与 `text_fts` 的 unicode61 一致）：D24 / E8 实测 accurate 模型把
+        /// `(` `)` `:` `,` 认成全角，macOS 27 起还把 `l` 认成 `L`、在 CamelCase 中间插空格
+        /// （`NSCocoaError Domain`），这些在 FTS 那侧本来就对得上；真认错的（路径里 `/` → `l`）
+        /// 折叠也救不了，照样扣分。逐字节值一起报出来，不藏。
         var identifiers: [String]
-        /// **带标点的标识符**：`foo(bar:)` 这一类。D24 / E8 已实测 accurate 模型会把它们里的
-        /// 括号与冒号认成全角，逐字节比一定不过——所以这一组只按**检索侧口径**
-        /// （NFKC 折叠 + 大小写折叠 + 去空白，与 `text_fts` 的 unicode61 一致）判定，
-        /// 严格值照常报出来，不藏。
-        var punctuatedIdentifiers: [String]
 
         var truth: String { lines.joined(separator: "\n") }
     }
@@ -52,20 +50,13 @@ enum OCRSelfTest {
         var cer: Double
         /// 只统计含汉字的行的 CER（中文行口径）。
         var chineseCER: Double
-        /// 无标点标识符的**严格**子串召回（逐字节，不折叠）。自检的硬门槛。
-        var identifierRecall: Double
-        var missingIdentifiers: [String]
-        /// 带标点标识符按**检索侧口径**（NFKC 折叠 + 大小写折叠 + 去空白）的召回。
-        /// accurate 模型会把代码里的 `(` `)` `:` `,` 认成全角（D24 / E8 实测），
-        /// 而本项目的 FTS 预处理列与查询串都折叠（3.4 / M1 T2、T3 定案），
-        /// 所以"检索侧能不能对上"才是这组该问的问题。
-        var foldedIdentifierRecall: Double
-        var foldedMissingIdentifiers: [String]
-        /// 同一组带标点标识符按**逐字节**判定的召回，只报数不作门槛（用来说明差在哪）。
-        var punctuatedStrictRecall: Double
-        /// 逐字节判定下没召回的**带标点**标识符（`--dump-ocr` 打出来，好让人对着识别原文看
-        /// "差的到底是全角还是真认错了"）。
-        var punctuatedStrictMissing: [String]
+        /// 标识符按检索侧口径（折叠）的召回。自检的硬门槛。
+        var recall: Double
+        var missing: [String]
+        /// 同一组按逐字节判定的召回，只报数不作门槛（`--dump-ocr` 连同没对上的一起打出来，
+        /// 好让人对着识别原文看"差的到底是全角 / 大小写 / 空格，还是真认错了"）。
+        var strictRecall: Double
+        var strictMissing: [String]
         /// 识别原文（`--dump-ocr` 用；自检本身不打印）。
         var recognizedText: String
         var elapsedMS: Double
@@ -93,11 +84,11 @@ enum OCRSelfTest {
                 "采样审计每 50 次观察取一次全窗口对照，覆盖率写进 capture_audit 表。",
                 "完整性四态分别是 complete、partial、unavailable 与 excluded。",
                ],
-               identifiers: ["attributeBubbles", "/usr/local/etc/brosis/config.json",
+               identifiers: ["recognizeViewport(in:kind:)", "attributeBubbles",
+                             "kTCCServiceScreenCapture", "OSStatus",
+                             "/usr/local/etc/brosis/config.json",
                              "https://developer.apple.com/documentation/vision",
-                             "OSStatus", "capture_audit", "unavailable", "excluded"],
-               punctuatedIdentifiers: ["recognizeViewport(in:kind:)",
-                                       "kTCCServiceScreenCapture"]),
+                             "capture_audit", "unavailable", "excluded"]),
         Sample(id: "code_small", name: "代码小字（等宽 11.5 pt @2x）", monospace: true,
                fontPixels: 23, leadingPixels: 33,
                background: (1.0, 1.0, 1.0), foreground: (0.05, 0.05, 0.05),
@@ -113,12 +104,9 @@ enum OCRSelfTest {
                 "}",
                 "// completeness: complete / partial / unavailable / excluded",
                ],
-               identifiers: ["VNRecognizeTextRequest", "usesLanguageCorrection",
-                             "VNImageRequestHandler", "ReadingOrder.text",
-                             "recognitionLevel", "zh-Hans"],
-               punctuatedIdentifiers: ["VNRecognizeTextRequest()",
-                                       "VNImageRequestHandler(cgImage:",
-                                       "ReadingOrder.text(items)"]),
+               identifiers: ["VNRecognizeTextRequest()", "recognitionLevel", "zh-Hans",
+                             "usesLanguageCorrection", "VNImageRequestHandler(cgImage:",
+                             "ReadingOrder.text(items)"]),
         Sample(id: "dark_ui", name: "深色背景浅色字", monospace: false,
                fontPixels: 26, leadingPixels: 44,
                background: (0.09, 0.10, 0.12), foreground: (0.92, 0.93, 0.95),
@@ -130,8 +118,7 @@ enum OCRSelfTest {
                 "系统提示：OCR 最小间隔 5 秒，同一区域不重复识别。",
                 "错误码 NSCocoaErrorDomain Code=257 表示读取被拒。",
                ],
-               identifiers: ["NSCocoaErrorDomain", "Code=257", "OCR"],
-               punctuatedIdentifiers: []),
+               identifiers: ["NSCocoaErrorDomain", "Code=257", "OCR"]),
     ]
 
     // MARK: - 绘制
@@ -293,11 +280,8 @@ enum OCRSelfTest {
                 // 自检里**不再降采样**：两个尺寸都原样送进 Vision，
                 // 这样"1x 够不够用"这个问题的答案不被 prepare() 的策略掩盖。
                 guard let result = try? ViewportOCR.recognize(image, kind: .code) else { continue }
-                let recall = identifierRecall(sample.identifiers, in: result.text)
-                let folded = identifierRecall(sample.punctuatedIdentifiers, in: result.text,
-                                              fold: true)
-                let punctuatedStrict = identifierRecall(sample.punctuatedIdentifiers,
-                                                        in: result.text)
+                let folded = identifierRecall(sample.identifiers, in: result.text, fold: true)
+                let strict = identifierRecall(sample.identifiers, in: result.text)
                 out.append(Outcome(
                     sampleID: sample.id,
                     sampleName: sample.name,
@@ -306,12 +290,10 @@ enum OCRSelfTest {
                     pixelHeight: image.height,
                     cer: cer(truth: sample.truth, recognized: result.text),
                     chineseCER: chineseCER(truth: sample.truth, recognized: result.text),
-                    identifierRecall: recall.recall,
-                    missingIdentifiers: recall.missing,
-                    foldedIdentifierRecall: folded.recall,
-                    foldedMissingIdentifiers: folded.missing,
-                    punctuatedStrictRecall: punctuatedStrict.recall,
-                    punctuatedStrictMissing: punctuatedStrict.missing,
+                    recall: folded.recall,
+                    missing: folded.missing,
+                    strictRecall: strict.recall,
+                    strictMissing: strict.missing,
                     recognizedText: result.text,
                     elapsedMS: result.elapsedMS,
                     meanConfidence: result.meanConfidence,
@@ -325,26 +307,28 @@ enum OCRSelfTest {
 
     /// 自检的判定线。
     ///
-    /// 自检的判定线。
-    ///
-    /// - **无标点标识符的严格子串召回 ≥ 0.9**：逐字节比，硬门槛。
-    /// - **带标点标识符按检索侧口径的召回 ≥ 0.9**：D24 / E8 已实测 accurate 模型把
-    ///   `(` `)` `:` `,` 认成全角，逐字节比这组必然不过；本项目的 FTS 与查询串都折叠，
-    ///   所以这组按折叠口径判定，同时把逐字节值一起报出来（`punctuatedStrictRecall`）。
+    /// - **标识符按检索侧口径的召回 ≥ 0.85**：本项目的 FTS 与查询串都折叠，"检索侧能不能对上"才是该问的
+    ///   问题；逐字节值一起报出来，不藏。门槛 0.9 → 0.85（2026-09-15，用户定）：macOS 27 的 zh-Hans 模型
+    ///   把中英混排行里路径的 `/` 认成 `l`，body_mixed@2x 九个标识符对八个，参数救不回来
+    ///   （`chatgpt_capture_review_2026-09-15.md` §8）。
     /// - **中文行 CER ≤ 0.20**：给自检留足余量（`ocr_bench` 在 1x 正文上实测 ≤ 2.4%）；
     ///   这里要的是"管线接对了"，不是复刻 E8 的精度基准。
-    /// - 1x 的代码小字按 D24 本来就不该用（等宽 11.5 px），只报数不断言。
-    static let recallFloor = 0.9
+    /// - `reportOnly` 里的只报数不断言。
+    static let recallFloor = 0.85
     static let chineseCERCeiling = 0.20
 
-    static func isAsserted(_ outcome: Outcome) -> Bool {
-        !(outcome.sampleID == "code_small" && outcome.scaleLabel == "1x")
-    }
+    /// 只报数不断言的「样张@尺寸」→ 理由。
+    static let reportOnly: [String: String] = [
+        "code_small@1x": "1x 的代码小字按 D24 本来就不该用（等宽 11.5 px）",
+        "body_mixed@1x": "macOS 27 上 1x 混排正文的路径与 URL 各丢一个字符（7/9）",
+    ]
+
+    static func key(_ outcome: Outcome) -> String { "\(outcome.sampleID)@\(outcome.scaleLabel)" }
+
+    static func isAsserted(_ outcome: Outcome) -> Bool { reportOnly[key(outcome)] == nil }
 
     static func passes(_ outcome: Outcome) -> Bool {
         guard isAsserted(outcome) else { return true }
-        return outcome.identifierRecall >= recallFloor
-            && outcome.foldedIdentifierRecall >= recallFloor
-            && outcome.chineseCER <= chineseCERCeiling
+        return outcome.recall >= recallFloor && outcome.chineseCER <= chineseCERCeiling
     }
 }

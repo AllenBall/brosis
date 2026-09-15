@@ -516,6 +516,7 @@ enum AX {
     /// 应用自己 bundle 里的页面地址（飞书 `file:///Applications/Lark.app/Contents/Frameworks/…/
     /// webcontent/messenger/messenger/zh-CN.html`）：对用户毫无意义，`host:` / `url:` 检索用不上，
     /// 也进不了 sites 表。用户自己打开的本地文件（`file:///Users/…/x.html`）不算。
+    ///
     static func isBundleInternalURL(_ url: String) -> Bool {
         url.utf8.starts(with: "file://".utf8) && url.contains(".app/Contents/")
     }
@@ -523,9 +524,12 @@ enum AX {
     /// 浏览器自己的内部页（新标签页、设置、DevTools、PDF 阅读器外壳…）：对用户毫无意义，
     /// 却会以 `new-tab-page` / `accessibility` 这种"host"进 sites 表（2026-09-11 Chrome 复查 F5）。
     /// 同样不写 `observations.url`，标题照记。
+    /// `app://` 是 Electron / CEF 应用给自己打包的页面注册的 scheme（ChatGPT `app://-/index.html`、
+    /// 钉钉 `app://desktop.dingtalk.com/…`，后者已经以 host `desktop.dingtalk.com` 混进过 sites 表；
+    /// 2026-09-15 ChatGPT 复查 F5），没有任何浏览器用它表示网页。
     static let browserInternalSchemes = [
         "chrome://", "chrome-extension://", "chrome-untrusted://", "chrome-search://", "devtools://",
-        "edge://", "brave://", "vivaldi://", "opera://", "arc://", "about:", "view-source:",
+        "edge://", "brave://", "vivaldi://", "opera://", "arc://", "about:", "view-source:", "app://",
     ]
 
     static func isBrowserInternalURL(_ url: String) -> Bool {
@@ -590,7 +594,14 @@ enum AX {
     ///
     /// `AXHeading` 是 2026-09-09 加的：Chromium 把网页里的标题层级映射成这个角色，
     /// 而聊天 / 文档界面的分节标题正是判断"这段在讲什么"的关键，漏掉它等于把目录扔了。
-    static let textRoles = ["AXTextArea", "AXTextField", "AXStaticText", "AXWebArea", "AXHeading"]
+    ///
+    /// `AXWebArea` 是 2026-09-15 **去掉**的（ChatGPT 复查 F1）：它自己带的文字从来不是正文——
+    /// 真机上 Safari 的 AXValue 为空、AXDescription 是角色说明；Chrome 的 AXTitle 是页标题
+    /// （= 窗口标题）；飞书的是模块名 `messenger`；ChatGPT 的是「ChatGPT」。M0 把它列进来是为了
+    /// 统计"有没有 web area"，不是为了读它的字。留着的后果很具体：ChatGPT 的树被 12 层深度上限
+    /// 截在 web area 外面时仍读到「ChatGPT」7 个字，于是 `chars > 0`——进程被记成"已热"不再重扫，
+    /// OCR 回退也不再因"AX 空"触发，一个正文都记不到还没有任何信号。
+    static let textRoles = ["AXTextArea", "AXTextField", "AXStaticText", "AXHeading"]
 
     /// 单个角色一次遍历最多留多少字符。
     ///
@@ -702,6 +713,44 @@ enum AX {
 }
 
 // MARK: - 按下标找滚动条（Telegram：树对内容是死的，只有滚动条活着）
+
+extension AX {
+
+    // MARK: - 戳树：让 Chromium 把网页无障碍树建起来（2026-09-15 ChatGPT 复查 F2）
+
+    /// **Chromium（macOS 14+）的网页无障碍树是「戳一下才建」的**，光读 `AXChildren` 永远碰不到开关。
+    ///
+    /// 机制（Chromium `content/app_shim_remote_cocoa/render_widget_host_view_cocoa.mm`，
+    /// `kSonomaAccessibilityActivationRefinements`）：无障碍模式没开时，网页内容视图
+    /// `isAccessibilityElement = false`、不出现在父节点的 `AXChildren` 里——所以 BFS 走到
+    /// `ContentsContainerView` 就没有子节点了，与"这个应用不给正文"一模一样。
+    /// 但 `accessibilityHitTest:` 在根元素为空时**返回视图自己**，随后任何人问它的 `accessibilityRole`
+    /// 就 `CreateScopedModeForProcess(kAXModeBasic | kFromPlatform)`，渲染进程开始把树推上来
+    /// （异步，之后对已加载文档发 `AXLoadComplete`）。VoiceOver、以及用户点进网页时 AppKit 算焦点元素，
+    /// 走的都是这条路；brosis 的 BFS 只问 `AXChildren`，永远碰不到它。
+    ///
+    /// 所以"戳"就是两条 AX 消息：对应用元素做一次命中测试，再读命中元素的 `AXRole`。
+    /// `AXManualAccessibility` 对非 Electron 的 Chromium（ChatGPT 的 Codex Framework、CEF）不支持，
+    /// `AXEnhancedUserInterface` 是 AppKit 层的属性、content 层看不见，两个都替代不了它。
+    /// 树已经在的应用（Chrome、飞书）命中的是某个 DOM 节点，读一次它的角色无副作用。
+    ///
+    /// 另外 Chromium 会在 WebContents **隐藏 5 分钟（±20 s）** 后撤掉这个模式
+    /// （`BrowserAccessibilityStateImpl::kDisableDelay`），所以"从隐藏切回来要重新戳"是常态——
+    /// `EventSkeleton.noteAXOutcome` 每次空读都戳，不记"已热"。
+    ///
+    /// 只读：不点、不敲、不改焦点。命中点取窗口中心。返回命中元素的角色，给日志与探针看
+    /// （根为空时是 `AXScrollArea`——那正是 `RenderWidgetHostViewCocoa` 自报的角色）。
+    @discardableResult
+    static func pokeWebContents(pid: pid_t, windowFrame: CGRect) -> String {
+        let application = applicationElement(pid: pid)
+        var hit: AXUIElement?
+        let error = AXUIElementCopyElementAtPosition(application, Float(windowFrame.midX),
+                                                     Float(windowFrame.midY), &hit)
+        guard error == .success, let hit else { return "hit_error=\(error.rawValue)" }
+        AXUIElementSetMessagingTimeout(hit, messagingTimeout)
+        return "hit=\(role(hit))"
+    }
+}
 
 extension CGRect {
     /// `[x,y w×h]`，探针输出与日志同用。

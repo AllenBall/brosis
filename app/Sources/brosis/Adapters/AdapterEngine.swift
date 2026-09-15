@@ -687,7 +687,7 @@ enum AdapterEngine {
                     : item.depth <= region.classProbeMaxDepth)
                 if wantsRow || wantsPrune {
                     let classes = node.domClasses
-                    if wantsPrune, !region.pruneClasses.isDisjoint(with: classes) { continue }
+                    if wantsPrune, region.prunes(classes) { continue }
                     if wantsRow, let rowLabels {
                         if classes.contains(rowLabels.selfClass) {
                             isRow = true; prefix = labels?.me
@@ -699,10 +699,13 @@ enum AdapterEngine {
                 }
             }
 
-            // 非文本节点的 value / description / title 只在"容器也要探 frame"时才有用（判它带不带正文）；
-            // 关掉容器探测的规则（飞书）省下这三次 AX 调用——一棵树里七成节点是 AXGroup。
+            // 非文本节点的 value / description / title 只用来判"要不要探它的 frame"（带正文的才探）；
+            // 滚动 / 列表类容器（AXGroup 等）开着容器探测时本来就要探，读它们的文本纯属浪费——
+            // 一棵 Chromium 树里七成节点是 AXGroup，每个省三条 AX 消息（2026-09-15 /simplify）。
+            // 关掉容器探测的规则（飞书）非文本节点一律不读。
             let isText = textRoles.contains(role)
-            let carried = (isText || region.probeContainerFrames) ? node.viewportText() : nil
+            let carried = (isText || (region.probeContainerFrames && !scrollContainerRoles.contains(role)))
+                ? node.viewportText() : nil
             var visible: Bool? = nil
             // 探到的矩形留着复用：回滚区统计再读一次 `node.frame` 就是**两条不计预算的
             // AX 消息**（每个视口外节点多两条），而它要的正是同一个矩形。

@@ -832,23 +832,27 @@ enum SelfCheck {
         // 兜底规则分两条：Chromium 系开 OCR 回退，原生不开。
         // 这条区分是 2026-09-09 探测 Codex 时定的——通用规则不触发 OCR，
         // 于是「没有专属规则 + AX 读不到」的应用一个字都记不下来。
-        // 判定由 rule(for:) 内部查缓存得出，所以这里直接拿真实 app 的 URL 喂进去——
+        // 判定由 rule(for:) 内部查缓存得出，所以这里拿真实 app 的 URL 喂进去——用一个**没有专属规则**的
+        // 假 bundle id（ChatGPT 自 0.7.8 起有专属规则，不能再拿它当"兜底"的例子），结构判定照样命中。
         // 没装的机器上 chromiumFallback 会退成 generic，下面的断言用 installed 兜住。
         let codexURL = URL(fileURLWithPath: "/Applications/ChatGPT.app")
         let codexInstalled = FileManager.default.fileExists(atPath: codexURL.path)
         let nativeFallback = AdapterRegistry.rule(for: "com.example.native")
         let chromiumFallback = codexInstalled
-            ? AdapterRegistry.rule(for: "com.openai.codex", bundleURL: codexURL)
+            ? AdapterRegistry.rule(for: "com.selfcheck.chromium-no-rule", bundleURL: codexURL)
             : AdapterRegistry.genericChromium
         let bespoke = AdapterRegistry.rule(for: "com.anthropic.claudefordesktop")
-        check("兜底规则：Chromium 系开 OCR 回退，原生不开；有专属规则的不受影响",
+        // 2026-09-15 ChatGPT 复查 F1：兜底限额要按 Chromium 的 DOM 定（3000 / 30），而且 rule(for:) 不能
+        // 再用默认 1500 / 12 把它盖回去——那正是 ChatGPT 一个字都读不到的原因之一。
+        check("兜底规则：Chromium 系开 OCR 回退且限额 ≥ 30 层，原生不开；有专属规则的不受影响",
               nativeFallback.regions.allSatisfy { !$0.ocrFallback }
                 && chromiumFallback.regions.allSatisfy { $0.ocrFallback }
                 && chromiumFallback.id == "generic_chromium"
+                && chromiumFallback.limits.maxDepth >= 30
                 && bespoke.id == "claude_desktop",
               "原生 \(nativeFallback.id) ocr=\(nativeFallback.regions.allSatisfy { $0.ocrFallback })"
               + "、Chromium \(chromiumFallback.id) ocr=\(chromiumFallback.regions.allSatisfy { $0.ocrFallback })"
-              + "、Claude 仍走 \(bespoke.id)")
+              + " \(chromiumFallback.limits.label)、Claude 仍走 \(bespoke.id)")
         for note in electron.notes { print("       \(note)") }
 
         // ---------------------------------------------------------------- 8. 截图触发口径
@@ -1109,6 +1113,42 @@ enum SelfCheck {
                 && telegramRule.capturesWindow && scrollBarRulesConsistent,
               "\(telegramRule.id) 区域=\(telegramRule.regions.map(\.name).joined(separator: "/"))")
 
+        // ChatGPT（2026-09-15 复查）：只钉规则用例覆盖不到的几项（锚点、排除输入框、剪输入区由
+        // "树建好 → 只读 <main>" 那条用例钉，回退 OCR 由 "树没建" 那条钉）：
+        // 文档顺序（对话不串行）、帧变不 OCR（F3）、窗口定向（F3）、深度 ≥ 30（F1：landmark 在窗口下第 10–13 层）。
+        let chatgptRule = AdapterRegistry.rule(for: "com.openai.codex")
+        let chatgptMain = chatgptRule.regions.first { $0.name == "main" }
+        check("ChatGPT 规则：文档顺序、帧变不 OCR、窗口定向、≥ 30 层",
+              chatgptMain?.documentOrder == true && chatgptMain?.ocrOnFrameChange == false
+                && chatgptRule.capturesWindow && chatgptRule.limits.maxDepth >= 30,
+              "\(chatgptRule.id) regions=\(chatgptRule.regions.map(\.label).joined(separator: " | "))"
+                + " limits=\(chatgptRule.limits.label)")
+        // F1 的根因用合成树钉住：通用 Chromium 规则按原生应用的默认限额（12 层）读这棵树是 0 字、标 depth；
+        // 读得到正文由规则用例"通用 Chromium 规则读 ChatGPT 那棵树"钉。以后谁把限额改回去，这条会先叫。
+        var shallowChromium = AdapterRegistry.genericChromium
+        shallowChromium.limits = AX.defaultBFSLimits
+        let shallowScan = AdapterEngine.scan(rule: shallowChromium, window: AdapterVectors.chatgptTree(),
+                                             windowFrame: AdapterVectors.window)
+        check("ChatGPT 那棵树：通用 Chromium 规则按默认 \(AX.defaultBFSLimits.label) 读 0 字且标 depth",
+              shallowScan.totalChars == 0 && shallowScan.reachedDepthLimit,
+              "\(shallowScan.totalChars) 字 depth=\(shallowScan.reachedDepthLimit)")
+        // 树没建时的回退 OCR 矩形按侧栏宽内缩，不是整窗（同 Chrome F2c，下面共用 fallbackOCRRect）。
+        let chatgptShellRect = fallbackOCRRect(rule: AdapterRegistry.chatgpt,
+                                               tree: AdapterVectors.chatgptShellTree())
+        let chatgptShellExpected = chatgptMain?.fallbackInset?.resolve(in: AdapterVectors.window)
+        check("ChatGPT 树没建：回退 OCR 矩形 = 按侧栏宽内缩（不是整窗）",
+              chatgptShellExpected != nil && chatgptShellRect == chatgptShellExpected,
+              chatgptShellRect.map(\.axLabel) ?? "没有 OCR 请求")
+        // pruneClasses 按前缀：CSS Modules 的 hash 会变，全名不会再命中；写全名的（飞书）行为不变。
+        let pruneRule = RegionRule(name: "p", kind: .body, locator: .wholeWindow, read: .axSubtree,
+                                   pruneClasses: ["_ComposerLayoutBody_", "message-reactions"])
+        let pruneOK = pruneRule.prunes(["flex", "_ComposerLayoutBody_9z8y7_3"])
+            && pruneRule.prunes(["message-reactions"])
+            && !pruneRule.prunes(["_ComposerLayoutBodyX"])
+            && !pruneRule.prunes(["message-reaction"])
+            && !pruneRule.prunes([])
+        check("pruneClasses 按前缀匹配（CSS Modules 的 hash 后缀换了照样剪，短一截的不剪）", pruneOK, "")
+
         // Chrome 与飞书两条规则跟着开关换形态。**只钉真的会变的那几件事**：
         // 改读 AXWebArea、必需区域留 OCR 回退、开着时确实在读 AX。
         // 不钉 `capturesWindow`：`resolvingEnhanced` 只动 regions，它不可能变，断言它等于断言 x == x。
@@ -1126,10 +1166,8 @@ enum SelfCheck {
         check("开关开着时 Chrome / 飞书都改读 AXWebArea、必需区域留 OCR 回退、开始读 AX",
               enhancedFailures.isEmpty, enhancedFailures.joined(separator: " "))
         // 2026-09-11 Chrome 复查 F2c：AXWebArea 还没建出来那一秒，OCR 回退矩形按顶部外壳内缩，不是整窗。
-        let chromeShellScan = AdapterEngine.scan(rule: AdapterRegistry.chrome.resolvingEnhanced(true),
-                                                 window: AdapterVectors.chromeShellTree(),
-                                                 windowFrame: AdapterVectors.window)
-        let chromeShellRect = chromeShellScan.ocrRequests.first?.rect
+        let chromeShellRect = fallbackOCRRect(rule: AdapterRegistry.chrome.resolvingEnhanced(true),
+                                              tree: AdapterVectors.chromeShellTree())
         let chromeShellExpected = AdapterRegistry.chromeShellInset().resolve(in: AdapterVectors.window)
         check("Chrome 开关开着、web area 缺席：回退 OCR 矩形 = 顶部外壳内缩（不是整窗）",
               chromeShellRect == chromeShellExpected,
@@ -1158,6 +1196,9 @@ enum SelfCheck {
             ("about:blank", true),
             ("edge://settings/", true),
             ("https://chrome.google.com/webstore", false),
+            // 2026-09-15 ChatGPT 复查 F5：Electron / CEF 应用自己打包页面的 app:// 不是网页。
+            ("app://-/index.html", true),
+            ("app://desktop.dingtalk.com/web_content/chatbox.html", true),
         ]
         let urlSkipFailures = urlSkipCases.filter { ($0.0.map(AX.isInternalURL) ?? false) != $0.1 }
         check("bundle 内 file:// 与浏览器内部页地址不入库（用户自己的本地文件与 https 照记）",
@@ -1580,27 +1621,21 @@ enum SelfCheck {
         check("视口 OCR 冒烟：\(outcomes.count) 组自绘图像（\(OCRSelfTest.samples.count) 样张 × 2x/1x）",
               outcomes.count == OCRSelfTest.samples.count * 2 && failedOutcomes.isEmpty,
               failedOutcomes.isEmpty
-                ? "断言 \(asserted.count) 组：无标点标识符严格召回 ≥ \(OCRSelfTest.recallFloor)、"
-                + "带标点标识符按检索侧折叠口径召回 ≥ \(OCRSelfTest.recallFloor)、"
-                + "中文行 CER ≤ \(OCRSelfTest.chineseCERCeiling)"
+                ? "断言 \(asserted.count) 组：标识符按检索侧折叠口径召回 ≥ \(OCRSelfTest.recallFloor)、"
+                + "中文行 CER ≤ \(OCRSelfTest.chineseCERCeiling)；只报数：\(OCRSelfTest.reportOnly.keys.sorted().joined(separator: " "))"
                 : failedOutcomes.map {
-                    "\($0.sampleID)@\($0.scaleLabel) 严格 \(String(format: "%.2f", $0.identifierRecall))"
-                    + " 折叠 \(String(format: "%.2f", $0.foldedIdentifierRecall))"
-                    + " CER \(String(format: "%.3f", $0.chineseCER))"
-                    + " 缺 \($0.missingIdentifiers) / \($0.foldedMissingIdentifiers)"
+                    "\(OCRSelfTest.key($0)) 召回 \(String(format: "%.2f", $0.recall))"
+                    + " CER \(String(format: "%.3f", $0.chineseCER)) 缺 \($0.missing)"
                   }.joined(separator: "；"))
         for outcome in outcomes {
-            print("      \(outcome.sampleID)@\(outcome.scaleLabel) "
-                  + "\(outcome.pixelWidth)×\(outcome.pixelHeight)："
-                  + "无标点标识符严格召回 \(String(format: "%.3f", outcome.identifierRecall))、"
-                  + "带标点标识符 折叠 \(String(format: "%.3f", outcome.foldedIdentifierRecall))"
-                  + " / 严格 \(String(format: "%.3f", outcome.punctuatedStrictRecall))、"
-                  + "CER \(String(format: "%.4f", outcome.cer))、"
-                  + "中文行 CER \(String(format: "%.4f", outcome.chineseCER))、"
-                  + "置信度 \(String(format: "%.3f", outcome.meanConfidence))、"
-                  + "\(Int(outcome.elapsedMS)) ms、真值 \(outcome.truthChars) 字符 → "
-                  + "\(outcome.ocrChars) 字符"
-                  + (OCRSelfTest.isAsserted(outcome) ? "" : "（1x 代码小字按 D24 只报数不断言）"))
+            // Swift 6.4 对十段字符串拼接会"无法在合理时间内类型检查"，分段拼。
+            var line = "      \(OCRSelfTest.key(outcome)) \(outcome.pixelWidth)×\(outcome.pixelHeight)："
+            line += "标识符 折叠 \(fixed(outcome.recall, 3)) / 严格 \(fixed(outcome.strictRecall, 3))、"
+            line += "CER \(fixed(outcome.cer, 4))、中文行 CER \(fixed(outcome.chineseCER, 4))、"
+            line += "置信度 \(fixed(outcome.meanConfidence, 3))、"
+            line += "\(Int(outcome.elapsedMS)) ms、真值 \(outcome.truthChars) 字符 → \(outcome.ocrChars) 字符"
+            if let reason = OCRSelfTest.reportOnly[OCRSelfTest.key(outcome)] { line += "（只报数：\(reason)）" }
+            print(line)
         }
 
         // 12.13 采样审计的覆盖率口径（core 的 CaptureCoverage，这里只做一次冒烟）
@@ -1748,7 +1783,8 @@ enum SelfCheck {
                                                  gated: true, trigger: "self_check",
                                                  bundleID: "com.brosis.selfcheck.wechat",
                                                  displayBoundsOverride: bounds)
-            let ocrIDs = try ocrStore.search(q: "适配器", limit: 5).hits.map(\.evidenceID)
+            // 搜「规则引擎」不搜「适配器」：macOS 27 的 zh-Hans 模型在 1x 上把「适配器名单」认成「适配名单」。
+            let ocrIDs = try ocrStore.search(q: "规则引擎", limit: 5).hits.map(\.evidenceID)
             let ocrEvidence = try ocrStore.getEvidence(ids: ocrIDs, grant: nil, neighbors: 0)
             let ocrItem = ocrEvidence.items.first
             let ocrOccurrence = ocrItem?.occurrences.first
@@ -1757,7 +1793,7 @@ enum SelfCheck {
                     && ocrOccurrence?.region == "ocr:wechat.chat_panel"
                     && (ocrOccurrence?.confidence ?? 0) > 0
                     && (ocrOccurrence?.note?.contains("lowconf=") ?? false)
-                    && (ocrItem?.text?.contains("适配器") ?? false),
+                    && (ocrItem?.text?.contains("规则引擎") ?? false),
                   "区域 \(ocrOccurrence?.region ?? "nil")、"
                     + "置信度 \(String(format: "%.2f", ocrOccurrence?.confidence ?? 0))、"
                     + "note \(ocrOccurrence?.note ?? "nil")")
@@ -1972,6 +2008,17 @@ enum SelfCheck {
                 .joined(separator: "；"))
         print(failures == 0 ? "自检通过" : "自检失败 \(failures) 项")
         return failures == 0 ? 0 : 1
+    }
+
+    /// 规则在一棵"树还没建出来"的合成树上排的第一个 OCR 回退矩形（Chrome F2c 与 ChatGPT 共用）。
+    private static func fallbackOCRRect(rule: AdapterRule, tree: SyntheticAXNode) -> CGRect? {
+        AdapterEngine.scan(rule: rule, window: tree, windowFrame: AdapterVectors.window)
+            .ocrRequests.first?.rect
+    }
+
+    /// 定点小数（OCR 冒烟那一段十来个数字，每个都 `String(format:)` 太吵）。
+    private static func fixed(_ value: Double, _ digits: Int) -> String {
+        String(format: "%.\(digits)f", value)
     }
 
     /// 在给定文件的原始字节里找这些字符串（UTF-8）。文件不存在就跳过。
@@ -2239,24 +2286,22 @@ enum VectorDump {
                   + "（\(item.why)）\(scan.completeness == item.expected ? "PASS" : "FAIL")")
         }
 
-        print("\n## 11. 视口 OCR 自绘样张基准（Vision accurate，zh-Hans + en-US，纠错关）")
-        print("| 样张 | 尺寸 | 像素 | 无标点标识符严格召回 | 带标点 折叠 / 严格 | CER | 中文行 CER | 置信度 | 耗时 ms |")
-        print("|---|---|---|---:|---:|---:|---:|---:|---:|")
+        print("\n## 11. 视口 OCR 自绘样张基准（Vision accurate，zh-Hans + en-US，自动检测语言开，纠错关）")
+        print("| 样张 | 尺寸 | 像素 | 标识符召回 折叠 / 严格 | CER | 中文行 CER | 置信度 | 耗时 ms |")
+        print("|---|---|---|---:|---:|---:|---:|---:|")
         for outcome in OCRSelfTest.run() {
             print("| \(outcome.sampleName) | \(outcome.scaleLabel) "
                   + "| \(outcome.pixelWidth)×\(outcome.pixelHeight) "
-                  + "| \(String(format: "%.3f", outcome.identifierRecall)) "
-                  + "| \(String(format: "%.3f", outcome.foldedIdentifierRecall)) / "
-                  + "\(String(format: "%.3f", outcome.punctuatedStrictRecall)) "
+                  + "| \(String(format: "%.3f", outcome.recall)) / "
+                  + "\(String(format: "%.3f", outcome.strictRecall)) "
                   + "| \(String(format: "%.4f", outcome.cer)) "
                   + "| \(String(format: "%.4f", outcome.chineseCER)) "
                   + "| \(String(format: "%.3f", outcome.meanConfidence)) "
                   + "| \(Int(outcome.elapsedMS)) |")
         }
-        print("\n判定线：无标点标识符严格召回 ≥ \(OCRSelfTest.recallFloor)、"
-              + "带标点标识符按检索侧折叠口径召回 ≥ \(OCRSelfTest.recallFloor)、"
+        print("\n判定线：标识符按检索侧折叠口径召回 ≥ \(OCRSelfTest.recallFloor)、"
               + "中文行 CER ≤ \(OCRSelfTest.chineseCERCeiling)；"
-              + "1x 的代码小字按 D24 只报数不断言。")
+              + "只报数不断言：\(OCRSelfTest.reportOnly.keys.sorted().joined(separator: "、"))。")
 
         print("\n## 12. 3.12 应用采集清单：合成数据源合并 → 分组 / 排序 / 每行显示什么")
         // 「最近出现」那一列是相对时间（"N 天前"），随跑的日子变，不放进转储表，

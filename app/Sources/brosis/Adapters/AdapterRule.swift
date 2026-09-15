@@ -223,8 +223,11 @@ struct RegionRule: Sendable {
     /// 文本没变而画面变了，变的只能是图片 / 动画 / 光标，OCR 只会引入噪声——2026-09-11 复查里
     /// 飞书侧栏的 OCR 回退把压在上面的 Claude 窗口的字记成了飞书正文，走的正是这条触发。
     var ocrOnFrameChange: Bool = true
-    /// DOM class 含这些名字的节点连同子树不读（飞书：`message-reactions`——点表情的人名会以独立行混进对话）。
-    var pruneClasses: Set<String> = []
+    /// DOM class **以这些名字开头**的节点连同子树不读（飞书：`message-reactions`——点表情的人名会以独立行
+    /// 混进对话）。按前缀而不是全等（2026-09-15 ChatGPT 复查 F4）：CSS Modules 编出来的 class 是
+    /// `_ComposerLayoutBody_1qpwu_2` 这种"名字 + hash"，hash 每次发版都变，只有 `_ComposerLayoutBody_`
+    /// 这截是稳的。写全名的（飞书）行为不变。别拿 Tailwind 的 `flex` 这类短词当前缀，它会把 `flex-1` 一起剪掉。
+    var pruneClasses: [String] = []
     /// 读 class（认行、剪子树）只到区域根下这么多层——每读一次 class 是一次 AX 调用。
     var classProbeMaxDepth: Int = 12
     /// 进了一行之后，剪子树的 class 只在行下这么多层内看（飞书：`.message-reactions` 在行下第 4 层）。
@@ -232,6 +235,11 @@ struct RegionRule: Sendable {
 
     /// 这个区域要不要一个矩形：裁视口、OCR 回退、声明 OCR 三者任一。都不要就不必探它的 frame。
     var needsRect: Bool { clipToViewport || ocrFallback || read.declaresOCR }
+
+    /// 带这些 DOM class 的节点该不该连子树一起剪掉（见 `pruneClasses`：按前缀）。
+    func prunes(_ classes: [String]) -> Bool {
+        classes.contains { cls in pruneClasses.contains { cls.hasPrefix($0) } }
+    }
 
     var label: String {
         "\(name) kind=\(kind.rawValue) \(locator.label) read=\(read.rawValue)"
@@ -343,9 +351,9 @@ struct AdapterRule: Sendable {
     var capturesWindow: Bool = false
 
     /// 无障碍树**按文档建**（浏览器）：每次导航、每次切回久未显示的标签页都从空树开始。
-    /// `EventSkeleton` 据此把"读到空树 ⇒ 重扫、不 OCR"的状态按"进程 + 页面"记，而不是按进程
+    /// `EventSkeleton` 据此把"读到空树 ⇒ 重扫、不 OCR"的计数按"进程 + 页面"记，而不是按进程
     /// （2026-09-11 Chrome 复查 F2）。单文档的 Electron 应用（Claude 桌面版、飞书）保持 false：
-    /// 树建好就不退，按进程记"已热"的短路对它们仍然成立。
+    /// 树建好就不退，重扫计数按进程记就够。
     var axTreePerDocument = false
 
     /// 窗口标题以这些前缀开头时**只记标题、不读正文也不 OCR**（completeness = excluded）。

@@ -61,12 +61,12 @@ VERSION="$(sed -n 's/^[[:space:]]*static let version = "\([^"]*\)".*/\1/p' \
       先跑 dist/build_dmg.sh，它会把 DMG 硬链到这里。"
 DMG_COUNT="$(find "$ARCHIVE" -maxdepth 1 -name '*.dmg' | wc -l | tr -d ' ')"
 [ "$DMG_COUNT" -gt 0 ] || fail "$ARCHIVE 里一个 .dmg 都没有。先跑 dist/build_dmg.sh。"
-echo "归档目录：$ARCHIVE（$DMG_COUNT 个 DMG），当前版本 $VERSION"
+echo "归档目录：${ARCHIVE}（$DMG_COUNT 个 DMG），当前版本 $VERSION"
 
 # 当前版本的 .app 如果还是占位公钥，签出来的 appcast 对它毫无意义（它拒绝一切更新）。
 MANIFEST="$DIST_ROOT/$VERSION/manifest.json"
 if [ -f "$MANIFEST" ] && grep -q '"public_ed_key": "占位符' "$MANIFEST"; then
-  fail "$VERSION 这份构建的 SUPublicEDKey 还是占位符（见 $MANIFEST）。
+  fail "$VERSION 这份构建的 SUPublicEDKey 还是占位符（见 ${MANIFEST}）。
       先生成密钥对、把公钥写进
       ~/Library/Application Support/brosis-dev/sparkle_public_ed_key.txt，
       重跑 dist/build_dmg.sh，再生成 appcast。步骤见 dist/RELEASE.md。"
@@ -97,13 +97,13 @@ echo "generate_appcast：$TOOL"
 step "3. 私钥"
 if [ -n "$ED_KEY_FILE" ]; then
   [ -f "$ED_KEY_FILE" ] || fail "--ed-key-file 指的文件不存在：$ED_KEY_FILE"
-  echo "用私钥文件：$ED_KEY_FILE（不会被打印，也不会被拷走）"
+  echo "用私钥文件：${ED_KEY_FILE}（不会被打印，也不会被拷走）"
   KEY_ARGS=(--ed-key-file "$ED_KEY_FILE")
 else
   # 只查**存在性**：不加 -w，security 不需要读出密文，所以不会弹钥匙串授权框。
   # 真正读私钥是 generate_appcast 自己干的事，那一步会弹一次框，需要你点「允许」。
   if ! security find-generic-password -s "$KEY_SERVICE" -a "$ACCOUNT" > /dev/null 2>&1; then
-    fail "钥匙串里没有 Sparkle 的 Ed25519 私钥（service $KEY_SERVICE，account $ACCOUNT）。
+    fail "钥匙串里没有 Sparkle 的 Ed25519 私钥（service ${KEY_SERVICE}，account ${ACCOUNT}）。
       这一步只有你本人能做（会弹钥匙串授权框）：
         <scratch>/artifacts/sparkle/Sparkle/bin/generate_keys
       它会把**私钥**存进你的登录钥匙串并把**公钥**打印出来。把公钥那一串写进
@@ -112,7 +112,7 @@ else
       换机器时用 generate_keys -x <文件> 导出、-f <文件> 导入，或用 --ed-key-file。
       详见 dist/RELEASE.md。"
   fi
-  echo "钥匙串里有私钥（service $KEY_SERVICE，account $ACCOUNT）。generate_appcast 读它时会弹一次授权框。"
+  echo "钥匙串里有私钥（service ${KEY_SERVICE}，account ${ACCOUNT}）。generate_appcast 读它时会弹一次授权框。"
   KEY_ARGS=(--account "$ACCOUNT")
 fi
 
@@ -152,7 +152,7 @@ ITEMS="$(grep -c '<item>' "$ARCHIVE/appcast.xml" || true)"
 # 老写法（item 数 == 签名数）算出「有 -5 个 item 没有 edSignature」这种假失败。
 ENCLOSURES="$(grep -c '<enclosure' "$ARCHIVE/appcast.xml" || true)"
 SIGS="$(grep -c 'sparkle:edSignature' "$ARCHIVE/appcast.xml" || true)"
-echo "item 数 $ITEMS，enclosure 数 $ENCLOSURES，edSignature 数 $SIGS"
+echo "item 数 ${ITEMS}，enclosure 数 ${ENCLOSURES}，edSignature 数 $SIGS"
 [ "$ENCLOSURES" = "$SIGS" ] \
   || fail "有 $((ENCLOSURES - SIGS)) 条 enclosure 没有 edSignature（缺签名的下载装不上）"
 
@@ -177,8 +177,8 @@ done
 ITEM_VERSION="$(grep -oE '<sparkle:shortVersionString>[^<]+' "$ARCHIVE/appcast.xml" \
   | head -1 | sed 's/.*>//')"
 [ "$ITEM_VERSION" = "$VERSION" ] \
-  || fail "appcast 里的条目是 $ITEM_VERSION，而这次要发的是 $VERSION。
-      多半是 build_dmg.sh 没跑完（DMG 没进归档目录 $ARCHIVE）。
+  || fail "appcast 里的条目是 ${ITEM_VERSION}，而这次要发的是 ${VERSION}。
+      多半是 build_dmg.sh 没跑完（DMG 没进归档目录 ${ARCHIVE}）。
       先确认 $ARCHIVE/brosis-$VERSION.dmg 在不在，再重跑这个脚本。"
 # **不能再出现增量包。** 只发全量的前提是 appcast 里一条 delta 都不挂——挂了就等于
 # 引用一个不会被上传的资产，停在旧版的机器会去下 404。
